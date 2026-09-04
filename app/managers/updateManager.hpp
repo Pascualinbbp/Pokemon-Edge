@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "../utils/update_util.hpp"
+#include "../utils/updateUtil.hpp"
 #include "../utils/loggerUtil.hpp"
 
 class UpdateManager {
