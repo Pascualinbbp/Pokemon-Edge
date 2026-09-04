@@ -32,11 +32,20 @@ jobs:
           
           $json.userjson | ConvertTo-Json | Out-File "version.json" -Encoding utf8
 
-      - name: 📥 Descargar nlohmann/json (Single Header)
+      - name: 📥 Descargar nlohmann/json, Dear ImGui y stb_image
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "app/utils/nlohmann"
           Invoke-WebRequest -Uri "https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp" -OutFile "app/utils/nlohmann/json.hpp"
+
+          git clone --depth 1 https://github.com/ocornut/imgui.git temp_imgui
+          New-Item -ItemType Directory -Force -Path "app/utils/imgui"
+          Copy-Item "temp_imgui/imgui*.h" -Destination "app/utils/imgui/"
+          Copy-Item "temp_imgui/imgui*.cpp" -Destination "app/utils/imgui/"
+          Copy-Item "temp_imgui/backends/imgui_impl_win32.*" -Destination "app/utils/imgui/"
+          Copy-Item "temp_imgui/backends/imgui_impl_dx11.*" -Destination "app/utils/imgui/"
+
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h" -OutFile "app/utils/imgui/stb_image.h"
 
       - name: 📥 Descargar SQLite3 (Amalgamation)
         shell: pwsh
@@ -67,7 +76,7 @@ jobs:
               exit 1
           }
 
-      - name: 🔨 Compilar Recursos y EXE C++ (MSVC sin Consola)
+      - name: 🔨 Compilar Motor con ImGui y DirectX 11 (Sin Consola)
         shell: cmd
         env:
           DB_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
@@ -83,7 +92,7 @@ jobs:
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
           
           rc.exe resources.rc
-          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite main.cpp app/managers/appManager.cpp app/managers/guiManager.cpp app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib gdi32.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
+          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite /I app/utils/imgui main.cpp app/managers/appManager.cpp app/managers/guiManager.cpp app/utils/sqlite/sqlite3.c app/utils/imgui/imgui.cpp app/utils/imgui/imgui_draw.cpp app/utils/imgui/imgui_tables.cpp app/utils/imgui/imgui_widgets.cpp app/utils/imgui/imgui_impl_win32.cpp app/utils/imgui/imgui_impl_dx11.cpp resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh
@@ -92,6 +101,7 @@ jobs:
           
           Copy-Item -Path "PokemonEdge.exe" -Destination "release_build/"
           Copy-Item -Path "app/data/version.json" -Destination "release_build/app/data/version.json"
+          if (Test-Path "app/data/logo.png") { Copy-Item -Path "app/data/logo.png" -Destination "release_build/app/data/" }
 
           Compress-Archive -Path "release_build/*" -DestinationPath "PokemonEdge.zip" -Force
 
