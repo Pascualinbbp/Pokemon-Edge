@@ -1,0 +1,72 @@
+name: Build and Release PokemonEdge
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 📥 Checkout Código
+        uses: actions/checkout@v4
+
+      - name: 🏷️ Extraer Configuración del Release
+        id: config
+        shell: pwsh
+        run: |
+          $json = Get-Content release_config.json | ConvertFrom-Json
+          
+          echo "TAG=$($json.configs.tag)" >> $env:GITHUB_ENV
+          echo "REL_NAME=$($json.configs.name)" >> $env:GITHUB_ENV
+          echo "DESC=$($json.configs.description)" >> $env:GITHUB_ENV
+          echo "PRE=$($json.configs.prerelease.ToString().ToLower())" >> $env:GITHUB_ENV
+          echo "LATEST=$($json.configs.make_latest.ToString().ToLower())" >> $env:GITHUB_ENV
+          
+          # Generar para el empaquetado interno
+          New-Item -ItemType Directory -Force -Path "app/data"
+          $json.userjson | ConvertTo-Json | Out-File "app/data/version.json" -Encoding utf8
+          
+          # Generar una copia en raíz PARA EL ASSET de GitHub (Igual que en Python)
+          $json.userjson | ConvertTo-Json | Out-File "version.json" -Encoding utf8
+
+      - name: 📥 Descargar nlohmann/json (Single Header)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "app/utils/nlohmann"
+          Invoke-WebRequest -Uri "https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp" -OutFile "app/utils/nlohmann/json.hpp"
+
+      - name: 🔨 Compilar EXE C++ (MSVC)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cl.exe /std:c++17 /EHsc /O2 main.cpp app/managers/app_manager.cpp /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib
+
+      - name: 🗂️ Preparar ZIP Final
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "release_build/app/data"
+          
+          Copy-Item -Path "PokemonEdge.exe" -Destination "release_build/"
+          Copy-Item -Path "app/data/version.json" -Destination "release_build/app/data/version.json"
+
+          Compress-Archive -Path "release_build/*" -DestinationPath "PokemonEdge.zip" -Force
+
+      - name: 🚀 Publicar en GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.REL_NAME }}
+          body: ${{ env.DESC }}
+          prerelease: ${{ env.PRE == 'true' }}
+          make_latest: ${{ env.LATEST == 'true' }}
+          files: |
+            PokemonEdge.zip
+            version.json
+          overwrite: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
