@@ -25,7 +25,7 @@ void AppManager::runMainLogic() {
         std::cout << "      POKEMON EDGE - MENU     \n";
         std::cout << "==============================\n";
         std::cout << "1. Buscar tipo de Pokemon por ID\n";
-        std::cout << "3. Listar todos los tipos\n";
+        std::cout << "2. Listar todos los tipos\n";
         std::cout << "0. Salir\n";
         std::cout << "Seleccione una opcion: ";
 
@@ -50,7 +50,7 @@ void AppManager::runMainLogic() {
                 }
                 break;
             }
-            case 3: {
+            case 2: {
                 std::vector<PokemonType> list = DatabaseManager::getTypeDao().findAll();
                 std::cout << "\n--- LISTA DE TIPOS DE POKEMON ---\n";
                 for (const auto& t : list) {
