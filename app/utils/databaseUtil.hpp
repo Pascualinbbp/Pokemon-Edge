@@ -5,10 +5,6 @@
 #include "pathsUtil.hpp"
 #include "loggerUtil.hpp"
 
-#ifndef XOR_KEY_VAL
-#error "XOR_KEY_VAL no esta definido. Debe pasarse como flag de compilacion desde el entorno de compilacion."
-#endif
-
 class DatabaseUtil {
 private:
     static constexpr unsigned char XOR_KEY = static_cast<unsigned char>(XOR_KEY_VAL);
