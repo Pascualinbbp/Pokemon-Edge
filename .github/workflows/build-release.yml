@@ -27,11 +27,9 @@ jobs:
           echo "PRE=$($json.configs.prerelease.ToString().ToLower())" >> $env:GITHUB_ENV
           echo "LATEST=$($json.configs.make_latest.ToString().ToLower())" >> $env:GITHUB_ENV
           
-          # Generar para el empaquetado interno
           New-Item -ItemType Directory -Force -Path "app/data"
           $json.userjson | ConvertTo-Json | Out-File "app/data/version.json" -Encoding utf8
           
-          # Generar una copia en raíz PARA EL ASSET de GitHub (Igual que en Python)
           $json.userjson | ConvertTo-Json | Out-File "version.json" -Encoding utf8
 
       - name: 📥 Descargar nlohmann/json (Single Header)
@@ -43,7 +41,15 @@ jobs:
       - name: 🔨 Compilar EXE C++ (MSVC)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.X86.X64 -property installationPath`) do (
+            set "VS_PATH=%%i"
+          )
+          if "%VS_PATH%"=="" (
+            echo Error: No se encontró Visual Studio con las herramientas de C++.
+            exit /b 1
+          )
+          echo Usando Visual Studio en: "%VS_PATH%"
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
           cl.exe /std:c++17 /EHsc /O2 main.cpp app/managers/app_manager.cpp /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib
 
       - name: 🗂️ Preparar ZIP Final
