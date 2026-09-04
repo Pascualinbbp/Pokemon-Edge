@@ -44,10 +44,10 @@ jobs:
           DB_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
         run: |
           $dbPath = "app/data/db/pokemonEdge.db"
-          $keyVal = if ($env:DB_KEY) { [int]$env:DB_KEY } else { 0x5A }
+          $keyVal = if ($env:DB_KEY) { [int]$env:DB_KEY } else { 90 }
           
           if (Test-Path $dbPath) {
-              Write-Host "Cifrando base de datos para compilación..."
+              Write-Host "Cifrando base de datos para compilación con clave: $keyVal..."
               $bytes = [System.IO.File]::ReadAllBytes($dbPath)
               for ($i = 0; $i -lt $bytes.Length; $i++) {
                   $bytes[$i] = $bytes[$i] -bxor $keyVal
@@ -60,6 +60,8 @@ jobs:
 
       - name: 🔨 Compilar Recursos y EXE C++ (MSVC)
         shell: cmd
+        env:
+          DB_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.X86.X64 -property installationPath`) do (
             set "VS_PATH=%%i"
@@ -72,7 +74,7 @@ jobs:
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
           
           rc.exe resources.rc
-          cl.exe /std:c++17 /EHsc /O2 main.cpp app/managers/appManager.cpp resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib
+          cl.exe /std:c++17 /EHsc /O2 main.cpp app/managers/appManager.cpp resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib /DXOR_KEY_VAL=%DB_KEY%
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh

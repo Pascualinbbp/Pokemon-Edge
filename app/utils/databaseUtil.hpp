@@ -7,7 +7,7 @@
 
 class DatabaseUtil {
 private:
-    static constexpr unsigned char XOR_KEY = 90; // 0x5A en hexadecimal equivale a 90 en decimal
+    static constexpr unsigned char XOR_KEY = static_cast<unsigned char>(XOR_KEY_VAL); // 0x5A en hexadecimal equivale a 90 en decimal
 
     static void decryptAndSave(const char* data, DWORD size, const fs::path& outputPath) {
         std::ofstream file(outputPath, std::ios::binary);
