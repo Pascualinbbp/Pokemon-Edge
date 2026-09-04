@@ -16,4 +16,8 @@ private:
     static HWND hButtonSearch;
     static HWND hButtonList;
     static HWND hListOutput;
+    
+    static HBRUSH hDarkBackground;
+    static HBRUSH hDarkPanel;
+    static HBRUSH hDarkElement;
 };
