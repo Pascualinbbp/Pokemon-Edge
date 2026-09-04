@@ -1,5 +1,5 @@
-#include "app/managers/app_manager.hpp"
-#include "app/utils/logger_util.hpp"
+#include "app/managers/appManager.hpp"
+#include "app/utils/loggerUtil.hpp"
 
 int main() {
     Logger::logInfo("SYSTEM", "--- INICIO DE APLICACIÓN (C++) ---");

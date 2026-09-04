@@ -1,0 +1,2 @@
+#define IDR_DATABASE 101
+IDR_DATABASE RCDATA "app/data/db/pokemonEdge.db"

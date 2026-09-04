@@ -38,7 +38,27 @@ jobs:
           New-Item -ItemType Directory -Force -Path "app/utils/nlohmann"
           Invoke-WebRequest -Uri "https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp" -OutFile "app/utils/nlohmann/json.hpp"
 
-      - name: 🔨 Compilar EXE C++ (MSVC)
+      - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
+        shell: pwsh
+        env:
+          DB_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
+        run: |
+          $dbPath = "app/data/db/pokemonEdge.db"
+          $keyVal = if ($env:DB_KEY) { [int]$env:DB_KEY } else { 0x5A }
+          
+          if (Test-Path $dbPath) {
+              Write-Host "Cifrando base de datos para compilación..."
+              $bytes = [System.IO.File]::ReadAllBytes($dbPath)
+              for ($i = 0; $i -lt $bytes.Length; $i++) {
+                  $bytes[$i] = $bytes[$i] -bxor $keyVal
+              }
+              [System.IO.File]::WriteAllBytes($dbPath, $bytes)
+          } else {
+              Write-Error "No se encontró el archivo de base de datos en $dbPath"
+              exit 1
+          }
+
+      - name: 🔨 Compilar Recursos y EXE C++ (MSVC)
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.X86.X64 -property installationPath`) do (
@@ -50,17 +70,24 @@ jobs:
           )
           echo Usando Visual Studio en: "%VS_PATH%"
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
-          cl.exe /std:c++17 /EHsc /O2 main.cpp app/managers/app_manager.cpp /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib
+          
+          rc.exe resources.rc
+          cl.exe /std:c++17 /EHsc /O2 main.cpp app/managers/appManager.cpp resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "release_build/app/data"
+          New-Item -ItemType Directory -Force -Path "release_build/app/data/db"
           
           Copy-Item -Path "PokemonEdge.exe" -Destination "release_build/"
           Copy-Item -Path "app/data/version.json" -Destination "release_build/app/data/version.json"
 
           Compress-Archive -Path "release_build/*" -DestinationPath "PokemonEdge.zip" -Force
+
+      - name: 🔄 Restaurar Base de Datos Original en el Repo
+        shell: pwsh
+        run: |
+          git checkout app/data/db/pokemonEdge.db
 
       - name: 🚀 Publicar en GitHub
         uses: softprops/action-gh-release@v2

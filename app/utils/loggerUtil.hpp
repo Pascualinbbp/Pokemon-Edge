@@ -2,8 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
-#include <filesystem>
-#include "paths_util.hpp"
+#include "pathsUtil.hpp"
 
 class Logger {
 public:
@@ -24,12 +23,10 @@ private:
         }
 
         try {
-            fs::path logDir = PathsUtil::getBaseDir() / "app" / "logs";
-            if (!fs::exists(logDir)) {
-                fs::create_directories(logDir);
+            if (!fs::exists(PathsUtil::LOG_DIR)) {
+                fs::create_directories(PathsUtil::LOG_DIR);
             }
-            fs::path logFile = logDir / "app.log";
-            std::ofstream file(logFile, std::ios::app);
+            std::ofstream file(PathsUtil::LOG_FILE_PATH, std::ios::app);
             if (file.is_open()) {
                 file << "[" << level << "][" << module << "] " << message << std::endl;
             }

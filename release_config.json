@@ -1,15 +1,15 @@
 {
   "configs": {
-    "tag": "v0.0.1",
-    "name": "Initial C++ Release",
-    "description": "Primera versión nativa compilada en C++ con sistema de auto-actualización.",
-    "prerelease": false,
-    "make_latest": true,
+    "tag": "v0.0.2",
+    "name": "Pokemon Edge v0.0.2-beta (Prueba Base de Datos)",
+    "description": "Versión preliminar de prueba (Prerelease) que incluye la nueva tabla de tipos Pokémon, base de datos cifrada y mejoras en el sistema.",
+    "prerelease": true,
+    "make_latest": false,
     "branch": "main"
   },
   "userjson": {
-    "name": "PokemonEdge",
-    "version": "0.0.1",
+    "name": "Pokemon Edge",
+    "version": "0.0.2",
     "releaseDate": "2026-09-04",
     "author": "Pascualinbbp",
     "repository": "https://github.com/Pascualinbbp/Pokemon-Edge"
