@@ -40,8 +40,12 @@ jobs:
 
           git clone --depth 1 https://github.com/ocornut/imgui.git temp_imgui
           New-Item -ItemType Directory -Force -Path "app/utils/imgui"
-          Copy-Item "temp_imgui/imgui*.h" -Destination "app/utils/imgui/"
-          Copy-Item "temp_imgui/imgui*.cpp" -Destination "app/utils/imgui/"
+          
+          # Copiar todas las cabeceras raíz de ImGui (incluyendo imconfig.h)
+          Copy-Item "temp_imgui/*.h" -Destination "app/utils/imgui/"
+          Copy-Item "temp_imgui/*.cpp" -Destination "app/utils/imgui/"
+          
+          # Copiar backends de Win32 y DirectX 11
           Copy-Item "temp_imgui/backends/imgui_impl_win32.*" -Destination "app/utils/imgui/"
           Copy-Item "temp_imgui/backends/imgui_impl_dx11.*" -Destination "app/utils/imgui/"
 
