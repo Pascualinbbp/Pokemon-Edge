@@ -83,7 +83,7 @@ jobs:
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
           
           rc.exe resources.rc
-          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite main.cpp app/managers/appManager.cpp app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib
+          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite main.cpp app/managers/appManager.cpp app/managers/guiManager.cpp app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh
