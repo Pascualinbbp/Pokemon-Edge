@@ -74,7 +74,7 @@ jobs:
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
           
           rc.exe resources.rc
-          cl.exe /std:c++17 /EHsc /O2 main.cpp app/managers/appManager.cpp resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib /DXOR_KEY_VAL=%DB_KEY%
+          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% main.cpp app/managers/appManager.cpp resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh
