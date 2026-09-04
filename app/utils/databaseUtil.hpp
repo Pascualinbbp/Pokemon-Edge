@@ -7,7 +7,7 @@
 
 class DatabaseUtil {
 private:
-    static constexpr unsigned char XOR_KEY = 0x5A;
+    static constexpr unsigned char XOR_KEY = 90; // 0x5A en hexadecimal equivale a 90 en decimal
 
     static void decryptAndSave(const char* data, DWORD size, const fs::path& outputPath) {
         std::ofstream file(outputPath, std::ios::binary);
@@ -31,7 +31,7 @@ public:
 
         Logger::logInfo("DB_UTIL", "Extrayendo y descifrando base de datos embebida...");
 
-        HRSRC hRes = FindResourceW(NULL, MAKEINTRESOURCEW(101), RT_RCDATA);
+        HRSRC hRes = FindResourceW(NULL, MAKEINTRESOURCEW(101), (LPCWSTR)RT_RCDATA);
         if (!hRes) {
             Logger::logError("DB_UTIL", "No se pudo encontrar el recurso de la base de datos en el EXE.");
             return;
