@@ -38,6 +38,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path "app/utils/nlohmann"
           Invoke-WebRequest -Uri "https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp" -OutFile "app/utils/nlohmann/json.hpp"
 
+      - name: 📥 Descargar SQLite3 (Amalgamation)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://sqlite.org/2024/sqlite-amalgamation-3450100.zip" -OutFile "sqlite.zip"
+          Expand-Archive -Path "sqlite.zip" -DestinationPath "sqlite_ext"
+          New-Item -ItemType Directory -Force -Path "app/utils/sqlite"
+          Copy-Item -Path "sqlite_ext/sqlite-amalgamation-3450100/sqlite3.h" -Destination "app/utils/sqlite/sqlite3.h"
+          Copy-Item -Path "sqlite_ext/sqlite-amalgamation-3450100/sqlite3.c" -Destination "app/utils/sqlite/sqlite3.c"
+
       - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
         shell: pwsh
         env:
@@ -74,7 +83,7 @@ jobs:
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
           
           rc.exe resources.rc
-          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% main.cpp app/managers/appManager.cpp resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib
+          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite main.cpp app/managers/appManager.cpp app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh
