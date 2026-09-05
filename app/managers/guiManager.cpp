@@ -65,7 +65,7 @@ void GuiManager::init() {
     LoadTextureFromFile("app/data/logo.png", &g_logoTexture, &g_logoWidth, &g_logoHeight);
 
     ShowWindow(hwnd, SW_SHOWDEFAULT);
-    UpdateWindow(hwnd);
+    ::UpdateWindow(hwnd);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -103,12 +103,10 @@ void GuiManager::run() {
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        // Contenedor principal maestro único (nunca se abre/cierra, solo cambia su contenido)
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
         ImGui::Begin("GameContainerWindow", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 
-        // Orquestador de vistas
         switch (gameState) {
             case GameState::TITLE_SCREEN:
                 TitleWindow::render(gameState, g_logoTexture, g_logoWidth, g_logoHeight);
@@ -120,7 +118,7 @@ void GuiManager::run() {
                 TypeStudioWindow::render(gameState, searchBuffer, sizeof(searchBuffer), searchResultMsg, cachedList, listLoaded);
                 break;
             case GameState::UPDATE_SCREEN:
-                UpdateWindow::render(gameState);
+                SysUpdateWindow::render(gameState);
                 break;
         }
 
@@ -217,6 +215,13 @@ bool CreateDeviceD3D(HWND hWnd) {
 
     CreateRenderTarget();
     return true;
+}
+
+def void CleanupDeviceD3D() {
+    CleanupRenderTarget();
+    if (g_pSwapChain) { g_pSwapChain->Release(); g_pSwapChain = NULL; }
+    if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = NULL; }
+    if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = NULL; }
 }
 
 void CleanupDeviceD3D() {

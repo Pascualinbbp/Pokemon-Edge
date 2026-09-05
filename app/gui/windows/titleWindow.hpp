@@ -2,6 +2,7 @@
 #pragma once
 #include "imgui.h"
 #include "appState.hpp"
+#include <d3d11.h>
 #include <string>
 
 namespace TitleWindow {

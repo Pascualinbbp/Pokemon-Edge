@@ -3,7 +3,7 @@
 #include "imgui.h"
 #include "appState.hpp"
 
-namespace UpdateWindow {
+namespace SysUpdateWindow {
     inline void render(GameState& gameState) {
         if (ImGui::Button("< Menú Principal")) {
             gameState = GameState::MAIN_MENU;
