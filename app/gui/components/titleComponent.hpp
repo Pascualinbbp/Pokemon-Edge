@@ -22,8 +22,8 @@ namespace TitleComponent {
         ImGui::SetCursorPosX((windowSize.x - pressWidth) * 0.5f);
         ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.55f, 1.0f), "%s", pressText);
 
-        // Transición de estado
-        if (ImGui::IsAnyKeyPressed() || ImGui::IsMouseClicked(0)) {
+        // Transición de estado (Enter, Espacio o Clic Izquierdo)
+        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_Space) || ImGui::IsMouseClicked(0)) {
             state = GameState::MAIN_MENU;
         }
     }
