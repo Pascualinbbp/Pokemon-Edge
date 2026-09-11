@@ -89,7 +89,9 @@ void MainWindow::init() {
         D3D11_SUBRESOURCE_DATA subResource = { image_data, static_cast<UINT>(desc.Width * 4), 0 };
         if (SUCCEEDED(g_pd3dDevice->CreateTexture2D(&desc, &subResource, &pTexture))) {
             D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-            srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; srvDesc.ViewDimension = DXGI_SRV_DIMENSION_TEXTURE2D; srvDesc.Texture2D.MipLevels = desc.MipLevels;
+            srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; 
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; 
+            srvDesc.Texture2D.MipLevels = desc.MipLevels;
             g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, &g_logoTexture);
             pTexture->Release();
             Logger::logInfo("MAIN_WINDOW", "Textura DX11 del logo creada con éxito.");
