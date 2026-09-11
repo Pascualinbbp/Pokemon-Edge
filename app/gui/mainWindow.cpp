@@ -3,6 +3,7 @@
 #include "components/titleComponent.hpp"
 #include "components/menuComponent.hpp"
 #include "../utils/loggerUtil.hpp"
+#include <string>
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
@@ -36,6 +37,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             }
             return 0;
         case WM_DESTROY:
+            Logger::logInfo("MAIN_WINDOW", "Recibido evento WM_DESTROY. Cerrando la aplicación.");
             PostQuitMessage(0);
             return 0;
     }
@@ -43,27 +45,44 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 }
 
 void MainWindow::init() {
+    Logger::logInfo("MAIN_WINDOW", "Registrando la clase de ventana de Windows (WNDCLASSEX)...");
     WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WindowProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, "PokemonEdgeEngine", nullptr };
-    RegisterClassEx(&wc);
+    if (!RegisterClassEx(&wc)) {
+        Logger::logError("MAIN_WINDOW", "Fallo crítico: No se pudo registrar la clase de ventana. Error: " + std::to_string(GetLastError()));
+    }
     
+    Logger::logInfo("MAIN_WINDOW", "Llamando a CreateWindowEx para generar la GUI...");
     g_hwnd = CreateWindowEx(0, wc.lpszClassName, "Pokemon Edge // Game Engine Studio", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, 100, 100, 960, 540, nullptr, nullptr, wc.hInstance, nullptr);
 
-    // Init DX11
+    if (!g_hwnd) {
+        Logger::logError("MAIN_WINDOW", "Fallo crítico: No se pudo crear la ventana principal. Código de error WIN32: " + std::to_string(GetLastError()));
+        return;
+    }
+    Logger::logInfo("MAIN_WINDOW", "Ventana de Windows creada exitosamente.");
+
+    Logger::logInfo("MAIN_WINDOW", "Preparando inicialización de DirectX 11...");
     DXGI_SWAP_CHAIN_DESC sd = {};
     sd.BufferCount = 2; sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sd.OutputWindow = g_hwnd; sd.SampleDesc.Count = 1; sd.Windowed = TRUE; sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
     const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
     
-    if (D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, nullptr, &g_pd3dDeviceContext) != S_OK) return;
+    Logger::logInfo("MAIN_WINDOW", "Llamando a D3D11CreateDeviceAndSwapChain...");
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, nullptr, &g_pd3dDeviceContext);
+    if (hr != S_OK) {
+        Logger::logError("MAIN_WINDOW", "Fallo crítico: D3D11CreateDeviceAndSwapChain falló con HRESULT: " + std::to_string(hr));
+        return;
+    }
+    Logger::logInfo("MAIN_WINDOW", "Dispositivo de DirectX 11 y SwapChain inicializados correctamente.");
 
     ID3D11Texture2D* pBackBuffer;
     g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
     g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
     pBackBuffer->Release();
 
-    // Cargar Logo
+    Logger::logInfo("MAIN_WINDOW", "Intentando cargar app/data/logo.png desde el disco...");
     unsigned char* image_data = stbi_load("app/data/logo.png", &g_logoWidth, &g_logoHeight, nullptr, 4);
     if (image_data) {
+        Logger::logInfo("MAIN_WINDOW", "Logo cargado en memoria. Creando textura en DX11...");
         D3D11_TEXTURE2D_DESC desc = {};
         desc.Width = g_logoWidth; desc.Height = g_logoHeight; desc.MipLevels = 1; desc.ArraySize = 1; desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; desc.SampleDesc.Count = 1; desc.Usage = D3D11_USAGE_DEFAULT; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         ID3D11Texture2D* pTexture = nullptr;
@@ -73,21 +92,31 @@ void MainWindow::init() {
             srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; srvDesc.Texture2D.MipLevels = desc.MipLevels;
             g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, &g_logoTexture);
             pTexture->Release();
+            Logger::logInfo("MAIN_WINDOW", "Textura DX11 del logo creada con éxito.");
+        } else {
+            Logger::logError("MAIN_WINDOW", "Fallo al crear la textura 2D en DirectX 11 para el logo.");
         }
         stbi_image_free(image_data);
+    } else {
+        Logger::logError("MAIN_WINDOW", "No se pudo encontrar/cargar app/data/logo.png. Verifica la ruta.");
     }
 
+    Logger::logInfo("MAIN_WINDOW", "Ejecutando ShowWindow y UpdateWindow...");
     ShowWindow(g_hwnd, SW_SHOWDEFAULT);
     UpdateWindow(g_hwnd);
 
+    Logger::logInfo("MAIN_WINDOW", "Inicializando contexto de ImGui...");
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     GuiStyle::applyTheme();
     ImGui_ImplWin32_Init(g_hwnd);
     ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+    
+    Logger::logInfo("MAIN_WINDOW", "¡Función init() de MainWindow completada sin errores!");
 }
 
 void MainWindow::cleanup() {
+    Logger::logInfo("MAIN_WINDOW", "Liberando recursos de la aplicación...");
     if (g_logoTexture) { g_logoTexture->Release(); g_logoTexture = nullptr; }
     if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = nullptr; }
     if (g_pSwapChain) { g_pSwapChain->Release(); g_pSwapChain = nullptr; }
@@ -96,9 +125,16 @@ void MainWindow::cleanup() {
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
+    Logger::logInfo("MAIN_WINDOW", "Recursos liberados de forma segura.");
 }
 
 void MainWindow::run() {
+    if (!g_hwnd || !g_pd3dDeviceContext) {
+        Logger::logError("MAIN_WINDOW", "El bucle run() se abortó porque la ventana (g_hwnd) o DX11 no se crearon correctamente.");
+        return;
+    }
+
+    Logger::logInfo("MAIN_WINDOW", "Iniciando bucle de renderizado principal (run loop)...");
     bool done = false;
     GameState currentState = GameState::TITLE_SCREEN;
 
@@ -107,7 +143,10 @@ void MainWindow::run() {
         while (PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
-            if (msg.message == WM_QUIT) done = true;
+            if (msg.message == WM_QUIT) {
+                Logger::logInfo("MAIN_WINDOW", "Mensaje de salida recibido, rompiendo bucle.");
+                done = true;
+            }
         }
         if (done) break;
 
@@ -137,5 +176,6 @@ void MainWindow::run() {
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         g_pSwapChain->Present(1, 0);
     }
+    
     cleanup();
 }
