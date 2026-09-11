@@ -52,7 +52,7 @@ void MainWindow::init() {
     }
     
     Logger::logInfo("MAIN_WINDOW", "Llamando a CreateWindowEx para generar la GUI...");
-    g_hwnd = CreateWindowEx(0, wc.lpszClassName, "Pokemon Edge // Game Engine Studio", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, 100, 100, 960, 540, nullptr, nullptr, wc.hInstance, nullptr);
+    g_hwnd = CreateWindowEx(0, wc.lpszClassName, "Pokemon Edge // Game Engine Studio", WS_OVERLAPPEDWINDOW, 100, 100, 960, 540, nullptr, nullptr, wc.hInstance, nullptr);
 
     if (!g_hwnd) {
         Logger::logError("MAIN_WINDOW", "Fallo crítico: No se pudo crear la ventana principal. Código de error WIN32: " + std::to_string(GetLastError()));
@@ -89,7 +89,7 @@ void MainWindow::init() {
         D3D11_SUBRESOURCE_DATA subResource = { image_data, static_cast<UINT>(desc.Width * 4), 0 };
         if (SUCCEEDED(g_pd3dDevice->CreateTexture2D(&desc, &subResource, &pTexture))) {
             D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-            srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; srvDesc.Texture2D.MipLevels = desc.MipLevels;
+            srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; srvDesc.ViewDimension = DXGI_SRV_DIMENSION_TEXTURE2D; srvDesc.Texture2D.MipLevels = desc.MipLevels;
             g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, &g_logoTexture);
             pTexture->Release();
             Logger::logInfo("MAIN_WINDOW", "Textura DX11 del logo creada con éxito.");
