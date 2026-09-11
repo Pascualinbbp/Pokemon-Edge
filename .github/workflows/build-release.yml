@@ -96,7 +96,12 @@ jobs:
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
           
           rc.exe resources.rc
-          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite /I app/utils/imgui main.cpp app/managers/appManager.cpp app/managers/guiManager.cpp app/utils/sqlite/sqlite3.c app/utils/imgui/imgui.cpp app/utils/imgui/imgui_draw.cpp app/utils/imgui/imgui_tables.cpp app/utils/imgui/imgui_widgets.cpp app/utils/imgui/imgui_impl_win32.cpp app/utils/imgui/imgui_impl_dx11.cpp resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
+          
+          :: Recolectar automáticamente main.cpp y todos los .cpp dentro de la carpeta app (incluyendo GUI e ImGui)
+          dir /b /s app\*.cpp > sources.txt
+          echo main.cpp >> sources.txt
+          
+          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite /I app/utils/imgui @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh
