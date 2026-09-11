@@ -1,11 +1,16 @@
 #pragma once
-#include <windows.h>
+#include "../gui/mainWindow.hpp"
+#include "../utils/loggerUtil.hpp"
 
 class GuiManager {
 public:
-    static void init();
-    static void run();
+    static void init() {
+        Logger::logInfo("GUI_MANAGER", "Delegando inicialización a la GUI principal...");
+        MainWindow::init();
+    }
 
-private:
-    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+    static void run() {
+        Logger::logInfo("GUI_MANAGER", "Arrancando bucle de la interfaz...");
+        MainWindow::run();
+    }
 };
