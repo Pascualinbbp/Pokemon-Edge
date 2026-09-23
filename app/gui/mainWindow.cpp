@@ -165,9 +165,10 @@ void MainWindow::run() {
         return;
     }
 
-    Logger::logInfo("MAIN_WINDOW", "Iniciando bucle de renderizado principal (run loop)...");
+    Logger::logInfo("MAIN_WINDOW", "Iniciando bucle de renderizado optimizado por eventos...");
     bool done = false;
     GameState currentState = GameState::TITLE_SCREEN;
+    bool needsRedraw = true;
 
     while (!done) {
         MSG msg;
@@ -178,8 +179,15 @@ void MainWindow::run() {
                 Logger::logInfo("MAIN_WINDOW", "Mensaje de salida recibido, rompiendo bucle.");
                 done = true;
             }
+            needsRedraw = true; // Forzar redibujado solo cuando haya actividad de usuario o mensajes
         }
         if (done) break;
+
+        // Si no hay cambios ni eventos, suspendemos inteligentemente el hilo para no quemar la CPU
+        if (!needsRedraw) {
+            WaitMessage();
+            continue;
+        }
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
@@ -189,6 +197,7 @@ void MainWindow::run() {
         ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
         ImGui::Begin("MainCanvas", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
+        GameState prevState = currentState;
         switch (currentState) {
             case GameState::TITLE_SCREEN:
                 TitleComponent::render(currentState, g_logoTexture, g_logoWidth, g_logoHeight);
@@ -196,6 +205,10 @@ void MainWindow::run() {
             case GameState::MAIN_MENU:
                 MenuComponent::render(currentState);
                 break;
+        }
+
+        if (prevState != currentState) {
+            needsRedraw = true;
         }
 
         ImGui::End();
@@ -206,6 +219,8 @@ void MainWindow::run() {
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         g_pSwapChain->Present(1, 0);
+
+        needsRedraw = false; // Resetear hasta la siguiente interacción
     }
     
     cleanup();
