@@ -30,10 +30,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (g_pd3dDevice != nullptr && wParam != SIZE_MINIMIZED) {
                 if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = nullptr; }
                 g_pSwapChain->ResizeBuffers(0, (UINT)LOWORD(lParam), (UINT)HIWORD(lParam), DXGI_FORMAT_UNKNOWN, 0);
-                ID3D11Texture2D* pBackBuffer;
-                g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
-                g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
-                pBackBuffer->Release();
+                ID3D11Texture2D* pBackBuffer = nullptr;
+                if (SUCCEEDED(g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer)))) {
+                    g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
+                    pBackBuffer->Release();
+                }
             }
             return 0;
         case WM_DESTROY:
@@ -45,10 +46,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 }
 
 void MainWindow::init() {
+    Logger::logInfo("MAIN_WINDOW", "== INICIO DE MainWindow::init() ==");
     Logger::logInfo("MAIN_WINDOW", "Registrando la clase de ventana de Windows (WNDCLASSEX)...");
     WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WindowProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, "PokemonEdgeEngine", nullptr };
+    
     if (!RegisterClassEx(&wc)) {
-        Logger::logError("MAIN_WINDOW", "Fallo crítico: No se pudo registrar la clase de ventana. Error: " + std::to_string(GetLastError()));
+        Logger::logError("MAIN_WINDOW", "Fallo crítico: No se pudo registrar la clase de ventana. Código de error WIN32: " + std::to_string(GetLastError()));
+        return;
     }
     
     Logger::logInfo("MAIN_WINDOW", "Llamando a CreateWindowEx para generar la GUI...");
@@ -74,10 +78,22 @@ void MainWindow::init() {
     }
     Logger::logInfo("MAIN_WINDOW", "Dispositivo de DirectX 11 y SwapChain inicializados correctamente.");
 
-    ID3D11Texture2D* pBackBuffer;
-    g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
-    g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
+    Logger::logInfo("MAIN_WINDOW", "Obteniendo BackBuffer del SwapChain...");
+    ID3D11Texture2D* pBackBuffer = nullptr;
+    hr = g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
+    if (FAILED(hr)) {
+        Logger::logError("MAIN_WINDOW", "Fallo crítico: No se pudo obtener el BackBuffer. HRESULT: " + std::to_string(hr));
+        return;
+    }
+
+    Logger::logInfo("MAIN_WINDOW", "Creando RenderTargetView...");
+    hr = g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
     pBackBuffer->Release();
+    if (FAILED(hr)) {
+        Logger::logError("MAIN_WINDOW", "Fallo crítico: No se pudo crear el RenderTargetView. HRESULT: " + std::to_string(hr));
+        return;
+    }
+    Logger::logInfo("MAIN_WINDOW", "RenderTargetView creado exitosamente.");
 
     Logger::logInfo("MAIN_WINDOW", "Intentando cargar app/data/logo.png desde el disco...");
     unsigned char* image_data = stbi_load("app/data/logo.png", &g_logoWidth, &g_logoHeight, nullptr, 4);
@@ -87,20 +103,25 @@ void MainWindow::init() {
         desc.Width = g_logoWidth; desc.Height = g_logoHeight; desc.MipLevels = 1; desc.ArraySize = 1; desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; desc.SampleDesc.Count = 1; desc.Usage = D3D11_USAGE_DEFAULT; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         ID3D11Texture2D* pTexture = nullptr;
         D3D11_SUBRESOURCE_DATA subResource = { image_data, static_cast<UINT>(desc.Width * 4), 0 };
-        if (SUCCEEDED(g_pd3dDevice->CreateTexture2D(&desc, &subResource, &pTexture))) {
+        hr = g_pd3dDevice->CreateTexture2D(&desc, &subResource, &pTexture);
+        if (SUCCEEDED(hr)) {
             D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
             srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; 
             srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; 
             srvDesc.Texture2D.MipLevels = desc.MipLevels;
-            g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, &g_logoTexture);
+            hr = g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, &g_logoTexture);
+            if (FAILED(hr)) {
+                Logger::logError("MAIN_WINDOW", "Fallo al crear ShaderResourceView para el logo. HRESULT: " + std::to_string(hr));
+            } else {
+                Logger::logInfo("MAIN_WINDOW", "Textura DX11 del logo creada con éxito.");
+            }
             pTexture->Release();
-            Logger::logInfo("MAIN_WINDOW", "Textura DX11 del logo creada con éxito.");
         } else {
-            Logger::logError("MAIN_WINDOW", "Fallo al crear la textura 2D en DirectX 11 para el logo.");
+            Logger::logError("MAIN_WINDOW", "Fallo al crear la textura 2D en DirectX 11 para el logo. HRESULT: " + std::to_string(hr));
         }
         stbi_image_free(image_data);
     } else {
-        Logger::logError("MAIN_WINDOW", "No se pudo encontrar/cargar app/data/logo.png. Verifica la ruta.");
+        Logger::logError("MAIN_WINDOW", "No se pudo encontrar/cargar app/data/logo.png. Se omitirá el logo.");
     }
 
     Logger::logInfo("MAIN_WINDOW", "Ejecutando ShowWindow y UpdateWindow...");
@@ -111,10 +132,18 @@ void MainWindow::init() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     GuiStyle::applyTheme();
-    ImGui_ImplWin32_Init(g_hwnd);
-    ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
     
-    Logger::logInfo("MAIN_WINDOW", "¡Función init() de MainWindow completada sin errores!");
+    Logger::logInfo("MAIN_WINDOW", "Inicializando impl de ImGui Win32...");
+    if (!ImGui_ImplWin32_Init(g_hwnd)) {
+        Logger::logError("MAIN_WINDOW", "ImGui_ImplWin32_Init devolvió false.");
+    }
+
+    Logger::logInfo("MAIN_WINDOW", "Inicializando impl de ImGui DX11...");
+    if (!ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext)) {
+        Logger::logError("MAIN_WINDOW", "ImGui_ImplDX11_Init devolvió false.");
+    }
+    
+    Logger::logInfo("MAIN_WINDOW", "¡Función init() de MainWindow completada con éxito!");
 }
 
 void MainWindow::cleanup() {
@@ -131,8 +160,8 @@ void MainWindow::cleanup() {
 }
 
 void MainWindow::run() {
-    if (!g_hwnd || !g_pd3dDeviceContext) {
-        Logger::logError("MAIN_WINDOW", "El bucle run() se abortó porque la ventana (g_hwnd) o DX11 no se crearon correctamente.");
+    if (!g_hwnd || !g_pd3dDeviceContext || !g_mainRenderTargetView) {
+        Logger::logError("MAIN_WINDOW", "El bucle run() se abortó prematuramente debido a componentes nulos (¿falló init()?).");
         return;
     }
 
