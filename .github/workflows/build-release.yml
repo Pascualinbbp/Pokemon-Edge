@@ -19,7 +19,9 @@ jobs:
         id: config
         shell: pwsh
         run: |
+          Write-Host "[LOG] Iniciando lectura de release_config.json..."
           $json = Get-Content release_config.json | ConvertFrom-Json
+          Write-Host "[LOG] release_config.json leído con éxito."
           
           echo "TAG=$($json.configs.tag)" >> $env:GITHUB_ENV
           echo "REL_NAME=$($json.configs.name)" >> $env:GITHUB_ENV
@@ -29,64 +31,81 @@ jobs:
           
           New-Item -ItemType Directory -Force -Path "app/data"
           $json.userjson | ConvertTo-Json | Out-File "app/data/version.json" -Encoding utf8
-          
           $json.userjson | ConvertTo-Json | Out-File "version.json" -Encoding utf8
+          Write-Host "[LOG] Configuración de entorno y versiones guardada correctamente."
 
-      - name: 📥 Descargar Dependencias desde dependencies.json
+      - name: 📥 Descargar Dependencias desde dependencies.json (Con Logs Detallados)
         shell: pwsh
         run: |
+          Write-Host "[LOG] Paso de dependencias iniciado."
           if (-not (Test-Path "dependencies.json")) {
-              Write-Error "Fallo crítico: El archivo dependencies.json no existe."
+              Write-Error "[FATAL] El archivo dependencies.json no existe en la ruta raíz."
               exit 1
           }
+          Write-Host "[LOG] Archivo dependencies.json encontrado. Parseando contenido..."
           
           $depConfig = Get-Content dependencies.json | ConvertFrom-Json
-          
+          Write-Host "[LOG] dependencies.json parseado correctamente a objeto PowerShell."
+
           # 1. Archivos individuales
-          foreach ($fileEntry in$depConfig.files) {
-              Write-Host "Procesando archivo: $($fileEntry.url) -> $($fileEntry.dest)"
+          Write-Host "[LOG] --- INICIANDO SECCIÓN DE ARCHIVOS INDIVIDUALES ---"
+          foreach ($fileEntry in @($depConfig.files)) {
+              Write-Host "[LOG] Procesando archivo individual -> URL: $($fileEntry.url) | Destino: $($fileEntry.dest)"
               $targetDir = Split-Path$fileEntry.dest
               if ($targetDir -and -not (Test-Path$targetDir)) { 
+                  Write-Host "[LOG] Creando directorio destino faltante: $targetDir"
                   New-Item -ItemType Directory -Force -Path $targetDir | Out-Null 
               }
+              Write-Host "[LOG] Descargando con Invoke-WebRequest..."
               Invoke-WebRequest -Uri $fileEntry.url -OutFile$fileEntry.dest
+              Write-Host "[LOG] Descarga completada para: $($fileEntry.dest)"
           }
           
           # 2. Archivos ZIP
-          foreach ($zipEntry in$depConfig.zips) {
-              Write-Host "Procesando ZIP: $($zipEntry.url)"
+          Write-Host "[LOG] --- INICIANDO SECCIÓN DE ARCHIVOS ZIP ---"
+          foreach ($zipEntry in @($depConfig.zips)) {
+              Write-Host "[LOG] Procesando ZIP -> URL: $($zipEntry.url) | Extracción: $($zipEntry.extract_path)"
+              Write-Host "[LOG] Descargando archivo ZIP temporal..."
               Invoke-WebRequest -Uri $zipEntry.url -OutFile "temp_dl.zip"
+              Write-Host "[LOG] Expandiendo archivo ZIP..."
               Expand-Archive -Path "temp_dl.zip" -DestinationPath $zipEntry.extract_path -Force
               
-              foreach ($mappingKey in $zipEntry.mappings.PSObject.Properties.Name) {$destinationPath = $zipEntry.mappings.$mappingKey
+              foreach ($mappingKey in @($zipEntry.mappings.PSObject.Properties.Name)) {$destinationPath = $zipEntry.mappings.$mappingKey
+                  Write-Host "[LOG] Mapeando ZIP: $mappingKey ->$destinationPath"
                   $destinationDir = Split-Path$destinationPath
                   if ($destinationDir -and -not (Test-Path$destinationDir)) { 
                       New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null 
                   }
                   Copy-Item -Path $mappingKey -Destination$destinationPath -Force
               }
+              Write-Host "[LOG] Limpiando archivos temporales de ZIP..."
               Remove-Item "temp_dl.zip" -Force
               Remove-Item $zipEntry.extract_path -Recurse -Force
           }
           
           # 3. Repositorios Git
-          foreach ($gitEntry in$depConfig.gits) {
-              Write-Host "Procesando Git: $($gitEntry.url)"
+          Write-Host "[LOG] --- INICIANDO SECCIÓN DE REPOSITORIOS GIT ---"
+          foreach ($gitEntry in @($depConfig.gits)) {
+              Write-Host "[LOG] Procesando Git -> URL: $($gitEntry.url) | Carpeta temporal: $($gitEntry.temp_dir)"
               if (Test-Path $gitEntry.temp_dir) { 
+                  Write-Host "[LOG] Eliminando directorio temporal existente previamente: $($gitEntry.temp_dir)"
                   Remove-Item $gitEntry.temp_dir -Recurse -Force 
               }
+              Write-Host "[LOG] Ejecutando git clone --depth 1..."
               git clone --depth 1 $gitEntry.url $gitEntry.temp_dir
               
-              foreach ($mappingKey in $gitEntry.mappings.PSObject.Properties.Name) {$destinationPath = $gitEntry.mappings.$mappingKey
+              foreach ($mappingKey in @($gitEntry.mappings.PSObject.Properties.Name)) {$destinationPath = $gitEntry.mappings.$mappingKey
+                  Write-Host "[LOG] Mapeando Git: $mappingKey ->$destinationPath"
                   $destinationDir = Split-Path$destinationPath
                   if ($destinationDir -and -not (Test-Path$destinationDir)) { 
                       New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null 
                   }
                   Copy-Item -Path $mappingKey -Destination$destinationPath -Force
               }
+              Write-Host "[LOG] Limpiando directorio temporal Git: $($gitEntry.temp_dir)..."
               Remove-Item $gitEntry.temp_dir -Recurse -Force
           }
-          Write-Host "¡Todas las dependencias se leyeron del JSON y se organizaron con éxito!"
+          Write-Host "[LOG] ¡Todas las dependencias se leyeron del JSON y se organizaron con éxito!"
 
       - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
         shell: pwsh
@@ -102,6 +121,7 @@ jobs:
               for ($i = 0; $i -lt$bytes.Length; $i++) {$bytes[$i] =$bytes[$i] -bxor$keyVal
               }
               [System.IO.File]::WriteAllBytes($dbPath,$bytes)
+              Write-Host "Base de datos cifrada correctamente."
           } else {
               Write-Error "No se encontró el archivo de base de datos en $dbPath"
               exit 1
