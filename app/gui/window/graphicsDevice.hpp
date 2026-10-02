@@ -15,12 +15,12 @@ namespace GraphicsDevice {
     void init(HWND hwnd);
     void cleanup();
     void resize(UINT width, UINT height);
-
+    
     void beginFrame(const float clearColor[4]); // bind RT + clear + viewport
     void present();
-
+    
     bool loadTexture(const std::filesystem::path& path, Texture& out);
-
+    
     ID3D11Device* device();
     ID3D11DeviceContext* context();
     int width();

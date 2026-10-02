@@ -8,7 +8,7 @@
 using json = nlohmann::json;
 
 class JsonUtil {
-public:
+    public:
     static json loadFromFile(const fs::path& filePath) {
         std::ifstream file(filePath);
         if (!file.is_open()) {
@@ -22,7 +22,7 @@ public:
             return json{};
         }
     }
-
+    
     static bool saveToFile(const fs::path& filePath, const json& j, int indent = 4) {
         try {
             if (filePath.has_parent_path()) {
@@ -41,7 +41,7 @@ public:
             return false;
         }
     }
-
+    
     static json parseString(const std::string& content) {
         try {
             return json::parse(content);

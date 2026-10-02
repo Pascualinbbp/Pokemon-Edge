@@ -5,11 +5,11 @@
 #include "../utils/core/loggerUtil.hpp"
 
 class AppManager {
-public:
+    public:
     void start() {
         UpdateManager::checkAndHandleUpdate();
         DatabaseManager::init();
-
+        
         Logger::logInfo("APP_MANAGER", "¡Bienvenido a Pokemon Edge! Ejecutando GUI...");
         GuiManager::init();
         GuiManager::run();

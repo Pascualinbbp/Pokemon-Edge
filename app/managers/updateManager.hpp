@@ -4,20 +4,20 @@
 #include "../utils/core/loggerUtil.hpp"
 
 class UpdateManager {
-public:
+    public:
     static void checkAndHandleUpdate() {
         Logger::logInfo("UPDATE_MANAGER", "Verificando si existe una nueva versión disponible...");
         try {
             std::string localVer = UpdateUtil::getLocalVersionString();
             std::string remoteVer = UpdateUtil::fetchRemoteVersionString();
-
+            
             if (remoteVer.empty()) {
                 Logger::logError("UPDATE_MANAGER", "Error de red: No se pudo obtener version.json remoto.");
                 return;
             }
-
+            
             Logger::logInfo("UPDATE_MANAGER", "Versión local: " + localVer + " | Versión remota: " + remoteVer);
-
+            
             if (localVer == remoteVer) {
                 Logger::logInfo("UPDATE_MANAGER", "La aplicación ya está en la última versión.");
             } else {

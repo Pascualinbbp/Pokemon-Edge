@@ -6,7 +6,7 @@ namespace GuiLayout {
     inline void centerX(float itemWidth) {
         ImGui::SetCursorPosX((ImGui::GetWindowSize().x - itemWidth) * 0.5f);
     }
-
+    
     inline bool centeredButton(const char* label, const ImVec2& size) {
         centerX(size.x);
         return ImGui::Button(label, size);

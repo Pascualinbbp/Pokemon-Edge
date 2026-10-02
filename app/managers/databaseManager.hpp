@@ -4,15 +4,15 @@
 #include "../daos/typeDao.hpp"
 
 class DatabaseManager {
-private:
+    private:
     inline static TypeDao typeDaoInstance;
-
-public:
+    
+    public:
     static void init() {
         Logger::logInfo("DB_MANAGER", "Inicializando y verificando base de datos local...");
         DatabaseUtil::extractDatabaseIfNeeded();
     }
-
+    
     static TypeDao& getTypeDao() {
         return typeDaoInstance;
     }

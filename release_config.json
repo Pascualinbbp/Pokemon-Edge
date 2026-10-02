@@ -1,8 +1,8 @@
 {
   "configs": {
     "tag": "v0.0.2",
-    "name": "Pokemon Edge v0.0.2-beta (Prueba Base de Datos)",
-    "description": "Versión preliminar de prueba (Prerelease) que incluye la nueva tabla de tipos Pokémon, base de datos cifrada y mejoras en el sistema.",
+    "name": "Pokemon Edge v0.0.2-beta",
+    "description": "Versión preliminar de prueba.",
     "prerelease": true,
     "make_latest": false,
     "branch": "main"

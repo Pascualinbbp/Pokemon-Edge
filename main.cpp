@@ -19,6 +19,6 @@ int main() {
     } catch (...) {
         Logger::logError("SYSTEM", "Fallo crítico (Excepción desconocida no capturada en main).");
     }
-
+    
     return 0;
 }
