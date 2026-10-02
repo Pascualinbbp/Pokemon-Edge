@@ -51,13 +51,13 @@ jobs:
           Write-Host "[LOG] --- INICIANDO SECCIÓN DE ARCHIVOS INDIVIDUALES ---"
           foreach ($fileEntry in @($depConfig.files)) {
               Write-Host "[LOG] Procesando archivo individual -> URL: $($fileEntry.url) | Destino: $($fileEntry.dest)"
-              $targetDir = Split-Path$fileEntry.dest
-              if ($targetDir -and -not (Test-Path$targetDir)) { 
+              $targetDir = Split-Path $fileEntry.dest
+              if ($targetDir -and -not (Test-Path $targetDir)) { 
                   Write-Host "[LOG] Creando directorio destino faltante: $targetDir"
                   New-Item -ItemType Directory -Force -Path $targetDir | Out-Null 
               }
               Write-Host "[LOG] Descargando con Invoke-WebRequest..."
-              Invoke-WebRequest -Uri $fileEntry.url -OutFile$fileEntry.dest
+              Invoke-WebRequest -Uri $fileEntry.url -OutFile $fileEntry.dest
               Write-Host "[LOG] Descarga completada para: $($fileEntry.dest)"
           }
           
@@ -72,11 +72,11 @@ jobs:
               
               foreach ($mappingKey in @($zipEntry.mappings.PSObject.Properties.Name)) {$destinationPath = $zipEntry.mappings.$mappingKey
                   Write-Host "[LOG] Mapeando ZIP: $mappingKey ->$destinationPath"
-                  $destinationDir = Split-Path$destinationPath
-                  if ($destinationDir -and -not (Test-Path$destinationDir)) { 
+                  $destinationDir = Split-Path $destinationPath
+                  if ($destinationDir -and -not (Test-Path $destinationDir)) { 
                       New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null 
                   }
-                  Copy-Item -Path $mappingKey -Destination$destinationPath -Force
+                  Copy-Item -Path $mappingKey -Destination $destinationPath -Force
               }
               Write-Host "[LOG] Limpiando archivos temporales de ZIP..."
               Remove-Item "temp_dl.zip" -Force
@@ -96,11 +96,11 @@ jobs:
               
               foreach ($mappingKey in @($gitEntry.mappings.PSObject.Properties.Name)) {$destinationPath = $gitEntry.mappings.$mappingKey
                   Write-Host "[LOG] Mapeando Git: $mappingKey ->$destinationPath"
-                  $destinationDir = Split-Path$destinationPath
-                  if ($destinationDir -and -not (Test-Path$destinationDir)) { 
+                  $destinationDir = Split-Path $destinationPath
+                  if ($destinationDir -and -not (Test-Path $destinationDir)) { 
                       New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null 
                   }
-                  Copy-Item -Path $mappingKey -Destination$destinationPath -Force
+                  Copy-Item -Path $mappingKey -Destination $destinationPath -Force
               }
               Write-Host "[LOG] Limpiando directorio temporal Git: $($gitEntry.temp_dir)..."
               Remove-Item $gitEntry.temp_dir -Recurse -Force
@@ -118,7 +118,7 @@ jobs:
           if (Test-Path $dbPath) {
               Write-Host "Cifrando base de datos para compilación con clave: $keyVal..."
               $bytes = [System.IO.File]::ReadAllBytes($dbPath)
-              for ($i = 0; $i -lt$bytes.Length; $i++) {$bytes[$i] =$bytes[$i] -bxor$keyVal
+              for ($i = 0; $i -lt$bytes.Length; $i++) {$bytes[$i] =$bytes[$i] -bxor $keyVal
               }
               [System.IO.File]::WriteAllBytes($dbPath,$bytes)
               Write-Host "Base de datos cifrada correctamente."
