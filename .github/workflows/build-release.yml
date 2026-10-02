@@ -32,41 +32,45 @@ jobs:
           
           $json.userjson | ConvertTo-Json | Out-File "version.json" -Encoding utf8
 
-      - name: 📥 Descargar Dependencias (Automático vía dependencies.json)
+      - name: 📥 Descargar Dependencias desde dependencies.json
         shell: pwsh
         run: |
           if (-not (Test-Path "dependencies.json")) {
               Write-Error "Fallo crítico: El archivo dependencies.json no existe en el repositorio."
               exit 1
           }
-          $json = Get-Content dependencies.json | ConvertFrom-Json
-          foreach ($dep in$json.downloads) {
-              Write-Host "-> Obteniendo recurso: $($dep.url)"
-              if ($dep.type -eq 'file') {
-                  $destDir = Split-Path$dep.dest
-                  if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
-                  Invoke-WebRequest -Uri $dep.url -OutFile$dep.dest
+          $depConfig = Get-Content dependencies.json | ConvertFrom-Json
+          
+          foreach ($item in$depConfig.downloads) {
+              Write-Host "Procesando recurso: $($item.url)"
+              if ($item.type -eq 'file') {
+                  $dir = Split-Path$item.dest
+                  if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path$dir | Out-Null }
+                  Invoke-WebRequest -Uri $item.url -OutFile$item.dest
               }
-              elseif ($dep.type -eq 'zip') {
-                  Invoke-WebRequest -Uri $dep.url -OutFile "temp.zip"
-                  Expand-Archive -Path "temp.zip" -DestinationPath $dep.temp_dir -Force
-                  foreach ($file in$dep.files) {
-                      $destDir = Split-Path$file.dest
-                      if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
-                      Copy-Item -Path $file.src -Destination$file.dest -Force
+              elseif ($item.type -eq 'zip') {
+                  Invoke-WebRequest -Uri $item.url -OutFile "temp_download.zip"
+                  Expand-Archive -Path "temp_download.zip" -DestinationPath $item.temp_dir -Force
+                  foreach ($f in$item.files) {
+                      $dir = Split-Path$f.dest
+                      if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path$dir | Out-Null }
+                      Copy-Item -Path $f.src -Destination$f.dest -Force
                   }
-                  Remove-Item "temp.zip" -Force
+                  Remove-Item "temp_download.zip" -Force
+                  Remove-Item $item.temp_dir -Recurse -Force
               }
-              elseif ($dep.type -eq 'git') {
-                  git clone --depth 1 $dep.url $dep.temp_dir
-                  foreach ($file in$dep.files) {
-                      $destDir = Split-Path$file.dest
-                      if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
-                      Copy-Item -Path $file.src -Destination$file.dest -Force
+              elseif ($item.type -eq 'git') {
+                  if (Test-Path $item.temp_dir) { Remove-Item$item.temp_dir -Recurse -Force }
+                  git clone --depth 1 $item.url $item.temp_dir
+                  foreach ($f in$item.files) {
+                      $dir = Split-Path$f.dest
+                      if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path$dir | Out-Null }
+                      Copy-Item -Path $f.src -Destination$f.dest -Force
                   }
+                  Remove-Item $item.temp_dir -Recurse -Force
               }
           }
-          Write-Host "✅ ¡Todas las dependencias descargadas correctamente!"
+          Write-Host "¡Todas las dependencias se descargaron y organizaron con éxito!"
 
       - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
         shell: pwsh
@@ -96,7 +100,7 @@ jobs:
             set "VS_PATH=%%i"
           )
           if "%VS_PATH%"=="" (
-            echo Error: No se encontro Visual Studio con las herramientas de C++.
+            echo Error: No se encontró Visual Studio con las herramientas de C++.
             exit /b 1
           )
           echo Usando Visual Studio en: "%VS_PATH%"
@@ -104,13 +108,13 @@ jobs:
           
           rc.exe resources.rc
           
-          :: Recolectar automáticamente main.cpp y todos los .cpp dentro de la carpeta app
+          :: Recolectar automáticamente main.cpp y todos los .cpp dentro de la carpeta app (incluyendo GUI e ImGui)
           dir /b /s app\*.cpp > sources.txt
           echo main.cpp >> sources.txt
           
           cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite /I app/utils/imgui @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
-      - name: 🗂 Preparar ZIP Final
+      - name: 🗂️ Preparar ZIP Final
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "release_build/app/data/db"
