@@ -32,45 +32,44 @@ jobs:
           
           $json.userjson | ConvertTo-Json | Out-File "version.json" -Encoding utf8
 
-      - name: 📥 Descargar Dependencias desde dependencies.json
+      - name: 📥 Descargar Dependencias Automatizadas vía dependencies.json
         shell: pwsh
         run: |
-          if (-not (Test-Path "dependencies.json")) {
-              Write-Error "Fallo crítico: El archivo dependencies.json no existe en el repositorio."
-              exit 1
-          }
-          $depConfig = Get-Content dependencies.json | ConvertFrom-Json
+          $config = Get-Content dependencies.json | ConvertFrom-Json
           
-          foreach ($item in$depConfig.downloads) {
-              Write-Host "Procesando recurso: $($item.url)"
-              if ($item.type -eq 'file') {
-                  $dir = Split-Path$item.dest
-                  if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path$dir | Out-Null }
-                  Invoke-WebRequest -Uri $item.url -OutFile$item.dest
-              }
-              elseif ($item.type -eq 'zip') {
-                  Invoke-WebRequest -Uri $item.url -OutFile "temp_download.zip"
-                  Expand-Archive -Path "temp_download.zip" -DestinationPath $item.temp_dir -Force
-                  foreach ($f in$item.files) {
-                      $dir = Split-Path$f.dest
-                      if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path$dir | Out-Null }
-                      Copy-Item -Path $f.src -Destination$f.dest -Force
-                  }
-                  Remove-Item "temp_download.zip" -Force
-                  Remove-Item $item.temp_dir -Recurse -Force
-              }
-              elseif ($item.type -eq 'git') {
-                  if (Test-Path $item.temp_dir) { Remove-Item$item.temp_dir -Recurse -Force }
-                  git clone --depth 1 $item.url $item.temp_dir
-                  foreach ($f in$item.files) {
-                      $dir = Split-Path$f.dest
-                      if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path$dir | Out-Null }
-                      Copy-Item -Path $f.src -Destination$f.dest -Force
-                  }
-                  Remove-Item $item.temp_dir -Recurse -Force
-              }
+          # 1. Archivos individuales
+          foreach ($f in$config.files) {
+              $dir = Split-Path$f.dest
+              if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path$dir | Out-Null }
+              Write-Host "Descargando archivo: $($f.url)"
+              Invoke-WebRequest -Uri $f.url -OutFile$f.dest
           }
-          Write-Host "¡Todas las dependencias se descargaron y organizaron con éxito!"
+          
+          # 2. Archivos ZIP
+          foreach ($z in$config.zips) {
+              Write-Host "Descargando ZIP: $($z.url)"
+              Invoke-WebRequest -Uri $z.url -OutFile "temp_dl.zip"
+              Expand-Archive -Path "temp_dl.zip" -DestinationPath $z.extract_path -Force
+              foreach ($key in $z.mappings.PSObject.Properties.Name) {$destDir = Split-Path $z.mappings.$key
+                  if ($destDir -and -not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
+                  Copy-Item -Path $key -Destination $z.mappings.$key -Force
+              }
+              Remove-Item "temp_dl.zip" -Force
+              Remove-Item $z.extract_path -Recurse -Force
+          }
+          
+          # 3. Repositorios Git
+          foreach ($g in$config.gits) {
+              if (Test-Path $g.temp_dir) { Remove-Item$g.temp_dir -Recurse -Force }
+              Write-Host "Clonando repositorio Git: $($g.url)"
+              git clone --depth 1 $g.url $g.temp_dir
+              foreach ($key in $g.mappings.PSObject.Properties.Name) {$destDir = Split-Path $g.mappings.$key
+                  if ($destDir -and -not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
+                  Copy-Item -Path $key -Destination $g.mappings.$key -Force
+              }
+              Remove-Item $g.temp_dir -Recurse -Force
+          }
+          Write-Host "¡Todas las dependencias procesadas con éxito!"
 
       - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
         shell: pwsh

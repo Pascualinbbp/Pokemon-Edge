@@ -1,34 +1,34 @@
 {
-  "downloads": [
+  "files": [
     {
-      "type": "file",
       "url": "https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp",
       "dest": "app/utils/nlohmann/json.hpp"
     },
     {
-      "type": "file",
       "url": "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h",
       "dest": "app/utils/imgui/stb_image.h"
-    },
+    }
+  ],
+  "zips": [
     {
-      "type": "zip",
       "url": "https://sqlite.org/2024/sqlite-amalgamation-3450100.zip",
-      "temp_dir": "sqlite_ext",
-      "files": [
-        { "src": "sqlite_ext/sqlite-amalgamation-3450100/sqlite3.h", "dest": "app/utils/sqlite/sqlite3.h" },
-        { "src": "sqlite_ext/sqlite-amalgamation-3450100/sqlite3.c", "dest": "app/utils/sqlite/sqlite3.c" }
-      ]
-    },
+      "extract_path": "sqlite_ext",
+      "mappings": {
+        "sqlite_ext/sqlite-amalgamation-3450100/sqlite3.h": "app/utils/sqlite/sqlite3.h",
+        "sqlite_ext/sqlite-amalgamation-3450100/sqlite3.c": "app/utils/sqlite/sqlite3.c"
+      }
+    }
+  ],
+  "gits": [
     {
-      "type": "git",
       "url": "https://github.com/ocornut/imgui.git",
       "temp_dir": "temp_imgui",
-      "files": [
-        { "src": "temp_imgui/*.h", "dest": "app/utils/imgui/" },
-        { "src": "temp_imgui/*.cpp", "dest": "app/utils/imgui/" },
-        { "src": "temp_imgui/backends/imgui_impl_win32.*", "dest": "app/utils/imgui/" },
-        { "src": "temp_imgui/backends/imgui_impl_dx11.*", "dest": "app/utils/imgui/" }
-      ]
+      "mappings": {
+        "temp_imgui/*.h": "app/utils/imgui/",
+        "temp_imgui/*.cpp": "app/utils/imgui/",
+        "temp_imgui/backends/imgui_impl_win32.*": "app/utils/imgui/",
+        "temp_imgui/backends/imgui_impl_dx11.*": "app/utils/imgui/"
+      }
     }
   ]
 }
