@@ -40,53 +40,53 @@ jobs:
               exit 1
           }
           
-          $config = Get-Content dependencies.json | ConvertFrom-Json
+          $depConfig = Get-Content dependencies.json | ConvertFrom-Json
           
           # 1. Archivos individuales
-          foreach ($f in$config.files) {
-              Write-Host "Procesando archivo: $($f.url) -> $($f.dest)"
-              $dir = Split-Path$f.dest
-              if ($dir -and -not (Test-Path$dir)) { 
-                  New-Item -ItemType Directory -Force -Path $dir | Out-Null 
+          foreach ($fileEntry in$depConfig.files) {
+              Write-Host "Procesando archivo: $($fileEntry.url) -> $($fileEntry.dest)"
+              $targetDir = Split-Path$fileEntry.dest
+              if ($targetDir -and -not (Test-Path$targetDir)) { 
+                  New-Item -ItemType Directory -Force -Path $targetDir | Out-Null 
               }
-              Invoke-WebRequest -Uri $f.url -OutFile$f.dest
+              Invoke-WebRequest -Uri $fileEntry.url -OutFile$fileEntry.dest
           }
           
           # 2. Archivos ZIP
-          foreach ($z in$config.zips) {
-              Write-Host "Procesando ZIP: $($z.url)"
-              Invoke-WebRequest -Uri $z.url -OutFile "temp_dl.zip"
-              Expand-Archive -Path "temp_dl.zip" -DestinationPath $z.extract_path -Force
+          foreach ($zipEntry in$depConfig.zips) {
+              Write-Host "Procesando ZIP: $($zipEntry.url)"
+              Invoke-WebRequest -Uri $zipEntry.url -OutFile "temp_dl.zip"
+              Expand-Archive -Path "temp_dl.zip" -DestinationPath $zipEntry.extract_path -Force
               
-              foreach ($key in $z.mappings.PSObject.Properties.Name) {$destPath = $z.mappings.$key
-                  $destDir = Split-Path$destPath
-                  if ($destDir -and -not (Test-Path$destDir)) { 
-                      New-Item -ItemType Directory -Force -Path $destDir | Out-Null 
+              foreach ($mappingKey in $zipEntry.mappings.PSObject.Properties.Name) {$destinationPath = $zipEntry.mappings.$mappingKey
+                  $destinationDir = Split-Path$destinationPath
+                  if ($destinationDir -and -not (Test-Path$destinationDir)) { 
+                      New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null 
                   }
-                  Copy-Item -Path $key -Destination$destPath -Force
+                  Copy-Item -Path $mappingKey -Destination$destinationPath -Force
               }
               Remove-Item "temp_dl.zip" -Force
-              Remove-Item $z.extract_path -Recurse -Force
+              Remove-Item $zipEntry.extract_path -Recurse -Force
           }
           
           # 3. Repositorios Git
-          foreach ($g in$config.gits) {
-              Write-Host "Procesando Git: $($g.url)"
-              if (Test-Path $g.temp_dir) { 
-                  Remove-Item $g.temp_dir -Recurse -Force 
+          foreach ($gitEntry in$depConfig.gits) {
+              Write-Host "Procesando Git: $($gitEntry.url)"
+              if (Test-Path $gitEntry.temp_dir) { 
+                  Remove-Item $gitEntry.temp_dir -Recurse -Force 
               }
-              git clone --depth 1 $g.url $g.temp_dir
+              git clone --depth 1 $gitEntry.url $gitEntry.temp_dir
               
-              foreach ($key in $g.mappings.PSObject.Properties.Name) {$destPath = $g.mappings.$key
-                  $destDir = Split-Path$destPath
-                  if ($destDir -and -not (Test-Path$destDir)) { 
-                      New-Item -ItemType Directory -Force -Path $destDir | Out-Null 
+              foreach ($mappingKey in $gitEntry.mappings.PSObject.Properties.Name) {$destinationPath = $gitEntry.mappings.$mappingKey
+                  $destinationDir = Split-Path$destinationPath
+                  if ($destinationDir -and -not (Test-Path$destinationDir)) { 
+                      New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null 
                   }
-                  Copy-Item -Path $key -Destination$destPath -Force
+                  Copy-Item -Path $mappingKey -Destination$destinationPath -Force
               }
-              Remove-Item $g.temp_dir -Recurse -Force
+              Remove-Item $gitEntry.temp_dir -Recurse -Force
           }
-          Write-Host "¡Todas las dependencias se descargaron y organizaron con éxito!"
+          Write-Host "¡Todas las dependencias se leyeron del JSON y se organizaron con éxito!"
 
       - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
         shell: pwsh
