@@ -9,9 +9,9 @@ namespace GuiStyle {
         style.FrameRounding = 5.0f;
         
         ImVec4* colors = style.Colors;
-        colors[ImGuiCol_WindowBg]      = ImVec4(0.04f, 0.04f, 0.07f, 1.00f);
-        colors[ImGuiCol_Button]        = ImVec4(0.003f, 0.725f, 0.992f, 1.00f);
-        colors[ImGuiCol_ButtonHovered] = ImVec4(0.00f, 0.211f, 0.952f, 1.00f);
-        colors[ImGuiCol_ButtonActive]  = ImVec4(0.002f, 0.15f, 0.70f, 1.00f);
+        colors[ImGuiCol_WindowBg]      = ImVec4(0.05f, 0.06f, 0.10f, 1.00f);
+        colors[ImGuiCol_Button]        = ImVec4(0.00f, 0.33f, 0.98f, 1.00f);
+        colors[ImGuiCol_ButtonHovered] = ImVec4(0.10f, 0.43f, 1.00f, 1.00f);
+        colors[ImGuiCol_ButtonActive]  = ImVec4(0.00f, 0.25f, 0.80f, 1.00f);
     }
 }
