@@ -1,6 +1,6 @@
 #pragma once
-#include "../utils/databaseUtil.hpp"
-#include "../utils/loggerUtil.hpp"
+#include "../utils/data/databaseUtil.hpp"
+#include "../utils/core/loggerUtil.hpp"
 #include "../daos/typeDao.hpp"
 
 class DatabaseManager {

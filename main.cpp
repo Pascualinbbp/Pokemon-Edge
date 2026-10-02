@@ -1,6 +1,7 @@
 #include "app/managers/appManager.hpp"
-#include "app/utils/loggerUtil.hpp"
+#include "app/utils/core/loggerUtil.hpp"
 #include <exception>
+#include <string>
 
 int main() {
     try {

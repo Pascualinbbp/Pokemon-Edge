@@ -1,6 +1,6 @@
 #pragma once
-#include "scene.hpp"
-#include "renderer3D.hpp"
+#include "../world/scene.hpp"
+#include "../render/renderer3D.hpp"
 #include "input.hpp"
 
 class GameEngine {

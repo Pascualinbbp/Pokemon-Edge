@@ -1,22 +1,19 @@
 #pragma once
 #include "imgui.h"
-#include "../mainWindow.hpp"
+#include "../gameState.hpp"
+#include "../style/guiLayout.hpp"
 
 namespace MenuComponent {
     inline void render(GameState& state) {
-        ImVec2 windowSize = ImGui::GetWindowSize();
-        
-        ImGui::SetCursorPosY(windowSize.y * 0.3f);
-        float btnWidth = 340.0f;
-        
-        ImGui::SetCursorPosX((windowSize.x - btnWidth) * 0.5f);
-        if (ImGui::Button("NUEVA PARTIDA", ImVec2(btnWidth, 48))) {
-            state = GameState::PLAYING; // ¡Cambio de estado!
+        const ImVec2 buttonSize(340.0f, 48.0f);
+
+        ImGui::SetCursorPosY(ImGui::GetWindowSize().y * 0.3f);
+        if (GuiLayout::centeredButton("NUEVA PARTIDA", buttonSize)) {
+            state = GameState::PLAYING;
         }
 
         ImGui::Dummy(ImVec2(0.0f, 15.0f));
-        ImGui::SetCursorPosX((windowSize.x - btnWidth) * 0.5f);
-        if (ImGui::Button("VOLVER AL TÍTULO", ImVec2(btnWidth, 48))) {
+        if (GuiLayout::centeredButton("VOLVER AL TÍTULO", buttonSize)) {
             state = GameState::TITLE_SCREEN;
         }
     }

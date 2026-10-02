@@ -1,6 +1,6 @@
 #pragma once
-#include "../gui/mainWindow.hpp"
-#include "../utils/loggerUtil.hpp"
+#include "../gui/window/mainWindow.hpp"
+#include "../utils/core/loggerUtil.hpp"
 
 class GuiManager {
 public:

@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
-#include "../utils/updateUtil.hpp"
-#include "../utils/loggerUtil.hpp"
+#include "../utils/network/updateUtil.hpp"
+#include "../utils/core/loggerUtil.hpp"
 
 class UpdateManager {
 public:

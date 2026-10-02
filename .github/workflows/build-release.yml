@@ -16,96 +16,69 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 🏷️ Extraer Configuración del Release
-        id: config
         shell: pwsh
         run: |
-          Write-Host "[LOG] Iniciando lectura de release_config.json..."
-          $json = Get-Content release_config.json | ConvertFrom-Json
-          Write-Host "[LOG] release_config.json leído con éxito."
-          
-          echo "TAG=$($json.configs.tag)" >> $env:GITHUB_ENV
-          echo "REL_NAME=$($json.configs.name)" >> $env:GITHUB_ENV
-          echo "DESC=$($json.configs.description)" >> $env:GITHUB_ENV
-          echo "PRE=$($json.configs.prerelease.ToString().ToLower())" >> $env:GITHUB_ENV
-          echo "LATEST=$($json.configs.make_latest.ToString().ToLower())" >> $env:GITHUB_ENV
-          
-          New-Item -ItemType Directory -Force -Path "app/data"
-          $json.userjson | ConvertTo-Json | Out-File "app/data/version.json" -Encoding utf8
-          $json.userjson | ConvertTo-Json | Out-File "version.json" -Encoding utf8
-          Write-Host "[LOG] Configuración de entorno y versiones guardada correctamente."
+          $json = Get-Content release_config.json -Raw | ConvertFrom-Json
+          $c = $json.configs
 
-      - name: 📥 Descargar Dependencias desde dependencies.json (Con Logs Detallados)
+          @(
+            "TAG=$($c.tag)",
+            "REL_NAME=$($c.name)",
+            "DESC=$($c.description)",
+            "PRE=$($c.prerelease.ToString().ToLower())",
+            "LATEST=$($c.make_latest.ToString().ToLower())"
+          ) | Add-Content -Path $env:GITHUB_ENV
+
+          $versionJson = $json.userjson | ConvertTo-Json
+          New-Item -ItemType Directory -Force -Path "app/data" | Out-Null
+          $versionJson | Out-File "app/data/version.json" -Encoding utf8
+          $versionJson | Out-File "version.json" -Encoding utf8
+          Write-Host "[LOG] Configuración de release y versión guardadas."
+
+      - name: 📥 Descargar Dependencias desde dependencies.json
         shell: pwsh
         run: |
-          Write-Host "[LOG] Paso de dependencias iniciado."
-          if (-not (Test-Path "dependencies.json")) {
-              Write-Error "[FATAL] El archivo dependencies.json no existe en la ruta raíz."
-              exit 1
-          }
-          Write-Host "[LOG] Archivo dependencies.json encontrado. Parseando contenido..."
-          
-          $depConfig = Get-Content dependencies.json | ConvertFrom-Json
-          Write-Host "[LOG] dependencies.json parseado correctamente a objeto PowerShell."
+          $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest es MUCHO más rápido sin barra de progreso
 
-          # 1. Archivos individuales
-          Write-Host "[LOG] --- INICIANDO SECCIÓN DE ARCHIVOS INDIVIDUALES ---"
-          foreach ($fileEntry in @($depConfig.files)) {
-              Write-Host "[LOG] Procesando archivo individual -> URL: $($fileEntry.url) | Destino: $($fileEntry.dest)"
-              $targetDir = Split-Path $fileEntry.dest
-              if ($targetDir -and -not (Test-Path $targetDir)) { 
-                  Write-Host "[LOG] Creando directorio destino faltante: $targetDir"
-                  New-Item -ItemType Directory -Force -Path $targetDir | Out-Null 
+          if (-not (Test-Path "dependencies.json")) { throw "dependencies.json no existe en la raíz." }
+          $dep = Get-Content dependencies.json -Raw | ConvertFrom-Json
+
+          function Copy-Mappings($mappings) {
+              if (-not $mappings) { return }
+              foreach ($src in $mappings.PSObject.Properties.Name) {
+                  $dest = $mappings.$src
+                  $dir = Split-Path $dest
+                  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+                  Write-Host "[LOG] Copiando $src -> $dest"
+                  Copy-Item -Path $src -Destination $dest -Force
               }
-              Write-Host "[LOG] Descargando con Invoke-WebRequest..."
-              Invoke-WebRequest -Uri $fileEntry.url -OutFile $fileEntry.dest
-              Write-Host "[LOG] Descarga completada para: $($fileEntry.dest)"
           }
-          
-          # 2. Archivos ZIP
-          Write-Host "[LOG] --- INICIANDO SECCIÓN DE ARCHIVOS ZIP ---"
-          foreach ($zipEntry in @($depConfig.zips)) {
-              Write-Host "[LOG] Procesando ZIP -> URL: $($zipEntry.url) | Extracción: $($zipEntry.extract_path)"
-              Write-Host "[LOG] Descargando archivo ZIP temporal..."
-              Invoke-WebRequest -Uri $zipEntry.url -OutFile "temp_dl.zip"
-              Write-Host "[LOG] Expandiendo archivo ZIP..."
-              Expand-Archive -Path "temp_dl.zip" -DestinationPath $zipEntry.extract_path -Force
-              
-              foreach ($mappingKey in @($zipEntry.mappings.PSObject.Properties.Name)) {$destinationPath = $zipEntry.mappings.$mappingKey
-                  Write-Host "[LOG] Mapeando ZIP: $mappingKey ->$destinationPath"
-                  $destinationDir = Split-Path $destinationPath
-                  if ($destinationDir -and -not (Test-Path $destinationDir)) { 
-                      New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null 
-                  }
-                  Copy-Item -Path $mappingKey -Destination $destinationPath -Force
-              }
-              Write-Host "[LOG] Limpiando archivos temporales de ZIP..."
+
+          foreach ($f in $dep.files) {
+              Write-Host "[LOG] Archivo: $($f.url) -> $($f.dest)"
+              $dir = Split-Path $f.dest
+              if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+              Invoke-WebRequest -Uri $f.url -OutFile $f.dest
+          }
+
+          foreach ($z in $dep.zips) {
+              Write-Host "[LOG] ZIP: $($z.url)"
+              Invoke-WebRequest -Uri $z.url -OutFile "temp_dl.zip"
+              Expand-Archive -Path "temp_dl.zip" -DestinationPath $z.extract_path -Force
+              Copy-Mappings $z.mappings
               Remove-Item "temp_dl.zip" -Force
-              Remove-Item $zipEntry.extract_path -Recurse -Force
+              Remove-Item $z.extract_path -Recurse -Force
           }
-          
-          # 3. Repositorios Git
-          Write-Host "[LOG] --- INICIANDO SECCIÓN DE REPOSITORIOS GIT ---"
-          foreach ($gitEntry in @($depConfig.gits)) {
-              Write-Host "[LOG] Procesando Git -> URL: $($gitEntry.url) | Carpeta temporal: $($gitEntry.temp_dir)"
-              if (Test-Path $gitEntry.temp_dir) { 
-                  Write-Host "[LOG] Eliminando directorio temporal existente previamente: $($gitEntry.temp_dir)"
-                  Remove-Item $gitEntry.temp_dir -Recurse -Force 
-              }
-              Write-Host "[LOG] Ejecutando git clone --depth 1..."
-              git clone --depth 1 $gitEntry.url $gitEntry.temp_dir
-              
-              foreach ($mappingKey in @($gitEntry.mappings.PSObject.Properties.Name)) {$destinationPath = $gitEntry.mappings.$mappingKey
-                  Write-Host "[LOG] Mapeando Git: $mappingKey ->$destinationPath"
-                  $destinationDir = Split-Path $destinationPath
-                  if ($destinationDir -and -not (Test-Path $destinationDir)) { 
-                      New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null 
-                  }
-                  Copy-Item -Path $mappingKey -Destination $destinationPath -Force
-              }
-              Write-Host "[LOG] Limpiando directorio temporal Git: $($gitEntry.temp_dir)..."
-              Remove-Item $gitEntry.temp_dir -Recurse -Force
+
+          foreach ($g in $dep.gits) {
+              Write-Host "[LOG] Git: $($g.url)"
+              if (Test-Path $g.temp_dir) { Remove-Item $g.temp_dir -Recurse -Force }
+              git clone --quiet --depth 1 $g.url $g.temp_dir
+              if ($LASTEXITCODE -ne 0) { throw "git clone falló: $($g.url)" }
+              Copy-Mappings $g.mappings
+              Remove-Item $g.temp_dir -Recurse -Force
           }
-          Write-Host "[LOG] ¡Todas las dependencias se leyeron del JSON y se organizaron con éxito!"
+          Write-Host "[LOG] Dependencias listas."
 
       - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
         shell: pwsh
@@ -113,57 +86,56 @@ jobs:
           DB_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
         run: |
           $dbPath = "app/data/db/pokemonEdge.db"
-          $keyVal = if ($env:DB_KEY) { [int]$env:DB_KEY } else { 90 }
-          
-          if (Test-Path $dbPath) {
-              Write-Host "Cifrando base de datos para compilación con clave: $keyVal..."
-              $bytes = [System.IO.File]::ReadAllBytes($dbPath)
-              for ($i = 0; $i -lt$bytes.Length; $i++) {$bytes[$i] =$bytes[$i] -bxor $keyVal
+          if (-not (Test-Path $dbPath)) { throw "No se encontró la base de datos en $dbPath" }
+
+          $key = if ($env:DB_KEY) { [byte][int]$env:DB_KEY } else { [byte]90 }
+
+          # XOR en C# compilado: miles de veces más rápido que un bucle de PowerShell
+          Add-Type -TypeDefinition @'
+          public static class XorCipher {
+              public static void Apply(byte[] data, byte key) {
+                  for (int i = 0; i < data.Length; i++) data[i] ^= key;
               }
-              [System.IO.File]::WriteAllBytes($dbPath,$bytes)
-              Write-Host "Base de datos cifrada correctamente."
-          } else {
-              Write-Error "No se encontró el archivo de base de datos en $dbPath"
-              exit 1
           }
+          '@
+          $bytes = [System.IO.File]::ReadAllBytes($dbPath)
+          [XorCipher]::Apply($bytes, $key)
+          [System.IO.File]::WriteAllBytes($dbPath, $bytes)
+
+          # La clave efectiva (con el valor por defecto si no hay secret) se reutiliza al compilar
+          "DB_KEY_EFFECTIVE=$key" | Add-Content -Path $env:GITHUB_ENV
+          Write-Host "[LOG] Base de datos cifrada."
 
       - name: 🔨 Compilar Motor con ImGui y DirectX 11 (Sin Consola)
         shell: cmd
-        env:
-          DB_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
         run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.X86.X64 -property installationPath`) do (
-            set "VS_PATH=%%i"
-          )
-          if "%VS_PATH%"=="" (
-            echo Error: No se encontró Visual Studio con las herramientas de C++.
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
+          if not defined VS_PATH (
+            echo Error: No se encontro Visual Studio con las herramientas de C++.
             exit /b 1
           )
-          echo Usando Visual Studio en: "%VS_PATH%"
-          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
-          
-          rc.exe resources.rc
-          
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+
+          rc.exe /nologo resources.rc || exit /b 1
+
+          if not exist build mkdir build
           dir /b /s app\*.cpp > sources.txt
           echo main.cpp >> sources.txt
-          
-          cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite /I app/utils/imgui @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
+
+          cl.exe /nologo /MP /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY_EFFECTIVE% /I app/utils/sqlite /I app/utils/imgui /Fo:build\ @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "release_build/app/data/db"
-          
-          Copy-Item -Path "PokemonEdge.exe" -Destination "release_build/"
-          Copy-Item -Path "app/data/version.json" -Destination "release_build/app/data/version.json"
-          if (Test-Path "app/data/logo.png") { Copy-Item -Path "app/data/logo.png" -Destination "release_build/app/data/" }
+          $out = "release_build"
+          New-Item -ItemType Directory -Force -Path "$out/app/data/db" | Out-Null
 
-          Compress-Archive -Path "release_build/*" -DestinationPath "PokemonEdge.zip" -Force
+          Copy-Item "PokemonEdge.exe" "$out/"
+          Copy-Item "app/data/version.json" "$out/app/data/"
+          if (Test-Path "app/data/logo.png") { Copy-Item "app/data/logo.png" "$out/app/data/" }
+          if (Test-Path "app/data/icon.ico") { Copy-Item "app/data/icon.ico" "$out/app/data/" }
 
-      - name: 🔄 Restaurar Base de Datos Original en el Repo
-        shell: pwsh
-        run: |
-          git checkout app/data/db/pokemonEdge.db
+          Compress-Archive -Path "$out/*" -DestinationPath "PokemonEdge.zip" -Force
 
       - name: 🚀 Publicar en GitHub
         uses: softprops/action-gh-release@v2

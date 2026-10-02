@@ -1,41 +1,29 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "../utils/sqliteUtil.hpp"
-
-struct PokemonType {
-    int id;
-    std::string name;
-};
+#include "../models/pokemonType.hpp"
+#include "../utils/data/sqliteUtil.hpp"
 
 class TypeDao {
 public:
-    PokemonType findById(int id) {
-        PokemonType pType = { -1, "" };
-        std::string sql = "SELECT id, name FROM type WHERE id = ?;";
-        std::vector<std::string> params = { std::to_string(id) };
-
-        auto results = SqliteUtil::executeSelect(sql, params);
-        
-        if (!results.empty()) {
-            pType.id = std::stoi(results[0]["id"]);
-            pType.name = results[0]["name"];
-        }
-        return pType;
+    PokemonType findById(int id) const {
+        const auto rows = SqliteUtil::executeSelect(SELECT_BY_ID, { std::to_string(id) });
+        return rows.empty() ? PokemonType{} : fromRow(rows.front());
     }
 
-    std::vector<PokemonType> findAll() {
+    std::vector<PokemonType> findAll() const {
+        const auto rows = SqliteUtil::executeSelect(SELECT_ALL);
         std::vector<PokemonType> types;
-        std::string sql = "SELECT id, name FROM type;";
-
-        auto results = SqliteUtil::executeSelect(sql);
-        
-        for (const auto& row : results) {
-            PokemonType pType;
-            pType.id = std::stoi(row.at("id"));
-            pType.name = row.at("name");
-            types.push_back(pType);
-        }
+        types.reserve(rows.size());
+        for (const auto& row : rows) types.push_back(fromRow(row));
         return types;
+    }
+
+private:
+    static constexpr const char* SELECT_ALL = "SELECT id, name FROM type;";
+    static constexpr const char* SELECT_BY_ID = "SELECT id, name FROM type WHERE id = ?;";
+
+    static PokemonType fromRow(const SqliteUtil::Row& row) {
+        return { std::stoi(row.at("id")), row.at("name") };
     }
 };
