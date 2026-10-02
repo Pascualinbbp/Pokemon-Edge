@@ -3,8 +3,8 @@
 #include "components/titleComponent.hpp"
 #include "components/menuComponent.hpp"
 #include "../utils/loggerUtil.hpp"
-#include "../engine/gameEngine.hpp" // Nuevo Motor 3D
-#include "../engine/input.hpp"      // Nuevo Input
+#include "../engine/gameEngine.hpp" // Motor 3D
+#include "../engine/input.hpp"      // Input
 
 #include <string>
 #include "imgui.h"
@@ -18,7 +18,7 @@ static ID3D11Device* g_pd3dDevice = nullptr;
 static ID3D11DeviceContext* g_pd3dDeviceContext = nullptr;
 static IDXGISwapChain* g_pSwapChain = nullptr;
 static ID3D11RenderTargetView* g_mainRenderTargetView = nullptr;
-static ID3D11DepthStencilView* g_depthStencilView = nullptr; // NUEVO: Z-Buffer
+static ID3D11DepthStencilView* g_depthStencilView = nullptr; 
 static ID3D11ShaderResourceView* g_logoTexture = nullptr;
 static int g_logoWidth = 0, g_logoHeight = 0;
 static HWND g_hwnd = nullptr;
@@ -31,13 +31,11 @@ ID3D11DeviceContext* MainWindow::getContext() { return g_pd3dDeviceContext; }
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-// Función auxiliar para recrear los buffers (incluyendo profundidad)
 void CreateRenderTarget() {
     ID3D11Texture2D* pBackBuffer = nullptr;
     g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
     g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
     
-    // Crear buffer de profundidad
     D3D11_TEXTURE2D_DESC descDepth = {};
     D3D11_TEXTURE2D_DESC bbDesc;
     pBackBuffer->GetDesc(&bbDesc);
@@ -69,7 +67,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 CreateRenderTarget();
             }
             return 0;
-        // NUEVO: Captura de teclado básica
         case WM_KEYDOWN:
             if (wParam == 'W') g_inputState.up = true;
             if (wParam == 'S') g_inputState.down = true;
@@ -103,7 +100,6 @@ void MainWindow::init() {
     
     CreateRenderTarget();
 
-    // Carga de Logo (Simplificada por espacio)
     unsigned char* image_data = stbi_load("app/data/logo.png", &g_logoWidth, &g_logoHeight, nullptr, 4);
     if (image_data) {
         D3D11_TEXTURE2D_DESC desc = {};
@@ -126,8 +122,8 @@ void MainWindow::init() {
     ImGui_ImplWin32_Init(g_hwnd);
     ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
 
-    // Inicializamos el motor 3D
-    g_gameEngine.init(g_pd3dDevice, g_pd3dDeviceContext);
+    // FIX: Ahora solo le pasamos g_pd3dDevice (1 argumento)
+    g_gameEngine.init(g_pd3dDevice);
 }
 
 void MainWindow::cleanup() {
@@ -148,7 +144,6 @@ void MainWindow::run() {
     GameState currentState = GameState::TITLE_SCREEN;
     bool needsRedraw = true;
 
-    // Reloj de alto rendimiento para DeltaTime
     LARGE_INTEGER freq, lastTime, currentTime;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&lastTime);
@@ -163,29 +158,24 @@ void MainWindow::run() {
         }
         if (done) break;
 
-        // Si estamos jugando, el bucle NO debe detenerse nunca
         if (!needsRedraw && currentState != GameState::PLAYING) {
             WaitMessage();
             continue;
         }
 
-        // Calcular Delta Time
         QueryPerformanceCounter(&currentTime);
         float dt = static_cast<float>(currentTime.QuadPart - lastTime.QuadPart) / freq.QuadPart;
         lastTime = currentTime;
 
-        // Actualizar lógica 3D si estamos jugando
         if (currentState == GameState::PLAYING) {
             g_gameEngine.update(dt, g_inputState);
         }
 
-        // Renderizado
-        const float clear_color[4] = { 0.4f, 0.6f, 0.9f, 1.00f }; // Cielo azul claro
+        const float clear_color[4] = { 0.4f, 0.6f, 0.9f, 1.00f }; 
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, g_depthStencilView);
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color);
         g_pd3dDeviceContext->ClearDepthStencilView(g_depthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
 
-        // Si estamos jugando, renderizamos el mundo 3D DEBAJO de ImGui
         if (currentState == GameState::PLAYING) {
             RECT rc;
             GetClientRect(g_hwnd, &rc);
@@ -198,7 +188,6 @@ void MainWindow::run() {
 
         GameState prevState = currentState;
         
-        // ImGui UI Render
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
         ImGui::Begin("MainCanvas", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus);
@@ -207,7 +196,6 @@ void MainWindow::run() {
             case GameState::TITLE_SCREEN: TitleComponent::render(currentState, g_logoTexture, g_logoWidth, g_logoHeight); break;
             case GameState::MAIN_MENU: MenuComponent::render(currentState); break;
             case GameState::PLAYING:
-                // UI in-game simple
                 ImGui::SetCursorPos(ImVec2(10, 10));
                 ImGui::TextColored(ImVec4(1,1,1,1), "Controles: WASD. FPS: %.1f", ImGui::GetIO().Framerate);
                 if (ImGui::Button("SALIR AL MENU")) currentState = GameState::MAIN_MENU;

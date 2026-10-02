@@ -32,33 +32,41 @@ jobs:
           
           $json.userjson | ConvertTo-Json | Out-File "version.json" -Encoding utf8
 
-      - name: 📥 Descargar nlohmann/json, Dear ImGui y stb_image
+      - name: 📥 Descargar Dependencias (Automático vía dependencies.json)
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "app/utils/nlohmann"
-          Invoke-WebRequest -Uri "https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp" -OutFile "app/utils/nlohmann/json.hpp"
-
-          git clone --depth 1 https://github.com/ocornut/imgui.git temp_imgui
-          New-Item -ItemType Directory -Force -Path "app/utils/imgui"
-          
-          # Copiar todas las cabeceras raíz de ImGui (incluyendo imconfig.h)
-          Copy-Item "temp_imgui/*.h" -Destination "app/utils/imgui/"
-          Copy-Item "temp_imgui/*.cpp" -Destination "app/utils/imgui/"
-          
-          # Copiar backends de Win32 y DirectX 11
-          Copy-Item "temp_imgui/backends/imgui_impl_win32.*" -Destination "app/utils/imgui/"
-          Copy-Item "temp_imgui/backends/imgui_impl_dx11.*" -Destination "app/utils/imgui/"
-
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h" -OutFile "app/utils/imgui/stb_image.h"
-
-      - name: 📥 Descargar SQLite3 (Amalgamation)
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://sqlite.org/2024/sqlite-amalgamation-3450100.zip" -OutFile "sqlite.zip"
-          Expand-Archive -Path "sqlite.zip" -DestinationPath "sqlite_ext"
-          New-Item -ItemType Directory -Force -Path "app/utils/sqlite"
-          Copy-Item -Path "sqlite_ext/sqlite-amalgamation-3450100/sqlite3.h" -Destination "app/utils/sqlite/sqlite3.h"
-          Copy-Item -Path "sqlite_ext/sqlite-amalgamation-3450100/sqlite3.c" -Destination "app/utils/sqlite/sqlite3.c"
+          if (-not (Test-Path "dependencies.json")) {
+              Write-Error "Fallo crítico: El archivo dependencies.json no existe en el repositorio."
+              exit 1
+          }
+          $json = Get-Content dependencies.json | ConvertFrom-Json
+          foreach ($dep in$json.downloads) {
+              Write-Host "-> Obteniendo recurso: $($dep.url)"
+              if ($dep.type -eq 'file') {
+                  $destDir = Split-Path$dep.dest
+                  if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
+                  Invoke-WebRequest -Uri $dep.url -OutFile$dep.dest
+              }
+              elseif ($dep.type -eq 'zip') {
+                  Invoke-WebRequest -Uri $dep.url -OutFile "temp.zip"
+                  Expand-Archive -Path "temp.zip" -DestinationPath $dep.temp_dir -Force
+                  foreach ($file in$dep.files) {
+                      $destDir = Split-Path$file.dest
+                      if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
+                      Copy-Item -Path $file.src -Destination$file.dest -Force
+                  }
+                  Remove-Item "temp.zip" -Force
+              }
+              elseif ($dep.type -eq 'git') {
+                  git clone --depth 1 $dep.url $dep.temp_dir
+                  foreach ($file in$dep.files) {
+                      $destDir = Split-Path$file.dest
+                      if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
+                      Copy-Item -Path $file.src -Destination$file.dest -Force
+                  }
+              }
+          }
+          Write-Host "✅ ¡Todas las dependencias descargadas correctamente!"
 
       - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
         shell: pwsh
@@ -71,10 +79,9 @@ jobs:
           if (Test-Path $dbPath) {
               Write-Host "Cifrando base de datos para compilación con clave: $keyVal..."
               $bytes = [System.IO.File]::ReadAllBytes($dbPath)
-              for ($i = 0; $i -lt $bytes.Length; $i++) {
-                  $bytes[$i] = $bytes[$i] -bxor $keyVal
+              for ($i = 0; $i -lt$bytes.Length; $i++) {$bytes[$i] =$bytes[$i] -bxor$keyVal
               }
-              [System.IO.File]::WriteAllBytes($dbPath, $bytes)
+              [System.IO.File]::WriteAllBytes($dbPath,$bytes)
           } else {
               Write-Error "No se encontró el archivo de base de datos en $dbPath"
               exit 1
@@ -89,7 +96,7 @@ jobs:
             set "VS_PATH=%%i"
           )
           if "%VS_PATH%"=="" (
-            echo Error: No se encontró Visual Studio con las herramientas de C++.
+            echo Error: No se encontro Visual Studio con las herramientas de C++.
             exit /b 1
           )
           echo Usando Visual Studio en: "%VS_PATH%"
@@ -97,13 +104,13 @@ jobs:
           
           rc.exe resources.rc
           
-          :: Recolectar automáticamente main.cpp y todos los .cpp dentro de la carpeta app (incluyendo GUI e ImGui)
+          :: Recolectar automáticamente main.cpp y todos los .cpp dentro de la carpeta app
           dir /b /s app\*.cpp > sources.txt
           echo main.cpp >> sources.txt
           
           cl.exe /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY% /I app/utils/sqlite /I app/utils/imgui @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
-      - name: 🗂️ Preparar ZIP Final
+      - name: 🗂️️ Preparar ZIP Final
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "release_build/app/data/db"
