@@ -32,27 +32,38 @@ jobs:
           
           $json.userjson | ConvertTo-Json | Out-File "version.json" -Encoding utf8
 
-      - name: 📥 Descargar Dependencias Automatizadas vía dependencies.json
+      - name: 📥 Descargar Dependencias desde dependencies.json
         shell: pwsh
         run: |
+          if (-not (Test-Path "dependencies.json")) {
+              Write-Error "Fallo crítico: El archivo dependencies.json no existe."
+              exit 1
+          }
+          
           $config = Get-Content dependencies.json | ConvertFrom-Json
           
           # 1. Archivos individuales
           foreach ($f in$config.files) {
+              Write-Host "Procesando archivo: $($f.url) -> $($f.dest)"
               $dir = Split-Path$f.dest
-              if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path$dir | Out-Null }
-              Write-Host "Descargando archivo: $($f.url)"
+              if ($dir -and -not (Test-Path$dir)) { 
+                  New-Item -ItemType Directory -Force -Path $dir | Out-Null 
+              }
               Invoke-WebRequest -Uri $f.url -OutFile$f.dest
           }
           
           # 2. Archivos ZIP
           foreach ($z in$config.zips) {
-              Write-Host "Descargando ZIP: $($z.url)"
+              Write-Host "Procesando ZIP: $($z.url)"
               Invoke-WebRequest -Uri $z.url -OutFile "temp_dl.zip"
               Expand-Archive -Path "temp_dl.zip" -DestinationPath $z.extract_path -Force
-              foreach ($key in $z.mappings.PSObject.Properties.Name) {$destDir = Split-Path $z.mappings.$key
-                  if ($destDir -and -not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
-                  Copy-Item -Path $key -Destination $z.mappings.$key -Force
+              
+              foreach ($key in $z.mappings.PSObject.Properties.Name) {$destPath = $z.mappings.$key
+                  $destDir = Split-Path$destPath
+                  if ($destDir -and -not (Test-Path$destDir)) { 
+                      New-Item -ItemType Directory -Force -Path $destDir | Out-Null 
+                  }
+                  Copy-Item -Path $key -Destination$destPath -Force
               }
               Remove-Item "temp_dl.zip" -Force
               Remove-Item $z.extract_path -Recurse -Force
@@ -60,16 +71,22 @@ jobs:
           
           # 3. Repositorios Git
           foreach ($g in$config.gits) {
-              if (Test-Path $g.temp_dir) { Remove-Item$g.temp_dir -Recurse -Force }
-              Write-Host "Clonando repositorio Git: $($g.url)"
+              Write-Host "Procesando Git: $($g.url)"
+              if (Test-Path $g.temp_dir) { 
+                  Remove-Item $g.temp_dir -Recurse -Force 
+              }
               git clone --depth 1 $g.url $g.temp_dir
-              foreach ($key in $g.mappings.PSObject.Properties.Name) {$destDir = Split-Path $g.mappings.$key
-                  if ($destDir -and -not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path$destDir | Out-Null }
-                  Copy-Item -Path $key -Destination $g.mappings.$key -Force
+              
+              foreach ($key in $g.mappings.PSObject.Properties.Name) {$destPath = $g.mappings.$key
+                  $destDir = Split-Path$destPath
+                  if ($destDir -and -not (Test-Path$destDir)) { 
+                      New-Item -ItemType Directory -Force -Path $destDir | Out-Null 
+                  }
+                  Copy-Item -Path $key -Destination$destPath -Force
               }
               Remove-Item $g.temp_dir -Recurse -Force
           }
-          Write-Host "¡Todas las dependencias procesadas con éxito!"
+          Write-Host "¡Todas las dependencias se descargaron y organizaron con éxito!"
 
       - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
         shell: pwsh
@@ -107,7 +124,6 @@ jobs:
           
           rc.exe resources.rc
           
-          :: Recolectar automáticamente main.cpp y todos los .cpp dentro de la carpeta app (incluyendo GUI e ImGui)
           dir /b /s app\*.cpp > sources.txt
           echo main.cpp >> sources.txt
           
