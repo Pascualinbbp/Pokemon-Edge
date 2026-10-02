@@ -51,7 +51,7 @@ jobs:
           Write-Host "[LOG] --- INICIANDO SECCIÓN DE ARCHIVOS INDIVIDUALES ---"
           foreach ($fileEntry in @($depConfig.files)) {
               Write-Host "[LOG] Procesando archivo individual -> URL: $($fileEntry.url) | Destino: $($fileEntry.dest)"
-              $targetDir = Split-Path $fileEntry.dest
+              $targetDir = Split-Path$fileEntry.dest
               if ($targetDir -and -not (Test-Path$targetDir)) { 
                   Write-Host "[LOG] Creando directorio destino faltante: $targetDir"
                   New-Item -ItemType Directory -Force -Path $targetDir | Out-Null 
