@@ -11,7 +11,7 @@ namespace MenuComponent {
         
         ImGui::SetCursorPosX((windowSize.x - btnWidth) * 0.5f);
         if (ImGui::Button("NUEVA PARTIDA", ImVec2(btnWidth, 48))) {
-            // Placeholder
+            state = GameState::PLAYING; // ¡Cambio de estado!
         }
 
         ImGui::Dummy(ImVec2(0.0f, 15.0f));
