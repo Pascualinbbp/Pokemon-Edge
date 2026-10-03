@@ -1,8 +1,6 @@
 #include "renderer3D.hpp"
 #include "../../utils/graphics/d3dUtil.hpp"
-#include "../../utils/core/loggerUtil.hpp"
 #include <algorithm>
-#include <d3dcompiler.h>
 #include <cmath>
 #include <cstring>
 
@@ -53,20 +51,6 @@ namespace {
             return float4(0.0f, 0.0f, 0.0f, input.alpha);
         }
     )";
-
-    ComPtr<ID3DBlob> compileShader(const char* entry, const char* target) {
-        ComPtr<ID3DBlob> blob, errors;
-        const HRESULT hr = D3DCompile(kShaderCode, std::strlen(kShaderCode), nullptr, nullptr, nullptr,
-                                    entry, target, D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3,
-                                    0, &blob, &errors);
-        if (FAILED(hr)) {
-            if (errors) {
-                Logger::logError("RENDERER3D", std::string("Error de shader: ") + static_cast<const char*>(errors->GetBufferPointer()));
-            }
-            D3dUtil::check(hr, "D3DCompile");
-        }
-        return blob;
-    }
 }
 
 Renderer3D::Mesh Renderer3D::createMesh(ID3D11Device* device, const void* vertices, UINT vertexCount, UINT stride,
@@ -74,18 +58,10 @@ Renderer3D::Mesh Renderer3D::createMesh(ID3D11Device* device, const void* vertic
     Mesh mesh;
     mesh.indexCount = static_cast<UINT>(indices.size());
     mesh.stride = stride;
-
-    D3D11_BUFFER_DESC desc = {};
-    desc.Usage = D3D11_USAGE_IMMUTABLE;
-    desc.ByteWidth = stride * vertexCount;
-    desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA data = { vertices, 0, 0 };
-    D3dUtil::check(device->CreateBuffer(&desc, &data, &mesh.vertices), "CreateBuffer (vertex)");
-
-    desc.ByteWidth = static_cast<UINT>(sizeof(uint16_t) * indices.size());
-    desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-    data.pSysMem = indices.data();
-    D3dUtil::check(device->CreateBuffer(&desc, &data, &mesh.indices), "CreateBuffer (index)");
+    mesh.vertices = D3dUtil::createBuffer(device, stride * vertexCount, D3D11_BIND_VERTEX_BUFFER,
+        vertices, D3D11_USAGE_IMMUTABLE, "CreateBuffer (vertex)");
+    mesh.indices = D3dUtil::createBuffer(device, static_cast<UINT>(sizeof(uint16_t) * indices.size()), D3D11_BIND_INDEX_BUFFER,
+        indices.data(), D3D11_USAGE_IMMUTABLE, "CreateBuffer (index)");
     return mesh;
 }
 
@@ -185,24 +161,20 @@ Renderer3D::Mesh Renderer3D::createShadowDisc(ID3D11Device* device) {
 }
 
 void Renderer3D::createShadowInstances(ID3D11Device* device, UINT capacity) {
-    D3D11_BUFFER_DESC desc = {};
-    desc.Usage = D3D11_USAGE_DYNAMIC;
-    desc.ByteWidth = static_cast<UINT>(sizeof(ShadowInstance)) * capacity;
-    desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    D3dUtil::check(device->CreateBuffer(&desc, nullptr, &m_shadowInstances), "CreateBuffer (shadow instances)");
+    m_shadowInstances = D3dUtil::createBuffer(device, static_cast<UINT>(sizeof(ShadowInstance)) * capacity,
+        D3D11_BIND_VERTEX_BUFFER, nullptr, D3D11_USAGE_DYNAMIC, "CreateBuffer (shadow instances)");
     m_shadowCapacity = capacity;
 }
 
 void Renderer3D::init(ID3D11Device* device) {
     // 1. Shaders
-    const ComPtr<ID3DBlob> vsBlob = compileShader("VS", "vs_4_0");
-    const ComPtr<ID3DBlob> psBlob = compileShader("PS", "ps_4_0");
+    const ComPtr<ID3DBlob> vsBlob = D3dUtil::compileShader(kShaderCode, "VS", "vs_4_0");
+    const ComPtr<ID3DBlob> psBlob = D3dUtil::compileShader(kShaderCode, "PS", "ps_4_0");
     D3dUtil::check(device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &m_vertexShader), "CreateVertexShader");
     D3dUtil::check(device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &m_pixelShader), "CreatePixelShader");
 
-    const ComPtr<ID3DBlob> shadowVsBlob = compileShader("VS_SHADOW", "vs_4_0");
-    const ComPtr<ID3DBlob> shadowPsBlob = compileShader("PS_SHADOW", "ps_4_0");
+    const ComPtr<ID3DBlob> shadowVsBlob = D3dUtil::compileShader(kShaderCode, "VS_SHADOW", "vs_4_0");
+    const ComPtr<ID3DBlob> shadowPsBlob = D3dUtil::compileShader(kShaderCode, "PS_SHADOW", "ps_4_0");
     D3dUtil::check(device->CreateVertexShader(shadowVsBlob->GetBufferPointer(), shadowVsBlob->GetBufferSize(), nullptr, &m_shadowVertexShader), "CreateVertexShader (shadow)");
     D3dUtil::check(device->CreatePixelShader(shadowPsBlob->GetBufferPointer(), shadowPsBlob->GetBufferSize(), nullptr, &m_shadowPixelShader), "CreatePixelShader (shadow)");
 
@@ -221,11 +193,8 @@ void Renderer3D::init(ID3D11Device* device) {
     D3dUtil::check(device->CreateInputLayout(shadowLayout, _countof(shadowLayout), shadowVsBlob->GetBufferPointer(), shadowVsBlob->GetBufferSize(), &m_shadowLayout), "CreateInputLayout (shadow)");
 
     // 3. Constant buffer
-    D3D11_BUFFER_DESC cbDesc = {};
-    cbDesc.Usage = D3D11_USAGE_DEFAULT;
-    cbDesc.ByteWidth = sizeof(ConstantBuffer);
-    cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    D3dUtil::check(device->CreateBuffer(&cbDesc, nullptr, &m_constantBuffer), "CreateBuffer (constant)");
+    m_constantBuffer = D3dUtil::createBuffer(device, sizeof(ConstantBuffer), D3D11_BIND_CONSTANT_BUFFER,
+        nullptr, D3D11_USAGE_DEFAULT, "CreateBuffer (constant)");
 
     // 4. Estados de las sombras: mezcla alfa y prueba de profundidad sin escribirla.
     D3D11_BLEND_DESC blend = {};

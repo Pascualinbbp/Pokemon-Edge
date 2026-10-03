@@ -12,10 +12,10 @@ namespace LoadingComponent {
     inline void render(GameState& state, float elapsed) {
         const float progress = (std::min)(elapsed / FAKE_DURATION, 1.0f);
 
-        ImGui::SetCursorPosY(ImGui::GetWindowSize().y * 0.45f);
+        GuiLayout::beginAt(0.45f);
         GuiLayout::centeredText("CARGANDO MUNDO...");
+        GuiLayout::gap(GuiLayout::GAP_MEDIUM);
 
-        ImGui::Dummy(ImVec2(0.0f, 15.0f));
         GuiLayout::centerX(GuiLayout::BUTTON_SIZE.x);
         ImGui::ProgressBar(progress, ImVec2(GuiLayout::BUTTON_SIZE.x, 18.0f));
 

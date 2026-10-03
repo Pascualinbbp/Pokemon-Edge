@@ -1,11 +1,11 @@
 #pragma once
-#include <cstdio>
 #include "imgui.h"
 #include "../gameState.hpp"
 #include "../style/guiLayout.hpp"
 #include "../style/guiStyle.hpp"
 #include "../window/guiInput.hpp"
 #include "../../managers/saveManager.hpp"
+#include "../../utils/core/stringUtil.hpp"
 
 // Pantallas con la lista de partidas guardadas (cargar una, o elegir cuál eliminar).
 namespace SlotsComponent {
@@ -17,31 +17,24 @@ namespace SlotsComponent {
             for (int slot = 0; slot < SaveManager::MAX_SLOTS; ++slot) {
                 if (onlyUsed && !slots[slot].used) continue;
 
-                char label[96];
-                std::snprintf(label, sizeof(label), "PARTIDA %d   %s###slot%d", slot + 1, slots[slot].savedAtText.c_str(), slot);
-                if (GuiLayout::centeredButton(label)) clicked = slot;
-                ImGui::Dummy(ImVec2(0.0f, 10.0f));
+                char buffer[96];
+                const char* label = StringUtil::formatTo(buffer, "PARTIDA %d   %s###slot%d",
+                    slot + 1, slots[slot].savedAtText.c_str(), slot);
+                if (GuiLayout::menuButton(label, GuiLayout::GAP_SMALL)) clicked = slot;
             }
             return clicked;
-        }
-
-        inline void mutedText(const char* text) {
-            ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
-            GuiLayout::centeredText(text);
-            ImGui::PopStyleColor();
         }
     }
 
     // "CARGAR PARTIDA": devuelve la ranura elegida o -1.
     inline int renderLoad(GameState& state) {
-        ImGui::SetCursorPosY(ImGui::GetWindowSize().y * 0.2f);
+        GuiLayout::beginAt(0.2f);
         GuiLayout::centeredText("CARGAR PARTIDA");
-        ImGui::Dummy(ImVec2(0.0f, 20.0f));
+        GuiLayout::gap(GuiLayout::GAP_LARGE);
 
         const int slot = detail::slotButtons(true);
 
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
-        if (GuiLayout::centeredButton("VOLVER") || GuiInput::backPressed()) state = GameState::MAIN_MENU;
+        if (GuiInput::backButton()) state = GameState::MAIN_MENU;
         return slot;
     }
 
@@ -50,31 +43,27 @@ namespace SlotsComponent {
     inline int renderReplace(GameState& state, int& selected) {
         int confirmed = -1;
         const bool back = GuiInput::backPressed();
+        char buffer[96];
 
-        ImGui::SetCursorPosY(ImGui::GetWindowSize().y * 0.15f);
-        GuiLayout::centeredText("HAY 4 PARTIDAS GUARDADAS");
-        detail::mutedText("Elige una para eliminarla y empezar la nueva partida");
-        ImGui::Dummy(ImVec2(0.0f, 20.0f));
+        GuiLayout::beginAt(0.15f);
+        GuiLayout::centeredText(StringUtil::formatTo(buffer, "HAY %d PARTIDAS GUARDADAS", SaveManager::MAX_SLOTS));
+        GuiLayout::centeredText("Elige una para eliminarla y empezar la nueva partida", GuiStyle::MUTED);
+        GuiLayout::gap(GuiLayout::GAP_LARGE);
 
         if (selected < 0) {
             const int slot = detail::slotButtons(false);
             if (slot >= 0) selected = slot;
 
-            ImGui::Dummy(ImVec2(0.0f, 10.0f));
             if (GuiLayout::centeredButton("VOLVER") || back) state = GameState::MAIN_MENU;
         } else {
-            char message[64];
-            std::snprintf(message, sizeof(message), "¿Eliminar la partida %d? No se puede deshacer.", selected + 1);
-            ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::DANGER);
-            GuiLayout::centeredText(message);
-            ImGui::PopStyleColor();
+            GuiLayout::centeredText(StringUtil::formatTo(buffer, "¿Eliminar la partida %d? No se puede deshacer.", selected + 1),
+                GuiStyle::DANGER);
+            GuiLayout::gap(GuiLayout::GAP_MEDIUM);
 
-            ImGui::Dummy(ImVec2(0.0f, 15.0f));
-            if (GuiLayout::centeredButton("ELIMINAR Y EMPEZAR")) {
+            if (GuiLayout::menuButton("ELIMINAR Y EMPEZAR", GuiLayout::GAP_SMALL)) {
                 confirmed = selected;
                 selected = -1;
             }
-            ImGui::Dummy(ImVec2(0.0f, 10.0f));
             if (GuiLayout::centeredButton("CANCELAR") || back) selected = -1;
         }
         return confirmed;

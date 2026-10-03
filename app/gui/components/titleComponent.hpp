@@ -7,10 +7,8 @@
 
 namespace TitleComponent {
     inline void render(GameState& state, ImTextureID logoTexture, int logoW, int logoH) {
-        const ImVec2 windowSize = ImGui::GetWindowSize();
-
         // Logo centrado
-        ImGui::SetCursorPosY(windowSize.y * 0.2f);
+        GuiLayout::beginAt(0.2f);
         if (logoTexture) {
             const float renderW = 320.0f;
             const float renderH = (logoW > 0 && logoH > 0) ? renderW * (static_cast<float>(logoH) / logoW) : 120.0f;
@@ -19,7 +17,7 @@ namespace TitleComponent {
         }
 
         // Texto centrado con parpadeo suave
-        ImGui::SetCursorPosY(windowSize.y * 0.75f);
+        GuiLayout::beginAt(0.75f);
         const char* pressText = "- PRESIONA CUALQUIER TECLA PARA CONTINUAR -";
         GuiLayout::centerX(ImGui::CalcTextSize(pressText).x);
 

@@ -19,40 +19,57 @@ class Player {
 
     Physics::Body body;
 
+    // Al apuntar (mecánica aún sin implementar) el personaje seguirá a la cámara de forma continua.
+    bool aiming = false;
+
     Player() { body.shadowRadius = SHADOW_RADIUS; }
 
     // Escala vertical del modelo según la postura (de pie, agachado o deslizándose).
     float heightScale() const { return m_heightScale; }
 
-    // El movimiento es relativo a hacia dónde mira la cámara (cameraYaw).
     void update(float dt, const InputState& input, float cameraYaw, const Physics::World& world) {
         const bool wasGrounded = body.onGround;
         const bool forward = input.moveY > FORWARD_THRESHOLD;
 
+        updateMoveBasis(input, cameraYaw);
         float dirX = 0.0f, dirZ = 0.0f;
-        const float amount = direction(input.moveX, input.moveY, cameraYaw, dirX, dirZ);
+        const float amount = direction(input.moveX, input.moveY, m_moveYaw, dirX, dirZ);
 
         updateSprint(input, wasGrounded, forward);
-        updateStance(input, cameraYaw, wasGrounded);
-        updateSlide(dt, input, cameraYaw);
+        updateStance(input, wasGrounded);
+        updateSlide(dt, input);
         updateHorizontal(dt, wasGrounded, dirX, dirZ, amount);
         if (wasGrounded && input.jump) jump(world);
 
         world.step(body, dt);
-        if (!wasGrounded && body.onGround) land(input, cameraYaw);
+        if (!wasGrounded && body.onGround) land(input);
 
         m_heightScale = m_sliding ? SLIDE_HEIGHT : ((m_crouching || m_crouchQueued) ? CROUCH_HEIGHT : 1.0f);
     }
 
     private:
-    static constexpr float FORWARD_THRESHOLD = 0.3f; // inclinación mínima del stick para contar como "avanzar"
-    static constexpr float STEER_EPSILON = 0.05f;    // cambio mínimo de A/D o stick para girar el deslizamiento
-    static constexpr float MOMENTUM_DECAY = 2.0f;    // pérdida de impulso por segundo en el aire
+    static constexpr float FORWARD_THRESHOLD = 0.3f;   // inclinación mínima del stick para contar como "avanzar"
+    static constexpr float DIRECTION_EPSILON = 0.1f;   // cambio mínimo de la entrada para fijar una dirección nueva
+    static constexpr float STEER_EPSILON = 0.05f;      // cambio mínimo de A/D o stick para girar el deslizamiento
+    static constexpr float MOMENTUM_DECAY = 2.0f;      // pérdida de impulso por segundo en el aire
     static constexpr float CROUCH_HEIGHT = 0.6f;
     static constexpr float SLIDE_HEIGHT = 0.45f;
     static constexpr float SHADOW_RADIUS = 0.55f;
 
-    // Dirección unitaria en XZ para unos ejes de movimiento y la orientación de la cámara.
+    // La dirección de movimiento se fija respecto a la cámara en el momento en que el jugador cambia su
+    // entrada (pulsar o soltar una tecla, mover el stick). Girar la cámara después NO desvía al personaje:
+    // la cámara orbita libremente a su alrededor. Solo al apuntar el personaje sigue a la cámara.
+    void updateMoveBasis(const InputState& input, float cameraYaw) {
+        const bool changed = std::fabs(input.moveX - m_lastMoveX) > DIRECTION_EPSILON ||
+                             std::fabs(input.moveY - m_lastMoveY) > DIRECTION_EPSILON;
+        if (changed) {
+            m_lastMoveX = input.moveX;
+            m_lastMoveY = input.moveY;
+        }
+        if (changed || aiming) m_moveYaw = cameraYaw;
+    }
+
+    // Dirección unitaria en XZ para unos ejes de movimiento y un ángulo de referencia.
     // Devuelve cuánto se empuja (0..1); 0 si no hay entrada. Las diagonales quedan normalizadas.
     static float direction(float strafe, float forward, float yaw, float& x, float& z) {
         const float length = std::sqrt(strafe * strafe + forward * forward);
@@ -78,30 +95,30 @@ class Player {
 
     // Una pulsación de agacharse: corriendo desliza; en cualquier otro caso agacha o levanta.
     // En el aire se guarda para el aterrizaje.
-    void updateStance(const InputState& input, float cameraYaw, bool grounded) {
+    void updateStance(const InputState& input, bool grounded) {
         if (!input.crouch) return;
         if (!grounded) {
             m_crouchQueued = true;
         } else if (m_sliding) {
             return;
         } else if (m_sprinting) {
-            startSlide(input.moveX, cameraYaw);
+            startSlide(input.moveX);
         } else {
             m_crouching = !m_crouching;
         }
     }
 
-    void startSlide(float strafe, float cameraYaw) {
+    void startSlide(float strafe) {
         m_sliding = true;
         m_crouching = false;
         m_slideTime = 0.0f;
         m_slideStrafe = strafe;
-        direction(strafe, 1.0f, cameraYaw, m_slideDirX, m_slideDirZ);
+        direction(strafe, 1.0f, m_moveYaw, m_slideDirX, m_slideDirZ);
     }
 
     // El deslizamiento siempre avanza; A/D (o el stick) giran la dirección. La cámara no la cambia:
     // solo se recalcula cuando el jugador cambia su dirección lateral.
-    void updateSlide(float dt, const InputState& input, float cameraYaw) {
+    void updateSlide(float dt, const InputState& input) {
         if (!m_sliding) return;
 
         m_slideTime += dt;
@@ -109,7 +126,7 @@ class Player {
             m_sliding = false; // vuelve a la postura normal (y sigue corriendo si sigue avanzando)
         } else if (std::fabs(input.moveX - m_slideStrafe) > STEER_EPSILON) {
             m_slideStrafe = input.moveX;
-            direction(m_slideStrafe, 1.0f, cameraYaw, m_slideDirX, m_slideDirZ);
+            direction(m_slideStrafe, 1.0f, m_moveYaw, m_slideDirX, m_slideDirZ);
         }
     }
 
@@ -158,15 +175,18 @@ class Player {
     }
 
     // Al aterrizar se aplica la pulsación de agacharse hecha en el aire: corriendo desliza, si no, agacha.
-    void land(const InputState& input, float cameraYaw) {
+    void land(const InputState& input) {
         m_momentum = 0.0f;
         if (!m_crouchQueued) return;
 
         m_crouchQueued = false;
-        if (m_sprinting) startSlide(input.moveX, cameraYaw);
+        if (m_sprinting) startSlide(input.moveX);
         else m_crouching = true;
     }
 
+    float m_moveYaw = 0.0f;     // ángulo de referencia del movimiento (el de la cámara cuando cambió la entrada)
+    float m_lastMoveX = 0.0f;
+    float m_lastMoveY = 0.0f;
     float m_slideTime = 0.0f;
     float m_slideStrafe = 0.0f;
     float m_slideDirX = 0.0f;

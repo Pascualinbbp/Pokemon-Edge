@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "imgui.h"
 #include "inputHandler.hpp"
+#include "../style/guiLayout.hpp"
 #include "../../utils/input/gamepadState.hpp"
 
 // Puente entre el mando y la interfaz: alimenta la navegación de ImGui (stick izquierdo / cruceta para
@@ -107,4 +108,9 @@ namespace GuiInput {
     inline bool startPressed() { return (detail::pressedEdges & Gamepad::START) != 0; }
 
     inline bool anyButtonPressed() { return detail::pressedEdges != 0; }
+
+    // Botón "volver" centrado; también se activa con ESC o el botón de volver del mando.
+    inline bool backButton(const char* label = "VOLVER") {
+        return GuiLayout::centeredButton(label) || backPressed();
+    }
 }

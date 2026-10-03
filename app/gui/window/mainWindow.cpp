@@ -12,12 +12,13 @@
 #include "../components/pauseComponent.hpp"
 #include "../components/controlsComponent.hpp"
 #include "../../managers/saveManager.hpp"
+#include "../../managers/sessionManager.hpp"
 #include "../../utils/core/pathsUtil.hpp"
-#include "../../engine/core/gameEngine.hpp"
+#include "../../utils/core/resourceUtil.hpp"
+#include "../../utils/core/timeUtil.hpp"
+#include "../../utils/graphics/windowUtil.hpp"
 
-#include <algorithm>
 #include <cstdint>
-#include <optional>
 #include <windows.h>
 #include <dbt.h>
 #include "imgui.h"
@@ -29,77 +30,48 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 namespace {
     constexpr const char* kClassName = "PokemonEdgeEngine";
     constexpr const char* kWindowTitle = "Pokemon Edge // Game Engine Studio";
+    constexpr int kWindowWidth = 960;
+    constexpr int kWindowHeight = 540;
 
     constexpr UINT_PTR kDeviceTimerId = 1;
     constexpr UINT kDeviceRescanDelayMs = 1000;  // segunda búsqueda de mandos tras un cambio de dispositivos
     constexpr DWORD kMenuPollMs = 50;            // lectura del mando en los menús (solo con un mando conectado)
-    constexpr DWORD kIdleWakeMask = QS_ALLINPUT & ~QS_RAWINPUT; // los informes del mando no despiertan el bucle
+    constexpr float kMaxFrameSeconds = 0.1f;     // una pausa larga no debe disparar la simulación
 
     HWND g_hwnd = nullptr;
     Texture g_logo;
-    GameEngine g_gameEngine;
+    WindowUtil::Fullscreen g_fullscreen;
     GameState g_state = GameState::TITLE_SCREEN; // a nivel de módulo para poder pausar desde WM_KILLFOCUS
-    WINDOWPLACEMENT g_windowedPlacement = { sizeof(WINDOWPLACEMENT) };
     float g_loadTimer = 0.0f;   // segundos desde que empezó la carga
-    int g_activeSlot = -1;      // ranura de la partida en curso
     int g_selectedSlot = -1;    // ranura pendiente de confirmar en la pantalla de reemplazo
     bool g_resizing = false;    // el usuario está arrastrando el borde de la ventana
-    bool g_fullscreen = false;
     bool g_focused = false;
     bool g_saved = false;       // mostrar el aviso de "partida guardada" en la pausa
 
     // Redimensiona el swap chain solo si el tamaño del área cliente cambió de verdad.
     void applyResize(HWND hwnd) {
-        RECT client;
-        GetClientRect(hwnd, &client);
-        const int width = client.right;
-        const int height = client.bottom;
-        if (width != GraphicsDevice::width() || height != GraphicsDevice::height()) {
-            GraphicsDevice::resize(static_cast<UINT>(width), static_cast<UINT>(height));
+        const WindowUtil::Size size = WindowUtil::clientSize(hwnd);
+        if (size.width != GraphicsDevice::width() || size.height != GraphicsDevice::height()) {
+            GraphicsDevice::resize(static_cast<UINT>(size.width), static_cast<UINT>(size.height));
         }
         InputHandler::relockCursor(hwnd);
     }
 
-    // Pantalla completa sin bordes; al salir se restaura la posición y el tamaño anteriores.
-    void setFullscreen(bool enable) {
-        if (enable == g_fullscreen) return;
-        g_fullscreen = enable;
-
-        if (enable) {
-            MONITORINFO monitor = { sizeof(monitor) };
-            GetWindowPlacement(g_hwnd, &g_windowedPlacement);
-            GetMonitorInfo(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
-            SetWindowLongPtr(g_hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-            SetWindowPos(g_hwnd, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
-                monitor.rcMonitor.right - monitor.rcMonitor.left, monitor.rcMonitor.bottom - monitor.rcMonitor.top,
-                SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
-        } else {
-            SetWindowLongPtr(g_hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
-            SetWindowPlacement(g_hwnd, &g_windowedPlacement);
-            SetWindowPos(g_hwnd, nullptr, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-        }
-    }
-
-    // Arranca la pantalla de carga de la partida de una ranura.
-    void beginLoading(int slot) {
-        g_activeSlot = slot;
+    // Arranca la pantalla de carga de la partida que acaba de prepararse.
+    void beginLoading() {
         g_loadTimer = 0.0f;
         g_saved = false;
         g_state = GameState::LOADING;
     }
 
-    // Partida nueva: ocupa la ranura desde el primer momento.
     void startNewGame(int slot) {
-        g_gameEngine.newGame();
-        SaveManager::save(slot, g_gameEngine.captureSave());
-        beginLoading(slot);
+        SessionManager::startNew(slot);
+        beginLoading();
     }
 
     void startSavedGame(int slot) {
-        if (const std::optional<SaveData> save = SaveManager::load(slot)) g_gameEngine.applySave(*save);
-        else g_gameEngine.newGame(); // partida dañada: se empieza de cero en esa ranura
-        beginLoading(slot);
+        SessionManager::startSaved(slot);
+        beginLoading();
     }
 
     LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -160,17 +132,8 @@ namespace {
 }
 
 void MainWindow::init() {
-    WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WindowProc, 0L, 0L, GetModuleHandle(nullptr),
-        nullptr, LoadCursor(nullptr, IDC_ARROW), nullptr, nullptr, kClassName, nullptr };
-    RegisterClassEx(&wc);
-    g_hwnd = CreateWindowEx(0, kClassName, kWindowTitle, WS_OVERLAPPEDWINDOW, 100, 100, 960, 540,
-        nullptr, nullptr, wc.hInstance, nullptr);
-
-    HICON hIcon = LoadIcon(wc.hInstance, MAKEINTRESOURCE(102));
-    if (hIcon) {
-        SendMessage(g_hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
-        SendMessage(g_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIcon);
-    }
+    g_hwnd = WindowUtil::create(kClassName, kWindowTitle, WindowProc, kWindowWidth, kWindowHeight);
+    WindowUtil::setIcon(g_hwnd, ResourceUtil::loadIcon(IDI_ICON1));
 
     GraphicsDevice::init(g_hwnd);
     GraphicsDevice::loadTexture(PathsUtil::LOGO_PATH, g_logo); // el logo es opcional: si falla solo se registra
@@ -181,17 +144,19 @@ void MainWindow::init() {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // el mando navega los menús
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;                                   // sin imgui.ini en disco
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;        // el mando navega los menús
     GuiStyle::applyTheme();
     ImGui_ImplWin32_Init(g_hwnd);
     ImGui_ImplDX11_Init(GraphicsDevice::device(), GraphicsDevice::context());
 
-    g_gameEngine.init(GraphicsDevice::device());
+    SessionManager::engine().init(GraphicsDevice::device());
 }
 
 void MainWindow::cleanup() {
     InputHandler::setMouseCapture(g_hwnd, false); // devuelve el cursor al sistema
-    g_gameEngine.cleanup();
+    SessionManager::engine().cleanup();
     g_logo.srv.Reset();
 
     // ImGui debe cerrarse ANTES de liberar el dispositivo D3D.
@@ -204,13 +169,11 @@ void MainWindow::cleanup() {
 }
 
 void MainWindow::run() {
+    GameEngine& engine = SessionManager::engine();
+    TimeUtil::FrameTimer timer;
     int redrawFrames = 2; // frames pendientes de dibujar cuando no hay animación continua
     bool wasPlaying = false;
     InputDevice shownDevice = InputHandler::activeDevice();
-
-    LARGE_INTEGER freq, last, now;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&last);
 
     const ImTextureID logoId = (ImTextureID)(intptr_t)g_logo.srv.Get();
 
@@ -248,15 +211,12 @@ void MainWindow::run() {
             // Espera pasiva. Sin mando (o sin foco) no se despierta nunca por iniciativa propia.
             // Con un mando conectado se despierta cada kMenuPollMs para leerlo: Windows no avisa de
             // las pulsaciones de los mandos Xbox (XInput).
-            const DWORD timeout = (g_focused && InputHandler::hasGamepad()) ? kMenuPollMs : INFINITE;
-            MsgWaitForMultipleObjectsEx(0, nullptr, timeout, kIdleWakeMask, MWMO_INPUTAVAILABLE);
-            QueryPerformanceCounter(&last); // el tiempo dormido no cuenta como dt
+            WindowUtil::waitForMessages((g_focused && InputHandler::hasGamepad()) ? kMenuPollMs : INFINITE);
+            timer.reset(); // el tiempo dormido no cuenta como dt
             continue;
         }
 
-        QueryPerformanceCounter(&now);
-        const float dt = (std::min)(static_cast<float>(now.QuadPart - last.QuadPart) / freq.QuadPart, 0.1f);
-        last = now;
+        const float dt = timer.tick(kMaxFrameSeconds);
 
         if (g_state == GameState::PLAYING) {
             const InputState input = InputHandler::poll(dt);
@@ -264,7 +224,7 @@ void MainWindow::run() {
                 g_state = GameState::PAUSED;
                 redrawFrames = 2;
             } else {
-                g_gameEngine.update(dt, input);
+                engine.update(dt, input);
             }
         } else if (g_state == GameState::LOADING) {
             g_loadTimer += dt;
@@ -273,9 +233,7 @@ void MainWindow::run() {
         // GUI: fondo de la GUI. Juego: fondo propio del motor.
         const bool inGame = isInGame(g_state);
         GraphicsDevice::beginFrame(inGame ? GameEngine::CLEAR_COLOR : GuiStyle::BACKGROUND);
-        if (inGame) {
-            g_gameEngine.render(GraphicsDevice::context(), GraphicsDevice::width(), GraphicsDevice::height());
-        }
+        if (inGame) engine.render(GraphicsDevice::context(), GraphicsDevice::width(), GraphicsDevice::height());
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
@@ -297,7 +255,7 @@ void MainWindow::run() {
                     case MenuComponent::Action::NEW_GAME: {
                         const int slot = SaveManager::freeSlot();
                         if (slot >= 0) startNewGame(slot);
-                        else g_state = GameState::REPLACE_MENU; // 4 partidas: hay que eliminar una
+                        else g_state = GameState::REPLACE_MENU; // todas ocupadas: hay que eliminar una
                         break;
                     }
                     case MenuComponent::Action::LOAD_GAME:
@@ -327,9 +285,7 @@ void MainWindow::run() {
                 HudComponent::render(g_state, InputHandler::activeDevice());
                 break;
             case GameState::PAUSED:
-                if (PauseComponent::render(g_state, g_saved)) {
-                    g_saved = SaveManager::save(g_activeSlot, g_gameEngine.captureSave());
-                }
+                if (PauseComponent::render(g_state, g_saved)) g_saved = SessionManager::saveCurrent();
                 break;
             case GameState::CONTROLS:
                 ControlsComponent::render(g_state, InputHandler::activeDevice());
@@ -344,7 +300,7 @@ void MainWindow::run() {
 
         if (g_state != prevState) {
             redrawFrames = 2;
-            setFullscreen(isFullscreen(g_state));
+            g_fullscreen.set(g_hwnd, isFullscreen(g_state));
             if (g_state == GameState::PLAYING) g_saved = false;
         } else if (redrawFrames > 0) {
             --redrawFrames;

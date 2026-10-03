@@ -1,10 +1,10 @@
 #pragma once
 #include <array>
 #include <ctime>
-#include <exception>
 #include <optional>
 #include <string>
 #include "../models/saveData.hpp"
+#include "../utils/core/fileUtil.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "../utils/core/pathsUtil.hpp"
 #include "../utils/core/timeUtil.hpp"
@@ -51,23 +51,22 @@ class SaveManager {
         if (!validSlot(slot) || !s_slots[slot].used) return std::nullopt;
 
         const json j = JsonUtil::loadFromFile(PathsUtil::saveSlotPath(slot));
-        try {
-            SaveData data;
-            data.playerPosition = j.at("player").at("position").get<std::array<float, 3>>();
-            return data;
-        } catch (const std::exception& e) {
-            Logger::logError("SAVE_MANAGER", std::string("Partida guardada no válida: ") + e.what());
+        const auto position = JsonUtil::find<std::array<float, 3>>(j, { "player", "position" });
+        if (!position) {
+            Logger::logError("SAVE_MANAGER", "Partida guardada no válida en la ranura " + std::to_string(slot + 1));
             return std::nullopt;
         }
+
+        SaveData data;
+        data.playerPosition = *position;
+        return data;
     }
 
     static bool remove(int slot) {
         if (!validSlot(slot)) return false;
 
-        std::error_code ec;
-        fs::remove(PathsUtil::saveSlotPath(slot), ec);
-        if (ec) {
-            Logger::logError("SAVE_MANAGER", "No se pudo eliminar la partida: " + ec.message());
+        if (!FileUtil::remove(PathsUtil::saveSlotPath(slot))) {
+            Logger::logError("SAVE_MANAGER", "No se pudo eliminar la partida de la ranura " + std::to_string(slot + 1));
             return false;
         }
         s_slots[slot] = {};
@@ -82,18 +81,14 @@ class SaveManager {
 
     static void readSlotInfo(int slot) {
         const fs::path path = PathsUtil::saveSlotPath(slot);
-        if (!fs::exists(path)) {
+        if (!FileUtil::exists(path)) {
             s_slots[slot] = {};
             return;
         }
 
-        long long savedAt = 0;
-        try {
-            const json j = JsonUtil::loadFromFile(path);
-            if (j.is_object()) savedAt = j.value("savedAt", 0LL);
-        } catch (const std::exception&) {
-            // Archivo dañado: la ranura sigue contando como ocupada, solo sin fecha.
-        }
+        // Si el archivo está dañado la ranura sigue contando como ocupada, solo que sin fecha.
+        const json j = JsonUtil::loadFromFile(path);
+        const long long savedAt = JsonUtil::find<long long>(j, { "savedAt" }).value_or(0);
         s_slots[slot] = { true, TimeUtil::formatLocal(static_cast<std::time_t>(savedAt)) };
     }
 };

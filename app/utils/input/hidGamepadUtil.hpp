@@ -3,14 +3,13 @@
 #include <vector>
 #include <windows.h>
 #include "gamepadState.hpp"
+#include "rawInputUtil.hpp"
 
 // Mandos de PlayStation (DualShock 4 y DualSense) leídos directamente desde Raw Input (HID).
 // Solo se interpretan los informes conocidos: USB y Bluetooth (modo básico y completo).
 namespace HidGamepadUtil {
     namespace detail {
         inline constexpr USHORT SONY_VENDOR_ID = 0x054C;
-        inline constexpr USHORT USAGE_PAGE_GENERIC_DESKTOP = 0x01;
-        inline constexpr USHORT USAGE_GAMEPAD = 0x05;
 
         enum class Model { NONE, DUALSHOCK4, DUALSENSE };
 
@@ -111,8 +110,8 @@ namespace HidGamepadUtil {
             UINT size = sizeof(info);
             if (GetRawInputDeviceInfoW(list[i].hDevice, RIDI_DEVICEINFO, &info, &size) == static_cast<UINT>(-1)) continue;
             if (info.hid.dwVendorId != detail::SONY_VENDOR_ID ||
-                info.hid.usUsagePage != detail::USAGE_PAGE_GENERIC_DESKTOP ||
-                info.hid.usUsage != detail::USAGE_GAMEPAD) continue;
+                info.hid.usUsagePage != RawInputUtil::USAGE_PAGE_GENERIC_DESKTOP ||
+                info.hid.usUsage != RawInputUtil::USAGE_GAMEPAD) continue;
 
             const detail::Model model = detail::modelFromProduct(static_cast<USHORT>(info.hid.dwProductId));
             if (model == detail::Model::NONE) continue;

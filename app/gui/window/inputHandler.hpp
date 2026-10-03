@@ -5,18 +5,18 @@
 #include "../../engine/core/input.hpp"
 #include "../../engine/core/inputBindings.hpp"
 #include "../../engine/core/inputDevice.hpp"
+#include "../../utils/input/cursorUtil.hpp"
 #include "../../utils/input/hidGamepadUtil.hpp"
+#include "../../utils/input/rawInputUtil.hpp"
 #include "../../utils/input/xinputUtil.hpp"
 
-// Entrada de la plataforma (Win32): teclado, ratón (Raw Input) y mandos.
+// Entrada de la plataforma (Win32): teclado, ratón y mandos.
 // Convierte cualquier dispositivo en un InputState y decide cuál es el dispositivo activo.
 namespace InputHandler {
     namespace detail {
         inline constexpr DWORD DOUBLE_TAP_MS = 300;
         inline constexpr LPARAM REPEAT_FLAG = 1 << 30;      // bit 30 de lParam: la tecla ya estaba pulsada
         inline constexpr UINT LEFT_SHIFT_SCANCODE = 0x2A;
-        inline constexpr USHORT USAGE_MOUSE = 0x02;
-        inline constexpr USHORT USAGE_GAMEPAD = 0x05;
 
         // --- Teclado y ratón ---
         struct Keyboard {
@@ -32,9 +32,6 @@ namespace InputHandler {
         inline int lastMouseY = -1;
         inline HWND window = nullptr;
 
-        // Contenedor alineado para recibir un RAWINPUT de cualquier tamaño (los informes HID varían).
-        struct RawBuffer { alignas(RAWINPUT) BYTE data[512]; };
-
         // --- Dispositivos ---
         inline InputDevice active = InputDevice::KEYBOARD_MOUSE;
         inline std::optional<InputDevice> padType;  // tipo del mando conectado; vacío si no hay
@@ -42,26 +39,10 @@ namespace InputHandler {
         inline bool sonyRegistered = false;
         inline bool devicesDirty = false;
 
-        inline void registerRawInput(USHORT usage, bool enable) {
-            const RAWINPUTDEVICE device = { 0x01, usage, enable ? 0u : static_cast<DWORD>(RIDEV_REMOVE), enable ? window : nullptr };
-            RegisterRawInputDevices(&device, 1, sizeof(device));
-        }
-
         // Descarta lo que no debe arrastrarse entre frames o entre estados (pausa, carga...).
         inline void clearEvents() {
             mouseDX = mouseDY = 0.0f;
             keys.jump = keys.crouch = keys.sprint = false;
-        }
-
-        // Centra el cursor y lo encierra en un rectángulo de 1 píxel (queda inmóvil y oculto).
-        inline void lockCursor(HWND hwnd) {
-            RECT client;
-            GetClientRect(hwnd, &client);
-            POINT center = { client.right / 2, client.bottom / 2 };
-            ClientToScreen(hwnd, &center);
-            SetCursorPos(center.x, center.y);
-            const RECT lock = { center.x, center.y, center.x + 1, center.y + 1 };
-            ClipCursor(&lock);
         }
 
         inline bool readPad(GamepadState& out) {
@@ -77,7 +58,7 @@ namespace InputHandler {
             const bool sony = type == InputDevice::PLAYSTATION;
             if (sony != sonyRegistered) {
                 sonyRegistered = sony;
-                registerRawInput(USAGE_GAMEPAD, sony);
+                RawInputUtil::registerDevice(window, RawInputUtil::USAGE_GAMEPAD, sony);
             }
 
             if (type == padType) return;
@@ -166,22 +147,20 @@ namespace InputHandler {
 
     // WM_INPUT: movimiento del ratón o informe HID de un mando de PlayStation.
     inline void onRawInput(LPARAM lParam) {
-        static detail::RawBuffer buffer;
-        UINT size = sizeof(buffer.data);
-        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, buffer.data, &size, sizeof(RAWINPUTHEADER)) == static_cast<UINT>(-1)) return;
+        const RAWINPUT* raw = RawInputUtil::read(lParam);
+        if (!raw) return;
 
-        const RAWINPUT& raw = *reinterpret_cast<const RAWINPUT*>(buffer.data);
-        if (raw.header.dwType == RIM_TYPEMOUSE) {
-            if (raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) return;
-            const LONG dx = raw.data.mouse.lLastX;
-            const LONG dy = raw.data.mouse.lLastY;
+        if (raw->header.dwType == RIM_TYPEMOUSE) {
+            if (raw->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) return;
+            const LONG dx = raw->data.mouse.lLastX;
+            const LONG dy = raw->data.mouse.lLastY;
             if (dx == 0 && dy == 0) return;
 
             detail::mouseDX += static_cast<float>(dx);
             detail::mouseDY += static_cast<float>(dy);
             detail::active = InputDevice::KEYBOARD_MOUSE;
-        } else if (raw.header.dwType == RIM_TYPEHID) {
-            HidGamepadUtil::onReport(raw);
+        } else if (raw->header.dwType == RIM_TYPEHID) {
+            HidGamepadUtil::onReport(*raw);
         }
     }
 
@@ -190,7 +169,7 @@ namespace InputHandler {
 
     // Si la ventana se mueve o cambia de tamaño durante la captura, recoloca el bloqueo.
     inline void relockCursor(HWND hwnd) {
-        if (detail::captured) detail::lockCursor(hwnd);
+        if (detail::captured) CursorUtil::lockToCenter(hwnd);
     }
 
     // Oculta y bloquea el cursor y activa el Raw Input del ratón solo mientras se juega. Es idempotente.
@@ -198,15 +177,13 @@ namespace InputHandler {
         if (capture == detail::captured) return;
         detail::captured = capture;
         detail::clearEvents();
-        detail::registerRawInput(detail::USAGE_MOUSE, capture);
+        RawInputUtil::registerDevice(detail::window, RawInputUtil::USAGE_MOUSE, capture);
 
         if (capture) {
             detail::primePad();
-            ShowCursor(FALSE);
-            detail::lockCursor(hwnd);
+            CursorUtil::capture(hwnd);
         } else {
-            ClipCursor(nullptr);
-            ShowCursor(TRUE);
+            CursorUtil::release();
         }
     }
 

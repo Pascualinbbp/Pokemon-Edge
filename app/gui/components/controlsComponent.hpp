@@ -145,10 +145,10 @@ namespace ControlsComponent {
     inline void render(GameState& state, InputDevice device) {
         GuiLayout::dimBackground();
 
-        ImGui::SetCursorPosY(ImGui::GetWindowSize().y * 0.06f);
+        GuiLayout::beginAt(0.06f);
         GuiLayout::centeredText(detail::title(device));
+        GuiLayout::gap(GuiLayout::GAP_SMALL);
 
-        ImGui::Dummy(ImVec2(0.0f, 12.0f));
         GuiLayout::centerX(detail::PANEL_WIDTH);
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         ImGui::Dummy(ImVec2(detail::PANEL_WIDTH, detail::PANEL_HEIGHT));
@@ -158,12 +158,10 @@ namespace ControlsComponent {
         if (isGamepad(device)) detail::drawGamepad(dl, origin, device);
         else detail::drawKeyboard(dl, origin);
 
-        ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
-        if (isGamepad(device)) for (const char* line : detail::NOTES_GAMEPAD) GuiLayout::centeredText(line);
-        else for (const char* line : detail::NOTES_KEYBOARD) GuiLayout::centeredText(line);
-        ImGui::PopStyleColor();
+        if (isGamepad(device)) for (const char* line : detail::NOTES_GAMEPAD) GuiLayout::centeredText(line, GuiStyle::MUTED);
+        else for (const char* line : detail::NOTES_KEYBOARD) GuiLayout::centeredText(line, GuiStyle::MUTED);
 
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
-        if (GuiLayout::centeredButton("VOLVER") || GuiInput::backPressed()) state = GameState::PAUSED;
+        GuiLayout::gap(GuiLayout::GAP_SMALL);
+        if (GuiInput::backButton()) state = GameState::PAUSED;
     }
 }
