@@ -1,32 +1,41 @@
 #pragma once
+#include <cmath>
 #include <DirectXMath.h>
 #include "../core/input.hpp"
+#include "camera.hpp"
 
 struct Player {
-    DirectX::XMFLOAT3 position = { 0.0f, 0.0f, 0.0f }; // Ajustado a nivel del suelo (y = 0)
+    DirectX::XMFLOAT3 position = { 0.0f, 0.0f, 0.0f }; // a nivel del suelo (y = 0)
     float speed = 5.0f;
-    
-    void update(float dt, const InputState& input) {
-        const float step = speed * dt;
-        position.x += (static_cast<int>(input.right) - static_cast<int>(input.left)) * step;
-        position.z += (static_cast<int>(input.up) - static_cast<int>(input.down)) * step;
+
+    // El movimiento es relativo a hacia dónde mira la cámara (cameraYaw).
+    void update(float dt, const InputState& input, float cameraYaw) {
+        const float forward = static_cast<float>(input.up) - static_cast<float>(input.down);
+        const float strafe  = static_cast<float>(input.right) - static_cast<float>(input.left);
+        if (forward == 0.0f && strafe == 0.0f) return;
+
+        const float s = std::sin(cameraYaw);
+        const float c = std::cos(cameraYaw);
+        // adelante = (s, c), derecha = (c, -s): base ortonormal, así que la longitud es sqrt(f² + s²).
+        const float dirX = forward * s + strafe * c;
+        const float dirZ = forward * c - strafe * s;
+        const float step = speed * dt / std::sqrt(forward * forward + strafe * strafe); // diagonal normalizada
+
+        position.x += dirX * step;
+        position.z += dirZ * step;
     }
 };
 
 struct Scene {
-    static constexpr float CAMERA_HEIGHT = 5.0f;
-    static constexpr float CAMERA_DISTANCE = 6.0f;
-    
     Player player;
-    
-    // Cámara en 3ª persona siguiendo a la cápsula
+    Camera camera;
+
+    void update(float dt, const InputState& input) {
+        camera.rotate(input.mouseDX, input.mouseDY);
+        player.update(dt, input, camera.yaw());
+    }
+
     DirectX::XMMATRIX getViewMatrix() const {
-        const DirectX::XMFLOAT3& p = player.position;
-        // El punto de mira (at) se sitúa ligeramente elevado sobre el centro de la cápsula
-        const DirectX::XMVECTOR at = DirectX::XMVectorSet(p.x, p.y + 0.7f, p.z, 1.0f);
-        // La cámara (eye) se coloca detrás y arriba del jugador
-        const DirectX::XMVECTOR eye = DirectX::XMVectorSet(p.x, p.y + CAMERA_HEIGHT, p.z - CAMERA_DISTANCE, 1.0f);
-        const DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-        return DirectX::XMMatrixLookAtLH(eye, at, up);
+        return camera.viewMatrix(player.position);
     }
 };
