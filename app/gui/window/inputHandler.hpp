@@ -15,18 +15,22 @@ namespace InputHandler {
         inline constexpr DWORD DOUBLE_TAP_MS = 300;
         inline constexpr LPARAM REPEAT_FLAG = 1 << 30;      // bit 30 de lParam: la tecla ya estaba pulsada
         inline constexpr UINT LEFT_SHIFT_SCANCODE = 0x2A;
-        inline constexpr float RESCAN_INTERVAL = 2.0f;      // segundos entre búsquedas de mando si no hay ninguno
+        inline constexpr USHORT USAGE_MOUSE = 0x02;
+        inline constexpr USHORT USAGE_GAMEPAD = 0x05;
 
         // --- Teclado y ratón ---
         struct Keyboard {
-            bool up = false, down = false, left = false, right = false, crouch = false;
-            bool jump = false, sprint = false; // eventos de un frame
+            bool up = false, down = false, left = false, right = false; // mantenidas
+            bool jump = false, crouch = false, sprint = false;          // eventos de un frame
         };
         inline Keyboard keys;
         inline float mouseDX = 0.0f;
         inline float mouseDY = 0.0f;
         inline bool captured = false;
         inline DWORD lastWPress = 0;
+        inline int lastMouseX = -1;
+        inline int lastMouseY = -1;
+        inline HWND window = nullptr;
 
         // Contenedor alineado para recibir un RAWINPUT de cualquier tamaño (los informes HID varían).
         struct RawBuffer { alignas(RAWINPUT) BYTE data[512]; };
@@ -35,13 +39,18 @@ namespace InputHandler {
         inline InputDevice active = InputDevice::KEYBOARD_MOUSE;
         inline std::optional<InputDevice> padType;  // tipo del mando conectado; vacío si no hay
         inline uint16_t padPrevButtons = 0;
-        inline float rescanTimer = 0.0f;
+        inline bool sonyRegistered = false;
         inline bool devicesDirty = false;
+
+        inline void registerRawInput(USHORT usage, bool enable) {
+            const RAWINPUTDEVICE device = { 0x01, usage, enable ? 0u : static_cast<DWORD>(RIDEV_REMOVE), enable ? window : nullptr };
+            RegisterRawInputDevices(&device, 1, sizeof(device));
+        }
 
         // Descarta lo que no debe arrastrarse entre frames o entre estados (pausa, carga...).
         inline void clearEvents() {
             mouseDX = mouseDY = 0.0f;
-            keys.jump = keys.sprint = false;
+            keys.jump = keys.crouch = keys.sprint = false;
         }
 
         // Centra el cursor y lo encierra en un rectángulo de 1 píxel (queda inmóvil y oculto).
@@ -63,7 +72,14 @@ namespace InputHandler {
         }
 
         // Al conectar un mando se pasa a él; al desconectarlo, de vuelta a teclado y ratón.
+        // Los informes HID de PlayStation solo se piden a Windows mientras haya un mando de ese tipo.
         inline void setPad(std::optional<InputDevice> type) {
+            const bool sony = type == InputDevice::PLAYSTATION;
+            if (sony != sonyRegistered) {
+                sonyRegistered = sony;
+                registerRawInput(USAGE_GAMEPAD, sony);
+            }
+
             if (type == padType) return;
             padType = type;
             active = type.value_or(InputDevice::KEYBOARD_MOUSE);
@@ -83,21 +99,23 @@ namespace InputHandler {
         }
     }
 
-    inline void init() {
+    inline void init(HWND hwnd) {
+        detail::window = hwnd;
         detail::rescanGamepads();
     }
 
-    // Windows avisa de cambios de dispositivos (WM_DEVICECHANGE); la búsqueda se hace una vez por iteración.
+    // Windows avisa de cambios de dispositivos (WM_DEVICECHANGE): solo se marca; la búsqueda se hace
+    // una vez por iteración del bucle principal.
     inline void onDeviceChange() { detail::devicesDirty = true; }
 
     inline void refreshDevices() {
         if (!detail::devicesDirty) return;
         detail::devicesDirty = false;
-        detail::rescanTimer = 0.0f;
         detail::rescanGamepads();
     }
 
     inline InputDevice activeDevice() { return detail::active; }
+    inline bool hasGamepad() { return detail::padType.has_value(); }
 
     inline void onKey(WPARAM key, LPARAM lParam, bool pressed) {
         detail::Keyboard& k = detail::keys;
@@ -124,7 +142,7 @@ namespace InputHandler {
                 if (newPress) k.jump = true;
                 break;
             case VK_SHIFT: // solo el shift izquierdo (por su scancode)
-                if (((lParam >> 16) & 0xFF) == detail::LEFT_SHIFT_SCANCODE) k.crouch = pressed;
+                if (newPress && ((lParam >> 16) & 0xFF) == detail::LEFT_SHIFT_SCANCODE) k.crouch = true;
                 break;
             default:
                 gameKey = false;
@@ -132,6 +150,18 @@ namespace InputHandler {
         }
 
         if (gameKey && newPress) detail::active = InputDevice::KEYBOARD_MOUSE;
+    }
+
+    // Movimiento del ratón sobre la ventana (menús). Mover el ratón pasa la interfaz a teclado y ratón.
+    inline void onMouseMove(LPARAM lParam) {
+        if (detail::captured) return; // jugando, el ratón llega por Raw Input
+        const int x = static_cast<short>(LOWORD(lParam));
+        const int y = static_cast<short>(HIWORD(lParam));
+        if (x == detail::lastMouseX && y == detail::lastMouseY) return;
+
+        detail::lastMouseX = x;
+        detail::lastMouseY = y;
+        detail::active = InputDevice::KEYBOARD_MOUSE;
     }
 
     // WM_INPUT: movimiento del ratón o informe HID de un mando de PlayStation.
@@ -163,20 +193,12 @@ namespace InputHandler {
         if (detail::captured) detail::lockCursor(hwnd);
     }
 
-    // Oculta y bloquea el cursor y activa Raw Input (ratón y mandos HID) solo mientras se juega.
-    // Es idempotente.
+    // Oculta y bloquea el cursor y activa el Raw Input del ratón solo mientras se juega. Es idempotente.
     inline void setMouseCapture(HWND hwnd, bool capture) {
         if (capture == detail::captured) return;
         detail::captured = capture;
         detail::clearEvents();
-
-        const DWORD flags = capture ? 0 : RIDEV_REMOVE;
-        HWND const target = capture ? hwnd : nullptr;
-        const RAWINPUTDEVICE devices[] = {
-            { 0x01, 0x02, flags, target }, // ratón
-            { 0x01, 0x05, flags, target }, // mandos
-        };
-        RegisterRawInputDevices(devices, 2, sizeof(RAWINPUTDEVICE));
+        detail::registerRawInput(detail::USAGE_MOUSE, capture);
 
         if (capture) {
             detail::primePad();
@@ -188,23 +210,25 @@ namespace InputHandler {
         }
     }
 
+    // Lee el mando conectado con las zonas muertas aplicadas. Si el mando muestra actividad, pasa a ser
+    // el dispositivo activo. Si se ha perdido, vuelve a buscar. Devuelve false si no hay mando.
+    inline bool readGamepad(GamepadState& pad) {
+        if (!detail::padType) return false;
+        if (!detail::readPad(pad)) {
+            detail::rescanGamepads();
+            return false;
+        }
+
+        applyDeadzone(pad.lx, pad.ly, InputBindings::STICK_DEADZONE);
+        applyDeadzone(pad.rx, pad.ry, InputBindings::STICK_DEADZONE);
+        if (pad.hasActivity()) detail::active = *detail::padType;
+        return true;
+    }
+
     // Estado de entrada de este frame del dispositivo activo; consume los eventos acumulados.
     inline InputState poll(float dt) {
         GamepadState pad;
-        bool padOk = false;
-        if (detail::padType) {
-            padOk = detail::readPad(pad);
-            if (!padOk) detail::rescanGamepads(); // se perdió el mando
-        } else if ((detail::rescanTimer += dt) >= detail::RESCAN_INTERVAL) {
-            detail::rescanTimer = 0.0f;
-            detail::rescanGamepads();
-        }
-
-        if (padOk) {
-            applyDeadzone(pad.lx, pad.ly, InputBindings::STICK_DEADZONE);
-            applyDeadzone(pad.rx, pad.ry, InputBindings::STICK_DEADZONE);
-            if (pad.hasActivity()) detail::active = *detail::padType;
-        }
+        const bool padOk = readGamepad(pad);
 
         InputState input;
         if (padOk && isGamepad(detail::active)) {
@@ -214,17 +238,18 @@ namespace InputHandler {
             // Respuesta cuadrática: más precisión con inclinaciones pequeñas. Arriba en el stick = mirar arriba.
             input.lookX = pad.rx * std::fabs(pad.rx) * InputBindings::LOOK_SPEED * dt;
             input.lookY = -pad.ry * std::fabs(pad.ry) * InputBindings::LOOK_SPEED * dt;
-            input.crouch = (pad.buttons & InputBindings::PAD_CROUCH) != 0;
             input.jump = (pressed & InputBindings::PAD_JUMP) != 0;
+            input.crouch = (pressed & InputBindings::PAD_CROUCH) != 0;
             input.sprint = (pressed & InputBindings::PAD_SPRINT) != 0;
+            input.pause = (pressed & InputBindings::PAD_PAUSE) != 0;
         } else {
             const detail::Keyboard& k = detail::keys;
             input.moveX = static_cast<float>(k.right) - static_cast<float>(k.left);
             input.moveY = static_cast<float>(k.up) - static_cast<float>(k.down);
             input.lookX = detail::mouseDX;
             input.lookY = detail::mouseDY;
-            input.crouch = k.crouch;
             input.jump = k.jump;
+            input.crouch = k.crouch;
             input.sprint = k.sprint;
         }
 

@@ -10,9 +10,9 @@ struct InputState {
     float lookX = 0.0f;
     float lookY = 0.0f;
 
-    bool crouch = false; // mantenido
-
-    // Eventos de un solo frame.
-    bool jump = false;   // nueva pulsación de salto
-    bool sprint = false; // doble toque en W o pulsar L3
+    // Eventos de un solo frame (nueva pulsación).
+    bool jump = false;
+    bool crouch = false;  // agacharse / levantarse / deslizarse
+    bool sprint = false;  // doble toque en W o pulsar L3
+    bool pause = false;   // Options / Menú del mando
 };

@@ -1,5 +1,6 @@
 #include "mainWindow.hpp"
 #include "graphicsDevice.hpp"
+#include "guiInput.hpp"
 #include "inputHandler.hpp"
 #include "../gameState.hpp"
 #include "../style/guiStyle.hpp"
@@ -29,6 +30,11 @@ namespace {
     constexpr const char* kClassName = "PokemonEdgeEngine";
     constexpr const char* kWindowTitle = "Pokemon Edge // Game Engine Studio";
 
+    constexpr UINT_PTR kDeviceTimerId = 1;
+    constexpr UINT kDeviceRescanDelayMs = 1000;  // segunda búsqueda de mandos tras un cambio de dispositivos
+    constexpr DWORD kMenuPollMs = 50;            // lectura del mando en los menús (solo con un mando conectado)
+    constexpr DWORD kIdleWakeMask = QS_ALLINPUT & ~QS_RAWINPUT; // los informes del mando no despiertan el bucle
+
     HWND g_hwnd = nullptr;
     Texture g_logo;
     GameEngine g_gameEngine;
@@ -39,6 +45,7 @@ namespace {
     int g_selectedSlot = -1;    // ranura pendiente de confirmar en la pantalla de reemplazo
     bool g_resizing = false;    // el usuario está arrastrando el borde de la ventana
     bool g_fullscreen = false;
+    bool g_focused = false;
     bool g_saved = false;       // mostrar el aviso de "partida guardada" en la pausa
 
     // Redimensiona el swap chain solo si el tamaño del área cliente cambió de verdad.
@@ -112,9 +119,21 @@ namespace {
             case WM_MOVE:
                 InputHandler::relockCursor(hwnd);
                 return 0;
-            case WM_DEVICECHANGE: // conexión o desconexión de mandos
-                if (wParam == DBT_DEVNODES_CHANGED) InputHandler::onDeviceChange();
+            case WM_DEVICECHANGE: // conexión o desconexión de mandos (aviso del sistema, sin sondeo)
+                if (wParam == DBT_DEVNODES_CHANGED) {
+                    InputHandler::onDeviceChange();
+                    SetTimer(hwnd, kDeviceTimerId, kDeviceRescanDelayMs, nullptr); // el driver puede tardar en estar listo
+                }
                 return TRUE;
+            case WM_TIMER:
+                if (wParam == kDeviceTimerId) {
+                    KillTimer(hwnd, kDeviceTimerId);
+                    InputHandler::onDeviceChange();
+                }
+                return 0;
+            case WM_MOUSEMOVE:
+                InputHandler::onMouseMove(lParam);
+                return 0;
             case WM_INPUT:
                 InputHandler::onRawInput(lParam);
                 return DefWindowProc(hwnd, msg, wParam, lParam); // Raw Input exige llamar a DefWindowProc
@@ -124,7 +143,11 @@ namespace {
             case WM_KEYUP:
                 InputHandler::onKey(wParam, lParam, false);
                 return 0;
+            case WM_SETFOCUS:
+                g_focused = true;
+                return 0;
             case WM_KILLFOCUS:
+                g_focused = false;
                 InputHandler::resetKeys();
                 if (g_state == GameState::PLAYING) g_state = GameState::PAUSED;
                 return 0;
@@ -151,13 +174,14 @@ void MainWindow::init() {
 
     GraphicsDevice::init(g_hwnd);
     GraphicsDevice::loadTexture(PathsUtil::LOGO_PATH, g_logo); // el logo es opcional: si falla solo se registra
-    InputHandler::init();
+    InputHandler::init(g_hwnd);
 
     ShowWindow(g_hwnd, SW_SHOWDEFAULT);
     UpdateWindow(g_hwnd);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // el mando navega los menús
     GuiStyle::applyTheme();
     ImGui_ImplWin32_Init(g_hwnd);
     ImGui_ImplDX11_Init(GraphicsDevice::device(), GraphicsDevice::context());
@@ -181,6 +205,8 @@ void MainWindow::cleanup() {
 
 void MainWindow::run() {
     int redrawFrames = 2; // frames pendientes de dibujar cuando no hay animación continua
+    bool wasPlaying = false;
+    InputDevice shownDevice = InputHandler::activeDevice();
 
     LARGE_INTEGER freq, last, now;
     QueryPerformanceFrequency(&freq);
@@ -194,17 +220,36 @@ void MainWindow::run() {
             if (msg.message == WM_QUIT) done = true;
             TranslateMessage(&msg);
             DispatchMessage(&msg);
-            redrawFrames = 2;
+            if (msg.message != WM_INPUT) redrawFrames = 2; // los informes del mando no obligan a redibujar
         }
         if (done) break;
 
         InputHandler::refreshDevices();
 
-        // El ratón solo se captura mientras se juega.
-        InputHandler::setMouseCapture(g_hwnd, g_state == GameState::PLAYING);
+        // Al entrar/salir del juego cambia quién lee el mando: el juego (InputHandler) o la interfaz (GuiInput).
+        const bool playing = g_state == GameState::PLAYING;
+        if (playing != wasPlaying) {
+            if (playing) GuiInput::release();
+            else GuiInput::suppress();
+            wasPlaying = playing;
+        }
+        InputHandler::setMouseCapture(g_hwnd, playing);
+
+        // En los menús el mando también maneja la interfaz: solo se redibuja si algo cambió.
+        if (!playing && g_focused && InputHandler::hasGamepad() && GuiInput::pollChanged()) redrawFrames = 2;
+
+        // El dispositivo activo cambió (mando conectado o desconectado, o cambio de uso): redibujar las ayudas.
+        if (const InputDevice device = InputHandler::activeDevice(); device != shownDevice) {
+            shownDevice = device;
+            redrawFrames = 2;
+        }
 
         if (redrawFrames == 0 && !isAnimated(g_state)) {
-            WaitMessage();
+            // Espera pasiva. Sin mando (o sin foco) no se despierta nunca por iniciativa propia.
+            // Con un mando conectado se despierta cada kMenuPollMs para leerlo: Windows no avisa de
+            // las pulsaciones de los mandos Xbox (XInput).
+            const DWORD timeout = (g_focused && InputHandler::hasGamepad()) ? kMenuPollMs : INFINITE;
+            MsgWaitForMultipleObjectsEx(0, nullptr, timeout, kIdleWakeMask, MWMO_INPUTAVAILABLE);
             QueryPerformanceCounter(&last); // el tiempo dormido no cuenta como dt
             continue;
         }
@@ -213,8 +258,17 @@ void MainWindow::run() {
         const float dt = (std::min)(static_cast<float>(now.QuadPart - last.QuadPart) / freq.QuadPart, 0.1f);
         last = now;
 
-        if (g_state == GameState::PLAYING) g_gameEngine.update(dt, InputHandler::poll(dt));
-        else if (g_state == GameState::LOADING) g_loadTimer += dt;
+        if (g_state == GameState::PLAYING) {
+            const InputState input = InputHandler::poll(dt);
+            if (input.pause) {
+                g_state = GameState::PAUSED;
+                redrawFrames = 2;
+            } else {
+                g_gameEngine.update(dt, input);
+            }
+        } else if (g_state == GameState::LOADING) {
+            g_loadTimer += dt;
+        }
 
         // GUI: fondo de la GUI. Juego: fondo propio del motor.
         const bool inGame = isInGame(g_state);
@@ -225,6 +279,7 @@ void MainWindow::run() {
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
+        if (g_state != GameState::PLAYING) GuiInput::feed();
         ImGui::NewFrame();
 
         const GameState prevState = g_state;
@@ -269,7 +324,7 @@ void MainWindow::run() {
                 LoadingComponent::render(g_state, g_loadTimer);
                 break;
             case GameState::PLAYING:
-                HudComponent::render(g_state);
+                HudComponent::render(g_state, InputHandler::activeDevice());
                 break;
             case GameState::PAUSED:
                 if (PauseComponent::render(g_state, g_saved)) {
@@ -281,6 +336,7 @@ void MainWindow::run() {
                 break;
         }
         ImGui::End();
+        GuiInput::endFrame();
 
         ImGui::Render();
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());

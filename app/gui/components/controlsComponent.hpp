@@ -4,6 +4,7 @@
 #include "../style/guiDraw.hpp"
 #include "../style/guiLayout.hpp"
 #include "../style/guiStyle.hpp"
+#include "../window/guiInput.hpp"
 #include "../../engine/core/inputDevice.hpp"
 
 // Muestra únicamente los controles del dispositivo que se está usando.
@@ -22,18 +23,22 @@ namespace ControlsComponent {
         inline constexpr PadLayout PLAYSTATION_LAYOUT = { 322.0f, 150.0f, 262.0f, 438.0f, 150.0f, 262.0f, 292.0f, 102.0f, 468.0f, 102.0f };
         inline constexpr PadLayout XBOX_LAYOUT        = { 292.0f, 102.0f, 102.0f, 420.0f, 150.0f, 262.0f, 338.0f, 150.0f, 468.0f, 102.0f };
 
+        inline constexpr const char* NOTES_KEYBOARD[] = {
+            "Agacharse: pulsa SHIFT (otra vez para levantarte). Corriendo, SHIFT inicia un deslizamiento corto sin mantener la tecla.",
+            "Durante el deslizamiento, A y D cambian la dirección. Saltar desde un deslizamiento conserva el impulso.",
+        };
+        inline constexpr const char* NOTES_GAMEPAD[] = {
+            "Agacharse: pulsa el botón derecho (otra vez para levantarte). Corriendo (L3), inicia un deslizamiento corto.",
+            "Durante el deslizamiento, inclina el stick izquierdo a un lado para girar. Saltar desde él conserva el impulso.",
+            "Menús: stick izquierdo o cruceta para moverte, botón inferior para aceptar y botón derecho para volver.",
+        };
+
         inline const char* title(InputDevice device) {
             switch (device) {
                 case InputDevice::XBOX:        return "CONTROLES: MANDO DE XBOX";
                 case InputDevice::PLAYSTATION: return "CONTROLES: MANDO DE PLAYSTATION";
                 default:                       return "CONTROLES: TECLADO Y RATÓN";
             }
-        }
-
-        inline const char* note(InputDevice device) {
-            return isGamepad(device)
-                ? "Deslizarse: corre (pulsa L3) y agáchate. Durante el deslizamiento, inclina el stick izquierdo a un lado para girar."
-                : "Deslizarse: corre (W W) y pulsa SHIFT. Durante el deslizamiento, A y D cambian la dirección.";
         }
 
         inline void drawKeyboard(ImDrawList* dl, const ImVec2& o) {
@@ -85,16 +90,22 @@ namespace ControlsComponent {
             for (const Shape& s : body) dl->AddRectFilled(P(s.x0 - 2.0f, s.y0 - 2.0f), P(s.x1 + 2.0f, s.y1 + 2.0f), MUTED, s.radius + 2.0f);
             for (const Shape& s : body) dl->AddRectFilled(P(s.x0, s.y0), P(s.x1, s.y1), SURFACE, s.radius);
 
-            // Elementos centrales propios de cada mando.
+            // Elementos centrales propios de cada mando; el botón de pausa (Options / Menú) está en uso.
+            float pauseX, pauseY;
             if (xbox) {
-                dl->AddCircle(P(380.0f, 86.0f), 9.0f, MUTED, 0, 2.0f);  // botón Xbox
-                dl->AddCircle(P(350.0f, 102.0f), 5.0f, MUTED, 0, 1.5f); // Ver
-                dl->AddCircle(P(410.0f, 102.0f), 5.0f, MUTED, 0, 1.5f); // Menú
+                dl->AddCircle(P(380.0f, 86.0f), 9.0f, MUTED, 0, 2.0f);   // botón Xbox
+                dl->AddCircle(P(350.0f, 102.0f), 5.0f, MUTED, 0, 1.5f);  // Ver
+                dl->AddCircleFilled(P(410.0f, 102.0f), 5.0f, ACCENT);    // Menú
+                pauseX = 410.0f;
+                pauseY = 97.0f;
             } else {
                 box(340.0f, 82.0f, 420.0f, 114.0f, 8.0f, PANEL, MUTED);  // panel táctil
+                dl->AddRectFilled(P(428.0f, 86.0f), P(434.0f, 100.0f), ACCENT, 3.0f); // Options
+                pauseX = 431.0f;
+                pauseY = 86.0f;
             }
 
-            // Cruceta (sin acción asignada).
+            // Cruceta (sin acción asignada en el juego; navega los menús).
             const float dx = layout.dpadX, dy = layout.dpadY;
             dl->AddRectFilled(P(dx - 19.0f, dy - 8.0f), P(dx + 19.0f, dy + 8.0f), MUTED, 3.0f);
             dl->AddRectFilled(P(dx - 8.0f, dy - 19.0f), P(dx + 8.0f, dy + 19.0f), MUTED, 3.0f);
@@ -127,6 +138,7 @@ namespace ControlsComponent {
             callout(layout.rsX, layout.rsY, layout.rsElbowY, 550.0f, "Mover la cámara");
             callout(fx + 27.0f, fy, fy, 550.0f, "Agacharse / Deslizarse");
             callout(fx, fy + 27.0f, fy + 58.0f, 550.0f, "Saltar");
+            callout(pauseX, pauseY, 14.0f, 550.0f, "Pausa");
         }
     }
 
@@ -147,12 +159,11 @@ namespace ControlsComponent {
         else detail::drawKeyboard(dl, origin);
 
         ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
-        GuiLayout::centeredText(detail::note(device));
+        if (isGamepad(device)) for (const char* line : detail::NOTES_GAMEPAD) GuiLayout::centeredText(line);
+        else for (const char* line : detail::NOTES_KEYBOARD) GuiLayout::centeredText(line);
         ImGui::PopStyleColor();
 
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
-        if (GuiLayout::centeredButton("VOLVER") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-            state = GameState::PAUSED;
-        }
+        if (GuiLayout::centeredButton("VOLVER") || GuiInput::backPressed()) state = GameState::PAUSED;
     }
 }

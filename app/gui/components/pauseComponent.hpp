@@ -3,6 +3,7 @@
 #include "../gameState.hpp"
 #include "../style/guiLayout.hpp"
 #include "../style/guiStyle.hpp"
+#include "../window/guiInput.hpp"
 
 namespace PauseComponent {
     // saved: mostrar el aviso de "partida guardada". Devuelve true si se pulsó "GUARDAR PARTIDA".
@@ -12,8 +13,9 @@ namespace PauseComponent {
         ImGui::SetCursorPosY(ImGui::GetWindowSize().y * 0.22f);
         GuiLayout::centeredText("PAUSA");
 
+        // ESC, Options/Menú o el botón de volver del mando continúan la partida.
         ImGui::Dummy(ImVec2(0.0f, 20.0f));
-        if (GuiLayout::centeredButton("CONTINUAR") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        if (GuiLayout::centeredButton("CONTINUAR") || GuiInput::backPressed() || GuiInput::startPressed()) {
             state = GameState::PLAYING;
         }
 

@@ -19,11 +19,11 @@ class GameEngine {
 
     void applySave(const SaveData& save) {
         m_scene = Scene{};
-        m_scene.player.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
+        m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
     }
 
     SaveData captureSave() const {
-        const DirectX::XMFLOAT3& p = m_scene.player.position;
+        const DirectX::XMFLOAT3& p = m_scene.player.body.position;
         SaveData save;
         save.playerPosition = { p.x, p.y, p.z };
         return save;

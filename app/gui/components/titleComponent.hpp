@@ -3,6 +3,7 @@
 #include "imgui.h"
 #include "../gameState.hpp"
 #include "../style/guiLayout.hpp"
+#include "../window/guiInput.hpp"
 
 namespace TitleComponent {
     inline void render(GameState& state, ImTextureID logoTexture, int logoW, int logoH) {
@@ -25,7 +26,8 @@ namespace TitleComponent {
         const float alpha = 0.2f + 0.8f * (0.5f + 0.5f * std::sin(static_cast<float>(ImGui::GetTime()) * 4.0f));
         ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.55f, alpha), "%s", pressText);
 
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_Space) || ImGui::IsMouseClicked(0)) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_Space) ||
+            ImGui::IsMouseClicked(0) || GuiInput::anyButtonPressed()) {
             state = GameState::MAIN_MENU;
         }
     }

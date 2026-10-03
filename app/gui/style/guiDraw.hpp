@@ -21,14 +21,15 @@ namespace GuiDraw {
         dl->AddText(ImVec2(x, y - ImGui::GetTextLineHeight() * 0.5f), GuiStyle::FOREGROUND, text);
     }
 
-    // Dibuja una tecla y devuelve su ancho.
-    inline float keycap(ImDrawList* dl, const ImVec2& pos, const char* text, float minWidth = KEY_SIZE) {
+    // Dibuja una tecla (o botón con texto) y devuelve su ancho.
+    inline float keycap(ImDrawList* dl, const ImVec2& pos, const char* text,
+                        float minWidth = KEY_SIZE, float height = KEY_SIZE) {
         const ImVec2 size = ImGui::CalcTextSize(text);
-        const float width = (std::max)(minWidth, size.x + 20.0f);
-        const ImVec2 corner(pos.x + width, pos.y + KEY_SIZE);
+        const float width = (std::max)(minWidth, size.x + (height >= KEY_SIZE ? 20.0f : 14.0f));
+        const ImVec2 corner(pos.x + width, pos.y + height);
         dl->AddRectFilled(pos, corner, GuiStyle::SURFACE, 6.0f);
         dl->AddRect(pos, corner, GuiStyle::ACCENT, 6.0f, 0, 2.0f);
-        dl->AddText(ImVec2(pos.x + (width - size.x) * 0.5f, pos.y + (KEY_SIZE - size.y) * 0.5f), GuiStyle::FOREGROUND, text);
+        dl->AddText(ImVec2(pos.x + (width - size.x) * 0.5f, pos.y + (height - size.y) * 0.5f), GuiStyle::FOREGROUND, text);
         return width;
     }
 
@@ -56,9 +57,9 @@ namespace GuiDraw {
 
     // Botón frontal de un mando: símbolos de PlayStation o letras de colores de Xbox.
     // Los botones usados se rellenan; el resto queda apagado.
-    inline void faceButton(ImDrawList* dl, const ImVec2& c, Face face, bool xboxStyle, bool used) {
-        constexpr float radius = 10.0f;
+    inline void faceButton(ImDrawList* dl, const ImVec2& c, Face face, bool xboxStyle, bool used, float radius = 10.0f) {
         const int index = static_cast<int>(face);
+        const float s = radius / 10.0f; // escala de los símbolos
 
         if (xboxStyle) {
             static constexpr const char* letters[] = { "Y", "B", "A", "X" };
@@ -78,17 +79,17 @@ namespace GuiDraw {
         if (!used) dl->AddCircle(c, radius, GuiStyle::MUTED, 0, 1.5f);
         switch (face) {
             case Face::NORTH: // triángulo
-                dl->AddTriangle(ImVec2(c.x, c.y - 5.0f), ImVec2(c.x - 5.0f, c.y + 4.0f), ImVec2(c.x + 5.0f, c.y + 4.0f), color, 1.5f);
+                dl->AddTriangle(ImVec2(c.x, c.y - 5.0f * s), ImVec2(c.x - 5.0f * s, c.y + 4.0f * s), ImVec2(c.x + 5.0f * s, c.y + 4.0f * s), color, 1.5f);
                 break;
             case Face::EAST: // círculo
-                dl->AddCircle(c, 5.0f, color, 0, 1.5f);
+                dl->AddCircle(c, 5.0f * s, color, 0, 1.5f);
                 break;
             case Face::SOUTH: // cruz
-                dl->AddLine(ImVec2(c.x - 4.5f, c.y - 4.5f), ImVec2(c.x + 4.5f, c.y + 4.5f), color, 1.5f);
-                dl->AddLine(ImVec2(c.x + 4.5f, c.y - 4.5f), ImVec2(c.x - 4.5f, c.y + 4.5f), color, 1.5f);
+                dl->AddLine(ImVec2(c.x - 4.5f * s, c.y - 4.5f * s), ImVec2(c.x + 4.5f * s, c.y + 4.5f * s), color, 1.5f);
+                dl->AddLine(ImVec2(c.x + 4.5f * s, c.y - 4.5f * s), ImVec2(c.x - 4.5f * s, c.y + 4.5f * s), color, 1.5f);
                 break;
             case Face::WEST: // cuadrado
-                dl->AddRect(ImVec2(c.x - 4.5f, c.y - 4.5f), ImVec2(c.x + 4.5f, c.y + 4.5f), color, 0.0f, 0, 1.5f);
+                dl->AddRect(ImVec2(c.x - 4.5f * s, c.y - 4.5f * s), ImVec2(c.x + 4.5f * s, c.y + 4.5f * s), color, 0.0f, 0, 1.5f);
                 break;
         }
     }

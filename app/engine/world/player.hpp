@@ -3,36 +3,45 @@
 #include <cmath>
 #include <DirectXMath.h>
 #include "../core/input.hpp"
+#include "../physics/physicsWorld.hpp"
 
+// Controlador del personaje: decide su velocidad horizontal a partir de la entrada.
+// La gravedad, el suelo y la integración del movimiento los resuelve Physics::World.
 class Player {
     public:
-    static constexpr float WALK_SPEED   = 5.0f;
-    static constexpr float SPRINT_SPEED = 9.0f;
-    static constexpr float CROUCH_SPEED = 2.5f;
-    static constexpr float SLIDE_SPEED  = 12.0f; // velocidad inicial del deslizamiento
-    static constexpr float SLIDE_DECEL  = 16.0f; // lo que frena por segundo
-    static constexpr float JUMP_SPEED   = 7.0f;
-    static constexpr float GRAVITY      = 20.0f;
+    static constexpr float WALK_SPEED     = 5.0f;
+    static constexpr float SPRINT_SPEED   = 9.0f;
+    static constexpr float CROUCH_SPEED   = 2.5f;
+    static constexpr float SLIDE_SPEED    = 10.5f; // algo más rápido que correr
+    static constexpr float SLIDE_DURATION = 0.9f;  // segundos
+    static constexpr float SLIDE_EASE_OUT = 0.2f;  // al final baja hasta la velocidad de correr
+    static constexpr float JUMP_SPEED     = 7.0f;
 
-    DirectX::XMFLOAT3 position = { 0.0f, 0.0f, 0.0f }; // y = 0 es el suelo
+    Physics::Body body;
+
+    Player() { body.shadowRadius = SHADOW_RADIUS; }
 
     // Escala vertical del modelo según la postura (de pie, agachado o deslizándose).
     float heightScale() const { return m_heightScale; }
 
     // El movimiento es relativo a hacia dónde mira la cámara (cameraYaw).
-    void update(float dt, const InputState& input, float cameraYaw) {
-        const bool grounded = position.y == 0.0f; // se fuerza a 0 exacto al aterrizar
+    void update(float dt, const InputState& input, float cameraYaw, const Physics::World& world) {
+        const bool wasGrounded = body.onGround;
         const bool forward = input.moveY > FORWARD_THRESHOLD;
 
         float dirX = 0.0f, dirZ = 0.0f;
         const float amount = direction(input.moveX, input.moveY, cameraYaw, dirX, dirZ);
 
-        updateSprint(input, grounded, forward);
-        updateSlide(dt, input, cameraYaw, grounded);
-        move(dt, input, grounded, dirX, dirZ, amount);
-        updateVertical(dt, input, grounded);
+        updateSprint(input, wasGrounded, forward);
+        updateStance(input, cameraYaw, wasGrounded);
+        updateSlide(dt, input, cameraYaw);
+        updateHorizontal(dt, wasGrounded, dirX, dirZ, amount);
+        if (wasGrounded && input.jump) jump(world);
 
-        m_heightScale = m_sliding ? SLIDE_HEIGHT : (input.crouch ? CROUCH_HEIGHT : 1.0f);
+        world.step(body, dt);
+        if (!wasGrounded && body.onGround) land(input, cameraYaw);
+
+        m_heightScale = m_sliding ? SLIDE_HEIGHT : ((m_crouching || m_crouchQueued) ? CROUCH_HEIGHT : 1.0f);
     }
 
     private:
@@ -41,6 +50,7 @@ class Player {
     static constexpr float MOMENTUM_DECAY = 2.0f;    // pérdida de impulso por segundo en el aire
     static constexpr float CROUCH_HEIGHT = 0.6f;
     static constexpr float SLIDE_HEIGHT = 0.45f;
+    static constexpr float SHADOW_RADIUS = 0.55f;
 
     // Dirección unitaria en XZ para unos ejes de movimiento y la orientación de la cámara.
     // Devuelve cuánto se empuja (0..1); 0 si no hay entrada. Las diagonales quedan normalizadas.
@@ -56,42 +66,68 @@ class Player {
         return (std::min)(length, 1.0f);
     }
 
-    // Correr: doble toque en W / L3, solo desde el suelo y sin agacharse. Termina al dejar de avanzar.
+    // Correr: doble toque en W / L3, solo desde el suelo. Termina al dejar de avanzar. Levanta al personaje.
     void updateSprint(const InputState& input, bool grounded, bool forward) {
-        if (!forward) m_sprinting = false;
-        else if (input.sprint && grounded && !input.crouch) m_sprinting = true;
+        if (!forward) {
+            m_sprinting = false;
+        } else if (input.sprint && grounded) {
+            m_sprinting = true;
+            m_crouching = false;
+        }
     }
 
-    // Deslizarse: corriendo + agacharse (en el suelo o al aterrizar de un salto corriendo).
-    // Siempre avanza; A/D (o el stick) giran la dirección. La cámara no la cambia: solo se recalcula
-    // cuando el jugador cambia su dirección lateral.
-    void updateSlide(float dt, const InputState& input, float cameraYaw, bool grounded) {
-        if (m_sliding) {
-            m_slideSpeed -= SLIDE_DECEL * dt;
-            if (!input.crouch || m_slideSpeed <= CROUCH_SPEED) {
-                m_sliding = false;
-            } else if (std::fabs(input.moveX - m_slideStrafe) > STEER_EPSILON) {
-                m_slideStrafe = input.moveX;
-                direction(m_slideStrafe, 1.0f, cameraYaw, m_slideDirX, m_slideDirZ);
-            }
-        } else if (grounded && m_sprinting && input.crouch) {
-            m_sliding = true;
-            m_sprinting = false;
-            m_slideSpeed = SLIDE_SPEED;
+    // Una pulsación de agacharse: corriendo desliza; en cualquier otro caso agacha o levanta.
+    // En el aire se guarda para el aterrizaje.
+    void updateStance(const InputState& input, float cameraYaw, bool grounded) {
+        if (!input.crouch) return;
+        if (!grounded) {
+            m_crouchQueued = true;
+        } else if (m_sliding) {
+            return;
+        } else if (m_sprinting) {
+            startSlide(input.moveX, cameraYaw);
+        } else {
+            m_crouching = !m_crouching;
+        }
+    }
+
+    void startSlide(float strafe, float cameraYaw) {
+        m_sliding = true;
+        m_crouching = false;
+        m_slideTime = 0.0f;
+        m_slideStrafe = strafe;
+        direction(strafe, 1.0f, cameraYaw, m_slideDirX, m_slideDirZ);
+    }
+
+    // El deslizamiento siempre avanza; A/D (o el stick) giran la dirección. La cámara no la cambia:
+    // solo se recalcula cuando el jugador cambia su dirección lateral.
+    void updateSlide(float dt, const InputState& input, float cameraYaw) {
+        if (!m_sliding) return;
+
+        m_slideTime += dt;
+        if (m_slideTime >= SLIDE_DURATION) {
+            m_sliding = false; // vuelve a la postura normal (y sigue corriendo si sigue avanzando)
+        } else if (std::fabs(input.moveX - m_slideStrafe) > STEER_EPSILON) {
             m_slideStrafe = input.moveX;
             direction(m_slideStrafe, 1.0f, cameraYaw, m_slideDirX, m_slideDirZ);
         }
     }
 
-    void move(float dt, const InputState& input, bool grounded, float dirX, float dirZ, float amount) {
-        float speed;
+    // Velocidad constante durante el deslizamiento; en el último tramo baja a la de correr.
+    float slideSpeed() const {
+        const float remaining = (std::clamp)((SLIDE_DURATION - m_slideTime) / SLIDE_EASE_OUT, 0.0f, 1.0f);
+        return SPRINT_SPEED + (SLIDE_SPEED - SPRINT_SPEED) * remaining;
+    }
+
+    // Asigna la velocidad horizontal del cuerpo (la física la integra después).
+    void updateHorizontal(float dt, bool grounded, float dirX, float dirZ, float amount) {
+        float speed = 0.0f;
         if (m_sliding) {
             dirX = m_slideDirX;
             dirZ = m_slideDirZ;
-            speed = m_slideSpeed;
+            speed = slideSpeed();
         } else if (grounded) {
-            if (amount == 0.0f) return;
-            speed = (m_sprinting ? SPRINT_SPEED : (input.crouch ? CROUCH_SPEED : WALK_SPEED)) * amount;
+            if (amount > 0.0f) speed = (m_sprinting ? SPRINT_SPEED : (m_crouching ? CROUCH_SPEED : WALK_SPEED)) * amount;
         } else {
             // En el aire se conserva el impulso (por ejemplo, el de un salto desde un deslizamiento).
             if (amount > 0.0f) {
@@ -106,36 +142,32 @@ class Player {
             dirZ = m_airDirZ;
         }
 
-        position.x += dirX * speed * dt;
-        position.z += dirZ * speed * dt;
+        body.velocity.x = dirX * speed;
+        body.velocity.z = dirZ * speed;
     }
 
-    void updateVertical(float dt, const InputState& input, bool grounded) {
-        // Salto: solo con una pulsación nueva y desde el suelo.
-        if (grounded && input.jump) {
-            m_velocityY = JUMP_SPEED;
-            if (m_sliding) { // saltar desde un deslizamiento conserva el impulso de carrera
-                m_sliding = false;
-                m_sprinting = true;
-                m_momentum = (std::max)(m_slideSpeed, SPRINT_SPEED);
-                m_airDirX = m_slideDirX;
-                m_airDirZ = m_slideDirZ;
-            }
-        }
-
-        if (!grounded || m_velocityY > 0.0f) {
-            m_velocityY -= GRAVITY * dt;
-            position.y += m_velocityY * dt;
-            if (position.y <= 0.0f) {
-                position.y = 0.0f;
-                m_velocityY = 0.0f;
-                m_momentum = 0.0f;
-            }
+    void jump(const Physics::World& world) {
+        world.jump(body, JUMP_SPEED);
+        m_crouching = false;
+        if (m_sliding) { // saltar desde un deslizamiento conserva el impulso de carrera
+            m_sliding = false;
+            m_momentum = (std::max)(slideSpeed(), SPRINT_SPEED);
+            m_airDirX = m_slideDirX;
+            m_airDirZ = m_slideDirZ;
         }
     }
 
-    float m_velocityY = 0.0f;
-    float m_slideSpeed = 0.0f;
+    // Al aterrizar se aplica la pulsación de agacharse hecha en el aire: corriendo desliza, si no, agacha.
+    void land(const InputState& input, float cameraYaw) {
+        m_momentum = 0.0f;
+        if (!m_crouchQueued) return;
+
+        m_crouchQueued = false;
+        if (m_sprinting) startSlide(input.moveX, cameraYaw);
+        else m_crouching = true;
+    }
+
+    float m_slideTime = 0.0f;
     float m_slideStrafe = 0.0f;
     float m_slideDirX = 0.0f;
     float m_slideDirZ = 0.0f;
@@ -145,4 +177,6 @@ class Player {
     float m_heightScale = 1.0f;
     bool m_sprinting = false;
     bool m_sliding = false;
+    bool m_crouching = false;
+    bool m_crouchQueued = false;
 };

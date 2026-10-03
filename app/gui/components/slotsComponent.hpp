@@ -4,6 +4,7 @@
 #include "../gameState.hpp"
 #include "../style/guiLayout.hpp"
 #include "../style/guiStyle.hpp"
+#include "../window/guiInput.hpp"
 #include "../../managers/saveManager.hpp"
 
 // Pantallas con la lista de partidas guardadas (cargar una, o elegir cuál eliminar).
@@ -40,9 +41,7 @@ namespace SlotsComponent {
         const int slot = detail::slotButtons(true);
 
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
-        if (GuiLayout::centeredButton("VOLVER") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-            state = GameState::MAIN_MENU;
-        }
+        if (GuiLayout::centeredButton("VOLVER") || GuiInput::backPressed()) state = GameState::MAIN_MENU;
         return slot;
     }
 
@@ -50,7 +49,7 @@ namespace SlotsComponent {
     // 'selected' es la ranura pendiente de confirmar (-1 si ninguna). Devuelve la ranura confirmada o -1.
     inline int renderReplace(GameState& state, int& selected) {
         int confirmed = -1;
-        const bool escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        const bool back = GuiInput::backPressed();
 
         ImGui::SetCursorPosY(ImGui::GetWindowSize().y * 0.15f);
         GuiLayout::centeredText("HAY 4 PARTIDAS GUARDADAS");
@@ -62,7 +61,7 @@ namespace SlotsComponent {
             if (slot >= 0) selected = slot;
 
             ImGui::Dummy(ImVec2(0.0f, 10.0f));
-            if (GuiLayout::centeredButton("VOLVER") || escape) state = GameState::MAIN_MENU;
+            if (GuiLayout::centeredButton("VOLVER") || back) state = GameState::MAIN_MENU;
         } else {
             char message[64];
             std::snprintf(message, sizeof(message), "¿Eliminar la partida %d? No se puede deshacer.", selected + 1);
@@ -76,7 +75,7 @@ namespace SlotsComponent {
                 selected = -1;
             }
             ImGui::Dummy(ImVec2(0.0f, 10.0f));
-            if (GuiLayout::centeredButton("CANCELAR") || escape) selected = -1;
+            if (GuiLayout::centeredButton("CANCELAR") || back) selected = -1;
         }
         return confirmed;
     }
