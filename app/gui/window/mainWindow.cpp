@@ -5,6 +5,7 @@
 #include "../style/guiStyle.hpp"
 #include "../components/titleComponent.hpp"
 #include "../components/menuComponent.hpp"
+#include "../components/slotsComponent.hpp"
 #include "../components/loadingComponent.hpp"
 #include "../components/hudComponent.hpp"
 #include "../components/pauseComponent.hpp"
@@ -17,6 +18,7 @@
 #include <cstdint>
 #include <optional>
 #include <windows.h>
+#include <dbt.h>
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
@@ -33,6 +35,8 @@ namespace {
     GameState g_state = GameState::TITLE_SCREEN; // a nivel de módulo para poder pausar desde WM_KILLFOCUS
     WINDOWPLACEMENT g_windowedPlacement = { sizeof(WINDOWPLACEMENT) };
     float g_loadTimer = 0.0f;   // segundos desde que empezó la carga
+    int g_activeSlot = -1;      // ranura de la partida en curso
+    int g_selectedSlot = -1;    // ranura pendiente de confirmar en la pantalla de reemplazo
     bool g_resizing = false;    // el usuario está arrastrando el borde de la ventana
     bool g_fullscreen = false;
     bool g_saved = false;       // mostrar el aviso de "partida guardada" en la pausa
@@ -70,13 +74,25 @@ namespace {
         }
     }
 
-    // Prepara la escena (nueva o cargada) y arranca la pantalla de carga.
-    void startGame(bool continueSave) {
-        const std::optional<SaveData> save = continueSave ? SaveManager::load() : std::nullopt;
-        if (save) g_gameEngine.applySave(*save);
-        else g_gameEngine.newGame();
+    // Arranca la pantalla de carga de la partida de una ranura.
+    void beginLoading(int slot) {
+        g_activeSlot = slot;
         g_loadTimer = 0.0f;
         g_saved = false;
+        g_state = GameState::LOADING;
+    }
+
+    // Partida nueva: ocupa la ranura desde el primer momento.
+    void startNewGame(int slot) {
+        g_gameEngine.newGame();
+        SaveManager::save(slot, g_gameEngine.captureSave());
+        beginLoading(slot);
+    }
+
+    void startSavedGame(int slot) {
+        if (const std::optional<SaveData> save = SaveManager::load(slot)) g_gameEngine.applySave(*save);
+        else g_gameEngine.newGame(); // partida dañada: se empieza de cero en esa ranura
+        beginLoading(slot);
     }
 
     LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -96,6 +112,9 @@ namespace {
             case WM_MOVE:
                 InputHandler::relockCursor(hwnd);
                 return 0;
+            case WM_DEVICECHANGE: // conexión o desconexión de mandos
+                if (wParam == DBT_DEVNODES_CHANGED) InputHandler::onDeviceChange();
+                return TRUE;
             case WM_INPUT:
                 InputHandler::onRawInput(lParam);
                 return DefWindowProc(hwnd, msg, wParam, lParam); // Raw Input exige llamar a DefWindowProc
@@ -132,6 +151,7 @@ void MainWindow::init() {
 
     GraphicsDevice::init(g_hwnd);
     GraphicsDevice::loadTexture(PathsUtil::LOGO_PATH, g_logo); // el logo es opcional: si falla solo se registra
+    InputHandler::init();
 
     ShowWindow(g_hwnd, SW_SHOWDEFAULT);
     UpdateWindow(g_hwnd);
@@ -178,6 +198,8 @@ void MainWindow::run() {
         }
         if (done) break;
 
+        InputHandler::refreshDevices();
+
         // El ratón solo se captura mientras se juega.
         InputHandler::setMouseCapture(g_hwnd, g_state == GameState::PLAYING);
 
@@ -191,7 +213,7 @@ void MainWindow::run() {
         const float dt = (std::min)(static_cast<float>(now.QuadPart - last.QuadPart) / freq.QuadPart, 0.1f);
         last = now;
 
-        if (g_state == GameState::PLAYING) g_gameEngine.update(dt, InputHandler::poll());
+        if (g_state == GameState::PLAYING) g_gameEngine.update(dt, InputHandler::poll(dt));
         else if (g_state == GameState::LOADING) g_loadTimer += dt;
 
         // GUI: fondo de la GUI. Juego: fondo propio del motor.
@@ -216,12 +238,33 @@ void MainWindow::run() {
                 TitleComponent::render(g_state, logoId, g_logo.width, g_logo.height);
                 break;
             case GameState::MAIN_MENU:
-                switch (MenuComponent::render(g_state, SaveManager::hasSave())) {
-                    case MenuComponent::Action::NEW_GAME:      startGame(false); break;
-                    case MenuComponent::Action::CONTINUE_GAME: startGame(true);  break;
-                    case MenuComponent::Action::NONE:                            break;
+                switch (MenuComponent::render(g_state, SaveManager::hasSaves())) {
+                    case MenuComponent::Action::NEW_GAME: {
+                        const int slot = SaveManager::freeSlot();
+                        if (slot >= 0) startNewGame(slot);
+                        else g_state = GameState::REPLACE_MENU; // 4 partidas: hay que eliminar una
+                        break;
+                    }
+                    case MenuComponent::Action::LOAD_GAME:
+                        g_state = GameState::LOAD_MENU;
+                        break;
+                    case MenuComponent::Action::NONE:
+                        break;
                 }
                 break;
+            case GameState::LOAD_MENU: {
+                const int slot = SlotsComponent::renderLoad(g_state);
+                if (slot >= 0) startSavedGame(slot);
+                break;
+            }
+            case GameState::REPLACE_MENU: {
+                const int slot = SlotsComponent::renderReplace(g_state, g_selectedSlot);
+                if (slot >= 0) {
+                    SaveManager::remove(slot);
+                    startNewGame(slot);
+                }
+                break;
+            }
             case GameState::LOADING:
                 LoadingComponent::render(g_state, g_loadTimer);
                 break;
@@ -229,10 +272,12 @@ void MainWindow::run() {
                 HudComponent::render(g_state);
                 break;
             case GameState::PAUSED:
-                if (PauseComponent::render(g_state, g_saved)) g_saved = SaveManager::save(g_gameEngine.captureSave());
+                if (PauseComponent::render(g_state, g_saved)) {
+                    g_saved = SaveManager::save(g_activeSlot, g_gameEngine.captureSave());
+                }
                 break;
             case GameState::CONTROLS:
-                ControlsComponent::render(g_state);
+                ControlsComponent::render(g_state, InputHandler::activeDevice());
                 break;
         }
         ImGui::End();

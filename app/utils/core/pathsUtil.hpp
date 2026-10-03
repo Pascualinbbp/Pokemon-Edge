@@ -27,11 +27,15 @@ class PathsUtil {
     inline static const fs::path LOG_DIR = APP_DIR / "logs";
     inline static const fs::path LOG_FILE_PATH = LOG_DIR / "app.log";
     inline static const fs::path SAVE_DIR = APP_DIR / "saves";
-    inline static const fs::path SAVE_PATH = SAVE_DIR / "save.json";
     
     inline static const fs::path DOWNLOAD_FOLDER = BASE_DIR / "temp_download";
     inline static const fs::path TEMP_ZIP_PATH = DOWNLOAD_FOLDER / "update.zip";
     
     static constexpr const wchar_t* REMOTE_VERSION_JSON_URL = L"https://github.com/Pascualinbbp/Pokemon-Edge/releases/latest/download/version.json";
     static constexpr const wchar_t* LATEST_ZIP_URL = L"https://github.com/Pascualinbbp/Pokemon-Edge/releases/latest/download/PokemonEdge.zip";
+
+    // Archivo de una ranura de partida (slot empieza en 0): slot1.json, slot2.json...
+    static fs::path saveSlotPath(int slot) {
+        return SAVE_DIR / ("slot" + std::to_string(slot + 1) + ".json");
+    }
 };

@@ -12,7 +12,7 @@ struct Scene {
     Camera camera;
 
     void update(float dt, const InputState& input) {
-        camera.rotate(input.mouseDX, input.mouseDY);
+        camera.rotate(input.lookX, input.lookY);
         player.update(dt, input, camera.yaw());
         player.position.x = (std::clamp)(player.position.x, -HALF_SIZE, HALF_SIZE);
         player.position.z = (std::clamp)(player.position.z, -HALF_SIZE, HALF_SIZE);

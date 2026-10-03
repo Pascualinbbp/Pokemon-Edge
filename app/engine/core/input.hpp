@@ -1,18 +1,18 @@
 #pragma once
 
+// Acciones del jugador de este frame, independientes del dispositivo (teclado, ratón o mando).
 struct InputState {
-    // Teclas mantenidas.
-    bool up = false;
-    bool down = false;
-    bool left = false;
-    bool right = false;
-    bool crouch = false;
+    // Movimiento: strafe (-1 izquierda, +1 derecha) y avance (-1 atrás, +1 adelante).
+    float moveX = 0.0f;
+    float moveY = 0.0f;
 
-    // Eventos de un solo frame (se consumen en cada lectura).
-    bool jump = false;   // nueva pulsación de espacio
-    bool sprint = false; // doble toque en W
+    // Rotación de cámara de este frame, en "píxeles de ratón" equivalentes.
+    float lookX = 0.0f;
+    float lookY = 0.0f;
 
-    // Desplazamiento del ratón (en píxeles) acumulado desde el frame anterior.
-    float mouseDX = 0.0f;
-    float mouseDY = 0.0f;
+    bool crouch = false; // mantenido
+
+    // Eventos de un solo frame.
+    bool jump = false;   // nueva pulsación de salto
+    bool sprint = false; // doble toque en W o pulsar L3
 };

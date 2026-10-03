@@ -3,6 +3,8 @@
 enum class GameState {
     TITLE_SCREEN,
     MAIN_MENU,
+    LOAD_MENU,     // lista de partidas guardadas
+    REPLACE_MENU,  // 4 partidas guardadas: elegir cuál eliminar para empezar una nueva
     LOADING,
     PLAYING,
     PAUSED,
@@ -16,7 +18,7 @@ constexpr bool isInGame(GameState state) {
 
 // Estados en los que la ventana va en pantalla completa (desde que empieza la carga de la partida).
 constexpr bool isFullscreen(GameState state) {
-    return state != GameState::TITLE_SCREEN && state != GameState::MAIN_MENU;
+    return state == GameState::LOADING || isInGame(state);
 }
 
 // Estados que se redibujan continuamente; el resto solo con eventos.

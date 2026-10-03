@@ -11,8 +11,8 @@ namespace GuiStyle {
     inline constexpr ImU32 SURFACE       = IM_COL32(32, 32, 42, 255);
     inline constexpr ImU32 FOREGROUND    = IM_COL32(235, 235, 240, 255);
     inline constexpr ImU32 MUTED         = IM_COL32(120, 120, 135, 255);
-    inline constexpr ImU32 TAB_INACTIVE  = IM_COL32(40, 40, 54, 255);
     inline constexpr ImU32 SUCCESS       = IM_COL32(90, 220, 120, 255);
+    inline constexpr ImU32 DANGER        = IM_COL32(255, 110, 110, 255);
 
     inline void applyTheme() {
         ImGui::StyleColorsDark();

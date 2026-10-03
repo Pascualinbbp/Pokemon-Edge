@@ -4,18 +4,36 @@
 #include "../style/guiDraw.hpp"
 #include "../style/guiLayout.hpp"
 #include "../style/guiStyle.hpp"
+#include "../../engine/core/inputDevice.hpp"
 
+// Muestra únicamente los controles del dispositivo que se está usando.
 namespace ControlsComponent {
     namespace detail {
         inline constexpr float PANEL_WIDTH = 760.0f;
         inline constexpr float PANEL_HEIGHT = 280.0f;
-        inline constexpr float TAB_WIDTH = 210.0f;
 
-        inline bool tabButton(const char* text, bool active) {
-            if (!active) ImGui::PushStyleColor(ImGuiCol_Button, GuiStyle::TAB_INACTIVE);
-            const bool clicked = ImGui::Button(text, ImVec2(TAB_WIDTH, 32.0f));
-            if (!active) ImGui::PopStyleColor();
-            return clicked;
+        // Posiciones (en el panel) de los elementos que cambian entre mandos.
+        struct PadLayout {
+            float lsX, lsY, lsElbowY; // stick izquierdo y altura de su línea indicadora
+            float rsX, rsY, rsElbowY; // stick derecho
+            float dpadX, dpadY;
+            float faceX, faceY;       // centro del grupo de botones frontales
+        };
+        inline constexpr PadLayout PLAYSTATION_LAYOUT = { 322.0f, 150.0f, 262.0f, 438.0f, 150.0f, 262.0f, 292.0f, 102.0f, 468.0f, 102.0f };
+        inline constexpr PadLayout XBOX_LAYOUT        = { 292.0f, 102.0f, 102.0f, 420.0f, 150.0f, 262.0f, 338.0f, 150.0f, 468.0f, 102.0f };
+
+        inline const char* title(InputDevice device) {
+            switch (device) {
+                case InputDevice::XBOX:        return "CONTROLES: MANDO DE XBOX";
+                case InputDevice::PLAYSTATION: return "CONTROLES: MANDO DE PLAYSTATION";
+                default:                       return "CONTROLES: TECLADO Y RATÓN";
+            }
+        }
+
+        inline const char* note(InputDevice device) {
+            return isGamepad(device)
+                ? "Deslizarse: corre (pulsa L3) y agáchate. Durante el deslizamiento, inclina el stick izquierdo a un lado para girar."
+                : "Deslizarse: corre (W W) y pulsa SHIFT. Durante el deslizamiento, A y D cambian la dirección.";
         }
 
         inline void drawKeyboard(ImDrawList* dl, const ImVec2& o) {
@@ -39,9 +57,12 @@ namespace ControlsComponent {
             label(dl, o.x + 504.0f, o.y + 177.0f, "Mover la cámara");
         }
 
-        inline void drawGamepad(ImDrawList* dl, const ImVec2& o) {
+        inline void drawGamepad(ImDrawList* dl, const ImVec2& o, InputDevice device) {
             using namespace GuiDraw;
             using namespace GuiStyle;
+            const bool xbox = device == InputDevice::XBOX;
+            const PadLayout& layout = xbox ? XBOX_LAYOUT : PLAYSTATION_LAYOUT;
+
             const auto P = [&o](float x, float y) { return ImVec2(o.x + x, o.y + y); };
             const auto box = [&](float x0, float y0, float x1, float y1, float r, ImU32 fill, ImU32 border) {
                 dl->AddRectFilled(P(x0, y0), P(x1, y1), fill, r);
@@ -64,33 +85,35 @@ namespace ControlsComponent {
             for (const Shape& s : body) dl->AddRectFilled(P(s.x0 - 2.0f, s.y0 - 2.0f), P(s.x1 + 2.0f, s.y1 + 2.0f), MUTED, s.radius + 2.0f);
             for (const Shape& s : body) dl->AddRectFilled(P(s.x0, s.y0), P(s.x1, s.y1), SURFACE, s.radius);
 
-            box(340.0f, 82.0f, 420.0f, 114.0f, 8.0f, PANEL, MUTED); // panel táctil
-
-            // Cruceta (sin acción asignada).
-            dl->AddRectFilled(P(273.0f, 94.0f), P(311.0f, 110.0f), MUTED, 3.0f);
-            dl->AddRectFilled(P(284.0f, 83.0f), P(300.0f, 121.0f), MUTED, 3.0f);
-            dl->AddRectFilled(P(275.0f, 96.0f), P(309.0f, 108.0f), PANEL, 3.0f);
-            dl->AddRectFilled(P(286.0f, 85.0f), P(298.0f, 119.0f), PANEL, 3.0f);
-
-            // Sticks (usados).
-            for (const float x : { 322.0f, 438.0f }) {
-                dl->AddCircleFilled(P(x, 150.0f), 24.0f, PANEL);
-                dl->AddCircle(P(x, 150.0f), 24.0f, ACCENT, 0, 2.0f);
-                dl->AddCircleFilled(P(x, 150.0f), 15.0f, ACCENT);
+            // Elementos centrales propios de cada mando.
+            if (xbox) {
+                dl->AddCircle(P(380.0f, 86.0f), 9.0f, MUTED, 0, 2.0f);  // botón Xbox
+                dl->AddCircle(P(350.0f, 102.0f), 5.0f, MUTED, 0, 1.5f); // Ver
+                dl->AddCircle(P(410.0f, 102.0f), 5.0f, MUTED, 0, 1.5f); // Menú
+            } else {
+                box(340.0f, 82.0f, 420.0f, 114.0f, 8.0f, PANEL, MUTED);  // panel táctil
             }
 
-            // Botones frontales: los usados se rellenan con el color de acento.
-            const auto face = [&](float x, float y, FaceSymbol symbol, bool used) {
-                dl->AddCircleFilled(P(x, y), 10.0f, used ? ACCENT : PANEL);
-                if (!used) dl->AddCircle(P(x, y), 10.0f, MUTED, 0, 1.5f);
-                faceSymbol(dl, P(x, y), symbol, used ? FOREGROUND : MUTED);
-            };
-            face(468.0f,  85.0f, FaceSymbol::TRIANGLE, false);
-            face(485.0f, 102.0f, FaceSymbol::CIRCLE,   true);
-            face(468.0f, 119.0f, FaceSymbol::CROSS,    true);
-            face(451.0f, 102.0f, FaceSymbol::SQUARE,   false);
+            // Cruceta (sin acción asignada).
+            const float dx = layout.dpadX, dy = layout.dpadY;
+            dl->AddRectFilled(P(dx - 19.0f, dy - 8.0f), P(dx + 19.0f, dy + 8.0f), MUTED, 3.0f);
+            dl->AddRectFilled(P(dx - 8.0f, dy - 19.0f), P(dx + 8.0f, dy + 19.0f), MUTED, 3.0f);
+            dl->AddRectFilled(P(dx - 17.0f, dy - 6.0f), P(dx + 17.0f, dy + 6.0f), PANEL, 3.0f);
+            dl->AddRectFilled(P(dx - 6.0f, dy - 17.0f), P(dx + 6.0f, dy + 17.0f), PANEL, 3.0f);
 
-            dl->AddRectFilled(P(428.0f, 86.0f), P(434.0f, 100.0f), ACCENT, 3.0f); // Options
+            // Sticks (ambos tienen acción).
+            for (const ImVec2 stick : { ImVec2(layout.lsX, layout.lsY), ImVec2(layout.rsX, layout.rsY) }) {
+                dl->AddCircleFilled(P(stick.x, stick.y), 24.0f, PANEL);
+                dl->AddCircle(P(stick.x, stick.y), 24.0f, ACCENT, 0, 2.0f);
+                dl->AddCircleFilled(P(stick.x, stick.y), 15.0f, ACCENT);
+            }
+
+            // Botones frontales: se usan el inferior (saltar) y el derecho (agacharse).
+            const float fx = layout.faceX, fy = layout.faceY;
+            faceButton(dl, P(fx, fy - 17.0f), Face::NORTH, xbox, false);
+            faceButton(dl, P(fx + 17.0f, fy), Face::EAST,  xbox, true);
+            faceButton(dl, P(fx, fy + 17.0f), Face::SOUTH, xbox, true);
+            faceButton(dl, P(fx - 17.0f, fy), Face::WEST,  xbox, false);
 
             // Líneas hacia cada acción (se dibujan al final para quedar encima).
             const auto callout = [&](float x, float y, float elbowY, float endX, const char* text) {
@@ -100,42 +123,31 @@ namespace ControlsComponent {
                 const float textX = endX < x ? endX - 8.0f - ImGui::CalcTextSize(text).x : endX + 8.0f;
                 label(dl, o.x + textX, o.y + elbowY, text);
             };
-            callout(322.0f, 150.0f, 262.0f, 210.0f, "Mover / Correr (pulsar)");
-            callout(438.0f, 150.0f, 262.0f, 550.0f, "Mover la cámara");
-            callout(495.0f, 102.0f, 102.0f, 550.0f, "Agacharse / Deslizarse");
-            callout(468.0f, 129.0f, 160.0f, 550.0f, "Saltar");
-            callout(431.0f,  86.0f,  14.0f, 550.0f, "Pausa");
+            callout(layout.lsX, layout.lsY, layout.lsElbowY, 210.0f, "Mover / Correr (pulsar L3)");
+            callout(layout.rsX, layout.rsY, layout.rsElbowY, 550.0f, "Mover la cámara");
+            callout(fx + 27.0f, fy, fy, 550.0f, "Agacharse / Deslizarse");
+            callout(fx, fy + 27.0f, fy + 58.0f, 550.0f, "Saltar");
         }
     }
 
-    inline void render(GameState& state) {
-        static bool gamepadTab = false;
-
+    inline void render(GameState& state, InputDevice device) {
         GuiLayout::dimBackground();
 
         ImGui::SetCursorPosY(ImGui::GetWindowSize().y * 0.06f);
-        GuiLayout::centeredText("CONTROLES");
+        GuiLayout::centeredText(detail::title(device));
 
-        ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        GuiLayout::centerX(2.0f * detail::TAB_WIDTH + ImGui::GetStyle().ItemSpacing.x);
-        if (detail::tabButton("TECLADO Y RATÓN", !gamepadTab)) gamepadTab = false;
-        ImGui::SameLine();
-        if (detail::tabButton("MANDO", gamepadTab)) gamepadTab = true;
-
-        ImGui::Dummy(ImVec2(0.0f, 8.0f));
+        ImGui::Dummy(ImVec2(0.0f, 12.0f));
         GuiLayout::centerX(detail::PANEL_WIDTH);
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         ImGui::Dummy(ImVec2(detail::PANEL_WIDTH, detail::PANEL_HEIGHT));
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
         dl->AddRectFilled(origin, GuiDraw::offset(origin, detail::PANEL_WIDTH, detail::PANEL_HEIGHT), GuiStyle::PANEL, 12.0f);
-        if (gamepadTab) detail::drawGamepad(dl, origin);
+        if (isGamepad(device)) detail::drawGamepad(dl, origin, device);
         else detail::drawKeyboard(dl, origin);
 
         ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
-        GuiLayout::centeredText(gamepadTab
-            ? "Disposición prevista: el soporte de mando se añadirá más adelante."
-            : "Deslizarse: corre (W W) y pulsa SHIFT, o salta corriendo y agáchate en el aire.");
+        GuiLayout::centeredText(detail::note(device));
         ImGui::PopStyleColor();
 
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
