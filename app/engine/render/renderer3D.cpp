@@ -2,8 +2,8 @@
 #include "../../utils/graphics/d3dUtil.hpp"
 #include "../../utils/core/loggerUtil.hpp"
 #include <d3dcompiler.h>
+#include <cmath>
 #include <cstring>
-#include <vector>
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
@@ -45,17 +45,94 @@ namespace {
     }
 }
 
-Renderer3D::Mesh Renderer3D::createMesh(ID3D11Device* device, const Vertex* vertices, UINT count) {
+Renderer3D::Mesh Renderer3D::createMesh(ID3D11Device* device, const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices) {
+    Mesh mesh;
+    mesh.indexCount = static_cast<UINT>(indices.size());
+
     D3D11_BUFFER_DESC desc = {};
     desc.Usage = D3D11_USAGE_IMMUTABLE;
-    desc.ByteWidth = static_cast<UINT>(sizeof(Vertex) * count);
+    desc.ByteWidth = static_cast<UINT>(sizeof(Vertex) * vertices.size());
     desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA data = { vertices.data(), 0, 0 };
+    D3dUtil::check(device->CreateBuffer(&desc, &data, &mesh.vertices), "CreateBuffer (vertex)");
 
-    const D3D11_SUBRESOURCE_DATA data = { vertices, 0, 0 };
-    Mesh mesh;
-    mesh.vertexCount = count;
-    D3dUtil::check(device->CreateBuffer(&desc, &data, &mesh.buffer), "CreateBuffer (vertex)");
+    desc.ByteWidth = static_cast<UINT>(sizeof(uint16_t) * indices.size());
+    desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    data.pSysMem = indices.data();
+    D3dUtil::check(device->CreateBuffer(&desc, &data, &mesh.indices), "CreateBuffer (index)");
     return mesh;
+}
+
+// Suelo en tablero: 4 vértices y 6 índices por baldosa, generado una sola vez.
+Renderer3D::Mesh Renderer3D::createFloor(ID3D11Device* device) {
+    constexpr float tile = 2.0f;
+    constexpr int tiles = static_cast<int>(2.0f * Scene::HALF_SIZE / tile);
+    static_assert(tiles * tiles * 4 <= 65535, "El suelo no cabe en índices de 16 bits");
+
+    const XMFLOAT4 colors[2] = { { 0.25f, 0.70f, 0.25f, 1.0f }, { 0.18f, 0.55f, 0.20f, 1.0f } };
+
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+    vertices.reserve(static_cast<size_t>(tiles) * tiles * 4);
+    indices.reserve(static_cast<size_t>(tiles) * tiles * 6);
+
+    for (int row = 0; row < tiles; ++row) {
+        for (int col = 0; col < tiles; ++col) {
+            const float x0 = -Scene::HALF_SIZE + col * tile;
+            const float z0 = -Scene::HALF_SIZE + row * tile;
+            const float x1 = x0 + tile;
+            const float z1 = z0 + tile;
+            const XMFLOAT4& color = colors[(row + col) & 1];
+
+            const int first = static_cast<int>(vertices.size());
+            vertices.push_back({ { x0, 0.0f, z0 }, color });
+            vertices.push_back({ { x0, 0.0f, z1 }, color });
+            vertices.push_back({ { x1, 0.0f, z0 }, color });
+            vertices.push_back({ { x1, 0.0f, z1 }, color });
+            for (const int i : { 0, 1, 2, 2, 1, 3 }) indices.push_back(static_cast<uint16_t>(first + i));
+        }
+    }
+    return createMesh(device, vertices, indices);
+}
+
+// Jugador: cápsula (cilindro con un cono arriba y otro abajo), con color degradado de rojo claro a oscuro.
+Renderer3D::Mesh Renderer3D::createPlayer(ID3D11Device* device) {
+    constexpr int segments = 12;
+    constexpr float radius = 0.4f;
+    const XMFLOAT4 light = { 0.9f, 0.2f, 0.2f, 1.0f };
+    const XMFLOAT4 dark = { 0.7f, 0.1f, 0.1f, 1.0f };
+
+    // Orden de vértices: anillo inferior [0, segments), anillo superior [segments, 2*segments), punta inferior y punta superior.
+    std::vector<Vertex> vertices;
+    vertices.reserve(2 * segments + 2);
+    for (int i = 0; i < segments; ++i) {
+        const float theta = static_cast<float>(i) / segments * XM_2PI;
+        vertices.push_back({ { std::cos(theta) * radius, 0.2f, std::sin(theta) * radius }, light });
+    }
+    for (int i = 0; i < segments; ++i) {
+        const float theta = static_cast<float>(i) / segments * XM_2PI;
+        vertices.push_back({ { std::cos(theta) * radius, 1.2f, std::sin(theta) * radius }, dark });
+    }
+    vertices.push_back({ { 0.0f, 0.0f, 0.0f }, light });
+    vertices.push_back({ { 0.0f, 1.4f, 0.0f }, dark });
+
+    const int tipBottom = 2 * segments;
+    const int tipTop = tipBottom + 1;
+
+    // Sentido horario visto desde fuera (cara frontal en D3D11 por defecto).
+    std::vector<uint16_t> indices;
+    indices.reserve(segments * 12);
+    for (int i = 0; i < segments; ++i) {
+        const int j = (i + 1) % segments;
+        const int bottomI = i, bottomJ = j, topI = segments + i, topJ = segments + j;
+        for (const int index : { bottomI, topI, bottomJ,    // cuerpo
+                                 bottomJ, topI, topJ,
+                                 bottomI, bottomJ, tipBottom, // cono inferior
+                                 topJ, topI, tipTop }) {      // cono superior
+            indices.push_back(static_cast<uint16_t>(index));
+        }
+    }
+    return createMesh(device, vertices, indices);
 }
 
 void Renderer3D::init(ID3D11Device* device) {
@@ -80,53 +157,8 @@ void Renderer3D::init(ID3D11Device* device) {
     D3dUtil::check(device->CreateBuffer(&cbDesc, nullptr, &m_constantBuffer), "CreateBuffer (constant)");
 
     // 4. Geometría
-    const XMFLOAT4 green = { 0.2f, 0.8f, 0.2f, 1.0f };
-    const Vertex floorVerts[] = {
-        { { -10.0f, 0.0f, -10.0f }, green }, { { -10.0f, 0.0f, 10.0f }, green }, { { 10.0f, 0.0f, -10.0f }, green },
-        { {  10.0f, 0.0f, -10.0f }, green }, { { -10.0f, 0.0f, 10.0f }, green }, { { 10.0f, 0.0f,  10.0f }, green },
-    };
-    m_floor = createMesh(device, floorVerts, _countof(floorVerts));
-
-    // Jugador: Píldora / Cápsula 3D básica (aproximación con cilindro y cúpulas superior e inferior)
-    const XMFLOAT4 capColor = { 0.9f, 0.2f, 0.2f, 1.0f }; // Color rojo/rosita típico de cápsula
-    const XMFLOAT4 capColorDark = { 0.7f, 0.1f, 0.1f, 1.0f };
-    
-    std::vector<Vertex> capsuleVerts;
-    float radius = 0.4f;
-    float height = 1.2f;
-    int segments = 8;
-
-    // Generar cuerpo cilíndrico de la píldora
-    for (int i = 0; i < segments; ++i) {
-        float theta1 = (float)i / segments * 2.0f * DirectX::XM_PI;
-        float theta2 = (float)(i + 1) / segments * 2.0f * DirectX::XM_PI;
-
-        float x1 = cosf(theta1) * radius;
-        float z1 = sinf(theta1) * radius;
-        float x2 = cosf(theta2) * radius;
-        float z2 = sinf(theta2) * radius;
-
-        // Dos triángulos por segmento de cuerpo
-        capsuleVerts.push_back({ { x1, 0.2f, z1 }, capColor });
-        capsuleVerts.push_back({ { x2, 0.2f, z2 }, capColor });
-        capsuleVerts.push_back({ { x1, 1.2f, z1 }, capColorDark });
-
-        capsuleVerts.push_back({ { x2, 0.2f, z2 }, capColor });
-        capsuleVerts.push_back({ { x2, 1.2f, z2 }, capColorDark });
-        capsuleVerts.push_back({ { x1, 1.2f, z1 }, capColorDark });
-
-        // Tapa inferior (cono hacia y = 0.0f)
-        capsuleVerts.push_back({ { x1, 0.2f, z1 }, capColor });
-        capsuleVerts.push_back({ { x2, 0.2f, z2 }, capColor });
-        capsuleVerts.push_back({ { 0.0f, 0.0f, 0.0f }, capColor });
-
-        // Tapa superior (cono hacia y = 1.4f)
-        capsuleVerts.push_back({ { x2, 1.2f, z2 }, capColorDark });
-        capsuleVerts.push_back({ { x1, 1.2f, z1 }, capColorDark });
-        capsuleVerts.push_back({ { 0.0f, 1.4f, 0.0f }, capColorDark });
-    }
-
-    m_player = createMesh(device, capsuleVerts.data(), static_cast<UINT>(capsuleVerts.size()));
+    m_floor = createFloor(device);
+    m_player = createPlayer(device);
 }
 
 void Renderer3D::drawMesh(ID3D11DeviceContext* context, const Mesh& mesh, CXMMATRIX world, CXMMATRIX viewProj) const {
@@ -134,15 +166,22 @@ void Renderer3D::drawMesh(ID3D11DeviceContext* context, const Mesh& mesh, CXMMAT
     XMStoreFloat4x4(&cb.worldViewProj, XMMatrixTranspose(world * viewProj));
     context->UpdateSubresource(m_constantBuffer.Get(), 0, nullptr, &cb, 0, 0);
 
-    ID3D11Buffer* vb = mesh.buffer.Get();
+    ID3D11Buffer* vb = mesh.vertices.Get();
     const UINT stride = sizeof(Vertex);
     const UINT offset = 0;
     context->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
-    context->Draw(mesh.vertexCount, 0);
+    context->IASetIndexBuffer(mesh.indices.Get(), DXGI_FORMAT_R16_UINT, 0);
+    context->DrawIndexed(mesh.indexCount, 0, 0);
 }
 
 void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int width, int height) {
     if (width <= 0 || height <= 0) return;
+
+    const float aspect = static_cast<float>(width) / height;
+    if (aspect != m_aspect) {
+        m_aspect = aspect;
+        XMStoreFloat4x4(&m_proj, XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 250.0f));
+    }
 
     context->IASetInputLayout(m_inputLayout.Get());
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -151,12 +190,12 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     ID3D11Buffer* cb = m_constantBuffer.Get();
     context->VSSetConstantBuffers(0, 1, &cb);
 
-    const XMMATRIX proj = XMMatrixPerspectiveFovLH(XM_PIDIV4, static_cast<float>(width) / height, 0.1f, 100.0f);
-    const XMMATRIX viewProj = scene.getViewMatrix() * proj;
-
+    const XMMATRIX viewProj = scene.getViewMatrix() * XMLoadFloat4x4(&m_proj);
     const XMFLOAT3& p = scene.player.position;
+
     drawMesh(context, m_floor, XMMatrixIdentity(), viewProj);
-    drawMesh(context, m_player, XMMatrixTranslation(p.x, p.y, p.z), viewProj);
+    drawMesh(context, m_player,
+        XMMatrixScaling(1.0f, scene.player.heightScale(), 1.0f) * XMMatrixTranslation(p.x, p.y, p.z), viewProj);
 }
 
 void Renderer3D::cleanup() {

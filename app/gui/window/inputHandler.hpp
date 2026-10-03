@@ -5,8 +5,19 @@
 // Entrada de la plataforma (Win32): teclado y ratón (Raw Input) para el juego.
 namespace InputHandler {
     namespace detail {
-        inline InputState state;     // teclas pulsadas + delta de ratón acumulado
+        inline constexpr DWORD DOUBLE_TAP_MS = 300;
+        inline constexpr LPARAM REPEAT_FLAG = 1 << 30;      // bit 30 de lParam: la tecla ya estaba pulsada
+        inline constexpr UINT LEFT_SHIFT_SCANCODE = 0x2A;
+
+        inline InputState state;     // teclas mantenidas + eventos de un frame + delta de ratón acumulado
         inline bool captured = false;
+        inline DWORD lastWPress = 0;
+
+        // Descarta lo que no debe arrastrarse entre frames o entre estados (pausa, carga...).
+        inline void clearEvents() {
+            state.mouseDX = state.mouseDY = 0.0f;
+            state.jump = state.sprint = false;
+        }
 
         // Centra el cursor y lo encierra en un rectángulo de 1 píxel (queda inmóvil y oculto).
         inline void lockCursor(HWND hwnd) {
@@ -20,13 +31,32 @@ namespace InputHandler {
         }
     }
 
-    inline void onKey(WPARAM key, bool pressed) {
+    inline void onKey(WPARAM key, LPARAM lParam, bool pressed) {
+        InputState& s = detail::state;
+        const bool newPress = pressed && !(lParam & detail::REPEAT_FLAG); // ignora la repetición automática
+
         switch (key) {
-            case 'W':      detail::state.up = pressed; break;
-            case 'S':      detail::state.down = pressed; break;
-            case 'A':      detail::state.left = pressed; break;
-            case 'D':      detail::state.right = pressed; break;
-            case VK_SPACE: detail::state.jump = pressed; break;
+            case 'W':
+                if (newPress) {
+                    const DWORD now = GetMessageTime();
+                    if (now - detail::lastWPress <= detail::DOUBLE_TAP_MS) {
+                        s.sprint = true;
+                        detail::lastWPress = 0; // un tercer toque no cuenta como otro doble toque
+                    } else {
+                        detail::lastWPress = now;
+                    }
+                }
+                s.up = pressed;
+                break;
+            case 'S': s.down = pressed; break;
+            case 'A': s.left = pressed; break;
+            case 'D': s.right = pressed; break;
+            case VK_SPACE:
+                if (newPress) s.jump = true;
+                break;
+            case VK_SHIFT: // solo el shift izquierdo (por su scancode)
+                if (((lParam >> 16) & 0xFF) == detail::LEFT_SHIFT_SCANCODE) s.crouch = pressed;
+                break;
         }
     }
 
@@ -53,7 +83,7 @@ namespace InputHandler {
     inline void setMouseCapture(HWND hwnd, bool capture) {
         if (capture == detail::captured) return;
         detail::captured = capture;
-        detail::state.mouseDX = detail::state.mouseDY = 0.0f;
+        detail::clearEvents();
 
         const RAWINPUTDEVICE mouse = { 0x01, 0x02, capture ? 0u : static_cast<DWORD>(RIDEV_REMOVE), capture ? hwnd : nullptr };
         RegisterRawInputDevices(&mouse, 1, sizeof(mouse));
@@ -67,10 +97,10 @@ namespace InputHandler {
         }
     }
 
-    // Estado de entrada de este frame; consume el delta del ratón acumulado.
+    // Estado de entrada de este frame; consume los eventos y el delta del ratón acumulados.
     inline InputState poll() {
         const InputState snapshot = detail::state;
-        detail::state.mouseDX = detail::state.mouseDY = 0.0f;
+        detail::clearEvents();
         return snapshot;
     }
 }

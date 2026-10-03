@@ -39,7 +39,8 @@ class UpdateUtil {
         script += L"Get-ChildItem -Path " + baseDir + L" | ForEach-Object { ";
         script += L"  if ($_.Name -ne " + downloadName + L") { ";
         script += L"    if ($_.Name -eq 'app') { ";
-        script += L"      Get-ChildItem -Path $_.FullName | Where-Object { $_.Name -ne 'logs' } | Remove-Item -Recurse -Force ";
+        // Se conservan los datos del usuario: logs y partidas guardadas.
+        script += L"      Get-ChildItem -Path $_.FullName | Where-Object { $_.Name -notin 'logs','saves' } | Remove-Item -Recurse -Force ";
         script += L"    } else { Remove-Item -Path $_.FullName -Recurse -Force } ";
         script += L"  } ";
         script += L"}; ";

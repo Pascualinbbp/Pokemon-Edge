@@ -1,6 +1,7 @@
 #pragma once
 #include "updateManager.hpp"
 #include "databaseManager.hpp"
+#include "saveManager.hpp"
 #include "guiManager.hpp"
 #include "../utils/core/loggerUtil.hpp"
 
@@ -9,7 +10,8 @@ class AppManager {
     void start() {
         UpdateManager::checkAndHandleUpdate();
         DatabaseManager::init();
-        
+        SaveManager::init();
+
         Logger::logInfo("APP_MANAGER", "¡Bienvenido a Pokemon Edge! Ejecutando GUI...");
         GuiManager::init();
         GuiManager::run();

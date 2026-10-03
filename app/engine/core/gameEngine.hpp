@@ -1,6 +1,7 @@
 #pragma once
 #include "../world/scene.hpp"
 #include "../render/renderer3D.hpp"
+#include "../../models/saveData.hpp"
 #include "input.hpp"
 
 class GameEngine {
@@ -10,6 +11,22 @@ class GameEngine {
 
     void init(ID3D11Device* device) {
         m_renderer.init(device);
+    }
+
+    void newGame() {
+        m_scene = Scene{};
+    }
+
+    void applySave(const SaveData& save) {
+        m_scene = Scene{};
+        m_scene.player.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
+    }
+
+    SaveData captureSave() const {
+        const DirectX::XMFLOAT3& p = m_scene.player.position;
+        SaveData save;
+        save.playerPosition = { p.x, p.y, p.z };
+        return save;
     }
 
     void update(float dt, const InputState& input) {

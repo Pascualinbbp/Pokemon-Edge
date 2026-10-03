@@ -26,6 +26,8 @@ class PathsUtil {
     inline static const fs::path DB_PATH = DB_DIR / "pokemonEdge.db";
     inline static const fs::path LOG_DIR = APP_DIR / "logs";
     inline static const fs::path LOG_FILE_PATH = LOG_DIR / "app.log";
+    inline static const fs::path SAVE_DIR = APP_DIR / "saves";
+    inline static const fs::path SAVE_PATH = SAVE_DIR / "save.json";
     
     inline static const fs::path DOWNLOAD_FOLDER = BASE_DIR / "temp_download";
     inline static const fs::path TEMP_ZIP_PATH = DOWNLOAD_FOLDER / "update.zip";
