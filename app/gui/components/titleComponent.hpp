@@ -17,13 +17,13 @@ namespace TitleComponent {
             ImGui::Image(logoTexture, ImVec2(renderW, renderH));
         }
 
-        // Texto centrado con parpadeo suave (oscuro para que contraste con el fondo naranja)
+        // Texto centrado con parpadeo suave
         ImGui::SetCursorPosY(windowSize.y * 0.75f);
         const char* pressText = "- PRESIONA CUALQUIER TECLA PARA CONTINUAR -";
         GuiLayout::centerX(ImGui::CalcTextSize(pressText).x);
 
         const float alpha = 0.2f + 0.8f * (0.5f + 0.5f * std::sin(static_cast<float>(ImGui::GetTime()) * 4.0f));
-        ImGui::TextColored(ImVec4(0.12f, 0.12f, 0.12f, alpha), "%s", pressText);
+        ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.55f, alpha), "%s", pressText);
 
         if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_Space) || ImGui::IsMouseClicked(0)) {
             state = GameState::MAIN_MENU;

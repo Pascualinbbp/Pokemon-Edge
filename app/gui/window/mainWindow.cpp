@@ -7,6 +7,7 @@
 #include "../components/menuComponent.hpp"
 #include "../components/hudComponent.hpp"
 #include "../components/pauseComponent.hpp"
+#include "../components/controlsComponent.hpp"
 #include "../../utils/core/pathsUtil.hpp"
 #include "../../engine/core/gameEngine.hpp"
 
@@ -26,15 +27,24 @@ namespace {
     HWND g_hwnd = nullptr;
     Texture g_logo;
     GameEngine g_gameEngine;
-    bool g_focusLost = false; // la ventana perdió el foco; el bucle decide si hay que pausar
+    GameState g_state = GameState::TITLE_SCREEN; // a nivel de módulo para poder pausar desde WM_KILLFOCUS
 
     LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam)) return true;
 
         switch (msg) {
             case WM_SIZE:
-                if (wParam != SIZE_MINIMIZED) GraphicsDevice::resize(LOWORD(lParam), HIWORD(lParam));
+                if (wParam != SIZE_MINIMIZED) {
+                    GraphicsDevice::resize(LOWORD(lParam), HIWORD(lParam));
+                    InputHandler::relockCursor(hwnd);
+                }
                 return 0;
+            case WM_MOVE:
+                InputHandler::relockCursor(hwnd);
+                return 0;
+            case WM_INPUT:
+                InputHandler::onRawInput(lParam);
+                return DefWindowProc(hwnd, msg, wParam, lParam); // Raw Input exige llamar a DefWindowProc
             case WM_KEYDOWN:
                 InputHandler::onKey(wParam, true);
                 return 0;
@@ -43,7 +53,7 @@ namespace {
                 return 0;
             case WM_KILLFOCUS:
                 InputHandler::resetKeys();
-                g_focusLost = true;
+                if (g_state == GameState::PLAYING) g_state = GameState::PAUSED;
                 return 0;
             case WM_DESTROY:
                 PostQuitMessage(0);
@@ -96,7 +106,6 @@ void MainWindow::cleanup() {
 }
 
 void MainWindow::run() {
-    GameState state = GameState::TITLE_SCREEN;
     int redrawFrames = 2; // frames pendientes de dibujar cuando no hay animación continua
 
     LARGE_INTEGER freq, last, now;
@@ -115,20 +124,11 @@ void MainWindow::run() {
         }
         if (done) break;
 
-        // Perder el foco durante la partida equivale a pausar.
-        if (g_focusLost) {
-            g_focusLost = false;
-            if (state == GameState::PLAYING) {
-                state = GameState::PAUSED;
-                redrawFrames = 2;
-            }
-        }
-
         // El ratón solo se captura mientras se juega.
-        InputHandler::setMouseCapture(g_hwnd, state == GameState::PLAYING);
+        InputHandler::setMouseCapture(g_hwnd, g_state == GameState::PLAYING);
 
         // Título (parpadeo) y juego se animan siempre; los menús solo se redibujan con eventos.
-        const bool animated = state == GameState::TITLE_SCREEN || state == GameState::PLAYING;
+        const bool animated = g_state == GameState::TITLE_SCREEN || g_state == GameState::PLAYING;
         if (redrawFrames == 0 && !animated) {
             WaitMessage();
             QueryPerformanceCounter(&last); // el tiempo dormido no cuenta como dt
@@ -139,10 +139,10 @@ void MainWindow::run() {
         const float dt = (std::min)(static_cast<float>(now.QuadPart - last.QuadPart) / freq.QuadPart, 0.1f);
         last = now;
 
-        const bool inGame = state == GameState::PLAYING || state == GameState::PAUSED;
-        if (state == GameState::PLAYING) g_gameEngine.update(dt, InputHandler::poll(g_hwnd));
+        if (g_state == GameState::PLAYING) g_gameEngine.update(dt, InputHandler::poll());
 
         // GUI: fondo de la GUI. Juego: fondo propio del motor.
+        const bool inGame = isInGame(g_state);
         GraphicsDevice::beginFrame(inGame ? GameEngine::CLEAR_COLOR : GuiStyle::BACKGROUND);
         if (inGame) {
             g_gameEngine.render(GraphicsDevice::context(), GraphicsDevice::width(), GraphicsDevice::height());
@@ -152,17 +152,18 @@ void MainWindow::run() {
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        const GameState prevState = state;
+        const GameState prevState = g_state;
 
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
         ImGui::Begin("MainCanvas", nullptr,
             ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus);
-        switch (state) {
-            case GameState::TITLE_SCREEN: TitleComponent::render(state, logoId, g_logo.width, g_logo.height); break;
-            case GameState::MAIN_MENU:    MenuComponent::render(state); break;
-            case GameState::PLAYING:      HudComponent::render(state); break;
-            case GameState::PAUSED:       PauseComponent::render(state); break;
+        switch (g_state) {
+            case GameState::TITLE_SCREEN: TitleComponent::render(g_state, logoId, g_logo.width, g_logo.height); break;
+            case GameState::MAIN_MENU:    MenuComponent::render(g_state); break;
+            case GameState::PLAYING:      HudComponent::render(g_state); break;
+            case GameState::PAUSED:       PauseComponent::render(g_state); break;
+            case GameState::CONTROLS:     ControlsComponent::render(g_state); break;
         }
         ImGui::End();
 
@@ -170,7 +171,7 @@ void MainWindow::run() {
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         GraphicsDevice::present();
 
-        if (state != prevState) redrawFrames = 2;
+        if (g_state != prevState) redrawFrames = 2;
         else if (redrawFrames > 0) --redrawFrames;
     }
     cleanup();

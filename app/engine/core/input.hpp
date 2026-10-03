@@ -5,6 +5,7 @@ struct InputState {
     bool down = false;
     bool left = false;
     bool right = false;
+    bool jump = false;
 
     // Desplazamiento del ratón (en píxeles) acumulado desde el frame anterior.
     float mouseDX = 0.0f;

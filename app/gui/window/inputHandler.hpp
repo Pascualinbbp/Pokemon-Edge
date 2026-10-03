@@ -2,69 +2,75 @@
 #include <windows.h>
 #include "../../engine/core/input.hpp"
 
-// Entrada de la plataforma (Win32): estado del teclado y captura del ratón para la cámara.
+// Entrada de la plataforma (Win32): teclado y ratón (Raw Input) para el juego.
 namespace InputHandler {
     namespace detail {
-        inline InputState keys;
+        inline InputState state;     // teclas pulsadas + delta de ratón acumulado
         inline bool captured = false;
 
-        // Devuelve el centro del área cliente en coordenadas de pantalla y el rectángulo del área cliente.
-        inline POINT clientArea(HWND hwnd, RECT& area) {
+        // Centra el cursor y lo encierra en un rectángulo de 1 píxel (queda inmóvil y oculto).
+        inline void lockCursor(HWND hwnd) {
             RECT client;
             GetClientRect(hwnd, &client);
-            POINT topLeft = { client.left, client.top };
-            POINT bottomRight = { client.right, client.bottom };
-            ClientToScreen(hwnd, &topLeft);
-            ClientToScreen(hwnd, &bottomRight);
-            area = { topLeft.x, topLeft.y, bottomRight.x, bottomRight.y };
-            return { (topLeft.x + bottomRight.x) / 2, (topLeft.y + bottomRight.y) / 2 };
+            POINT center = { client.right / 2, client.bottom / 2 };
+            ClientToScreen(hwnd, &center);
+            SetCursorPos(center.x, center.y);
+            const RECT lock = { center.x, center.y, center.x + 1, center.y + 1 };
+            ClipCursor(&lock);
         }
     }
 
     inline void onKey(WPARAM key, bool pressed) {
         switch (key) {
-            case 'W': detail::keys.up = pressed; break;
-            case 'S': detail::keys.down = pressed; break;
-            case 'A': detail::keys.left = pressed; break;
-            case 'D': detail::keys.right = pressed; break;
+            case 'W':      detail::state.up = pressed; break;
+            case 'S':      detail::state.down = pressed; break;
+            case 'A':      detail::state.left = pressed; break;
+            case 'D':      detail::state.right = pressed; break;
+            case VK_SPACE: detail::state.jump = pressed; break;
         }
     }
 
-    // Evita teclas "pegadas" al perder el foco.
-    inline void resetKeys() { detail::keys = InputState{}; }
+    // Movimiento relativo del ratón (WM_INPUT). Solo llega mientras hay captura.
+    inline void onRawInput(LPARAM lParam) {
+        RAWINPUT raw;
+        UINT size = sizeof(raw);
+        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) == static_cast<UINT>(-1)) return;
+        if (raw.header.dwType != RIM_TYPEMOUSE || (raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) return;
 
-    // Oculta y bloquea el cursor en la ventana mientras se juega. Es idempotente.
+        detail::state.mouseDX += static_cast<float>(raw.data.mouse.lLastX);
+        detail::state.mouseDY += static_cast<float>(raw.data.mouse.lLastY);
+    }
+
+    // Evita teclas "pegadas" al perder el foco.
+    inline void resetKeys() { detail::state = InputState{}; }
+
+    // Si la ventana se mueve o cambia de tamaño durante la captura, recoloca el bloqueo.
+    inline void relockCursor(HWND hwnd) {
+        if (detail::captured) detail::lockCursor(hwnd);
+    }
+
+    // Oculta y bloquea el cursor y activa Raw Input solo mientras se juega. Es idempotente.
     inline void setMouseCapture(HWND hwnd, bool capture) {
         if (capture == detail::captured) return;
         detail::captured = capture;
+        detail::state.mouseDX = detail::state.mouseDY = 0.0f;
+
+        const RAWINPUTDEVICE mouse = { 0x01, 0x02, capture ? 0u : static_cast<DWORD>(RIDEV_REMOVE), capture ? hwnd : nullptr };
+        RegisterRawInputDevices(&mouse, 1, sizeof(mouse));
 
         if (capture) {
-            RECT area;
-            const POINT center = detail::clientArea(hwnd, area);
             ShowCursor(FALSE);
-            ClipCursor(&area);
-            SetCursorPos(center.x, center.y); // el primer delta parte de 0
+            detail::lockCursor(hwnd);
         } else {
             ClipCursor(nullptr);
             ShowCursor(TRUE);
         }
     }
 
-    // Estado de entrada de este frame: teclas pulsadas + movimiento del ratón desde el centro.
-    inline InputState poll(HWND hwnd) {
-        InputState state = detail::keys;
-        if (detail::captured && GetForegroundWindow() == hwnd) {
-            RECT area;
-            const POINT center = detail::clientArea(hwnd, area);
-            ClipCursor(&area); // se mantiene al día si la ventana se mueve o cambia de tamaño
-
-            POINT p;
-            if (GetCursorPos(&p)) {
-                state.mouseDX = static_cast<float>(p.x - center.x);
-                state.mouseDY = static_cast<float>(p.y - center.y);
-                SetCursorPos(center.x, center.y);
-            }
-        }
-        return state;
+    // Estado de entrada de este frame; consume el delta del ratón acumulado.
+    inline InputState poll() {
+        const InputState snapshot = detail::state;
+        detail::state.mouseDX = detail::state.mouseDY = 0.0f;
+        return snapshot;
     }
 }
