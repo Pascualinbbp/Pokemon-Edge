@@ -30,8 +30,9 @@ class GameEngine {
         return save;
     }
 
-    void update(float dt, const InputState& input) {
-        m_scene.update(dt, input);
+    // Devuelve true si se pide pausar (ESC fuera del modo lanzamiento).
+    bool update(float dt, const InputState& input) {
+        return m_scene.update(dt, input);
     }
 
     void render(ID3D11DeviceContext* context, int screenW, int screenH) {
@@ -39,7 +40,7 @@ class GameEngine {
     }
 
     GameStatus status() const {
-        return { m_scene.camera.aimBlend(), m_scene.captures, m_scene.captureNotice > 0.0f };
+        return m_scene.status();
     }
 
     void cleanup() {

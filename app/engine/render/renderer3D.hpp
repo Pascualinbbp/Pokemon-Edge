@@ -43,7 +43,7 @@ class Renderer3D {
         const std::vector<uint16_t>& indices);
     static Mesh createFloor(ID3D11Device* device);
     static Mesh createPlayer(ID3D11Device* device);
-    static Mesh createCube(ID3D11Device* device);
+    static Mesh createCube(ID3D11Device* device, const DirectX::XMFLOAT3& tint);
     static Mesh createSphere(ID3D11Device* device);
     static Mesh createShadowDisc(ID3D11Device* device);
 
@@ -60,7 +60,8 @@ class Renderer3D {
 
     Mesh m_floor;
     Mesh m_player;
-    Mesh m_cube;   // objetivo de capturas (cubo unitario centrado en el origen)
+    Mesh m_cube;   // cuerpo del pokémon de pruebas (cubo unitario centrado en el origen)
+    Mesh m_nose;   // cubito amarillo que marca hacia dónde mira
     Mesh m_sphere; // pokéball (esfera unitaria)
 
     // Sombras: un único disco dibujado con instancias (una sola llamada para todas).

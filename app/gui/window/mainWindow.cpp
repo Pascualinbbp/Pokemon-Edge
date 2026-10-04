@@ -232,11 +232,9 @@ void MainWindow::run() {
 
         if (g_state == GameState::PLAYING) {
             const InputState input = InputHandler::poll(dt);
-            if (input.pause) {
+            if (input.pause || engine.update(dt, input)) {
                 g_state = GameState::PAUSED;
                 redrawFrames = 2;
-            } else {
-                engine.update(dt, input);
             }
         } else if (g_state == GameState::LOADING) {
             g_loadTimer += dt;
@@ -294,7 +292,7 @@ void MainWindow::run() {
                 LoadingComponent::render(g_state, g_loadTimer);
                 break;
             case GameState::PLAYING:
-                HudComponent::render(g_state, InputHandler::activeDevice(), engine.status());
+                HudComponent::render(InputHandler::activeDevice(), engine.status());
                 break;
             case GameState::PAUSED:
                 if (PauseComponent::render(g_state, g_saved)) g_saved = SessionManager::saveCurrent();

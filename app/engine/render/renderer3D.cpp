@@ -156,7 +156,7 @@ Renderer3D::Mesh Renderer3D::createPlayer(ID3D11Device* device) {
 
 // Cubo unitario centrado en el origen. Cada cara tiene un tono distinto para que se note el volumen
 // (el shader no tiene iluminación).
-Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device) {
+Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device, const XMFLOAT3& tint) {
     struct Face { XMFLOAT3 n, u, v; float shade; };
     const Face faces[6] = {
         { { 0, 1, 0 },  { 1, 0, 0 }, { 0, 0, 1 }, 1.00f },
@@ -174,7 +174,7 @@ Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device) {
 
     const XMFLOAT3 center = { 0.0f, 0.0f, 0.0f };
     for (const Face& f : faces) {
-        const XMFLOAT4 color = { 1.0f * f.shade, 0.55f * f.shade, 0.10f * f.shade, 1.0f };
+        const XMFLOAT4 color = { tint.x * f.shade, tint.y * f.shade, tint.z * f.shade, 1.0f };
         const int first = static_cast<int>(vertices.size());
         for (int k = 0; k < 4; ++k) {
             const float su = (k & 1) ? 0.5f : -0.5f;
@@ -303,7 +303,8 @@ void Renderer3D::init(ID3D11Device* device) {
     // 5. Geometría
     m_floor = createFloor(device);
     m_player = createPlayer(device);
-    m_cube = createCube(device);
+    m_cube = createCube(device, { 1.0f, 0.55f, 0.10f });
+    m_nose = createCube(device, { 1.0f, 0.90f, 0.15f });
     m_sphere = createSphere(device);
     m_shadowDisc = createShadowDisc(device);
     createShadowInstances(device, kInitialShadowCapacity);
@@ -397,10 +398,18 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     drawMesh(context, m_player,
         XMMatrixScaling(1.0f, scene.player.heightScale(), 1.0f) * XMMatrixTranslation(p.x, p.y, p.z), viewProj);
 
-    if (scene.target.visible()) {
-        const float size = scene.target.scale();
-        const XMFLOAT3 c = scene.target.center();
+    for (const CaptureTarget& target : scene.targets) {
+        if (!target.visible()) continue;
+        const float size = target.scale();
+        const XMFLOAT3 c = target.center();
         drawMesh(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), viewProj);
+
+        const float nose = size * 0.4f;
+        const float sinYaw = std::sin(target.yaw());
+        const float cosYaw = std::cos(target.yaw());
+        drawMesh(context, m_nose,
+            XMMatrixScaling(nose, nose, nose) *
+            XMMatrixTranslation(c.x + sinYaw * size * 0.5f, c.y + size * 0.15f, c.z + cosYaw * size * 0.5f), viewProj);
     }
     for (const Pokeball& ball : scene.balls) {
         const XMFLOAT3& b = ball.body.position;
@@ -423,6 +432,7 @@ void Renderer3D::cleanup() {
     m_shadowPixelShader.Reset();
     m_shadowVertexShader.Reset();
     m_sphere = {};
+    m_nose = {};
     m_cube = {};
     m_player = {};
     m_floor = {};

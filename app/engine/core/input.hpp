@@ -11,12 +11,16 @@ struct InputState {
     float lookY = 0.0f;
 
     // Estado mantenido.
-    bool aim = false;       // apuntar: clic derecho / gatillo izquierdo (L2)
+    bool aimHold = false;     // apuntar mientras se mantiene (L2 en el mando)
 
     // Eventos de un solo frame (nueva pulsación).
     bool jump = false;
-    bool crouch = false;    // agacharse / levantarse / deslizarse
-    bool sprint = false;    // doble toque en W o pulsar L3
-    bool pause = false;     // Options / Menú del mando
-    bool throwBall = false; // lanzar Pokéball: clic izquierdo / gatillo derecho (R2)
+    bool crouch = false;      // agacharse / levantarse / deslizarse
+    bool sprint = false;      // doble toque en W o pulsar L3
+    bool pause = false;       // Options / Menú del mando
+    bool throwBall = false;   // lanzar Pokéball: clic izquierdo / R2
+    bool aimToggle = false;   // entrar / salir del modo lanzamiento: clic derecho
+    bool escape = false;      // ESC: sale del modo lanzamiento o, si no, pausa
+    bool lockTap = false;     // TAB / R3 (pulsación corta): fijar la cámara o cambiar de objetivo
+    bool lockCancel = false;  // TAB / R3 mantenido: soltar el objetivo
 };

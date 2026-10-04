@@ -140,6 +140,8 @@ class Player {
         return SPRINT_SPEED + (SLIDE_SPEED - SPRINT_SPEED) * remaining;
     }
 
+    bool crouched() const { return m_crouching; }
+
     // Velocidad al caminar por el suelo según la postura.
     float groundSpeed() const {
         if (m_sprinting) return SPRINT_SPEED;

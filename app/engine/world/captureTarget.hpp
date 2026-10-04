@@ -4,9 +4,12 @@
 #include <utility>
 #include <DirectXMath.h>
 #include "../physics/body.hpp"
+#include "../../utils/core/randomUtil.hpp"
+#include "captureRules.hpp"
 
-// Objetivo de pruebas: un cubo inmóvil que hace de pokémon. Al recibir una Pokéball se "captura"
-// (se encoge y desaparece) y tras unos segundos reaparece en otro sitio para seguir probando.
+// Objetivo de pruebas: un cubo inmóvil que hace de pokémon (el cubito amarillo marca hacia dónde mira).
+// Al capturarlo se encoge y desaparece; si la captura falla, cambia su porcentaje base al azar.
+// Tras unos segundos reaparece en su sitio con un porcentaje nuevo.
 class CaptureTarget {
     public:
     static constexpr float SIZE          = 1.2f;  // arista del cubo
@@ -17,10 +20,14 @@ class CaptureTarget {
 
     Physics::Body body; // inmóvil: nunca se integra con la física
 
-    CaptureTarget() { moveTo(0); }
+    explicit CaptureTarget(int slot = 0) : m_slot(slot % SLOT_COUNT) { spawn(); }
 
     bool hittable() const { return m_state == State::IDLE; }
     bool visible() const { return m_state != State::HIDDEN; }
+    float yaw() const { return SPAWNS[m_slot][2]; }
+    float baseChance() const { return m_baseChance; }
+
+    void reroll() { m_baseChance = RandomUtil::range(CaptureRules::MIN_BASE, CaptureRules::MAX_BASE); }
 
     // Arista actual del cubo dibujado (se encoge al capturarlo).
     float scale() const {
@@ -88,7 +95,7 @@ class CaptureTarget {
                 break;
             case State::HIDDEN:
                 m_timer += dt;
-                if (m_timer >= RESPAWN_DELAY) moveTo(m_spawnIndex + 1);
+                if (m_timer >= RESPAWN_DELAY) spawn();
                 break;
         }
     }
@@ -96,19 +103,25 @@ class CaptureTarget {
     private:
     enum class State { IDLE, CAPTURING, HIDDEN };
 
-    // Posiciones (x, z) por las que va apareciendo el cubo.
-    static constexpr float SPAWNS[][2] = { { 0.0f, 14.0f }, { -12.0f, 18.0f }, { 14.0f, 10.0f }, { -8.0f, -14.0f }, { 10.0f, -12.0f } };
-    static constexpr int SPAWN_COUNT = static_cast<int>(sizeof(SPAWNS) / sizeof(SPAWNS[0]));
+    // Posición (x, z) y hacia dónde mira (yaw, 0 = +Z) de cada pokémon. El jugador empieza en el origen mirando a +Z.
+    static constexpr float SPAWNS[][3] = {
+        {   0.0f,  14.0f,  3.14159265f },  // de frente al jugador
+        { -12.0f,  18.0f,  0.0f },         // de espaldas al jugador
+        {  14.0f,  10.0f, -1.57079633f },  // mirando hacia el centro
+        {  -8.0f, -14.0f,  3.14159265f },  // de espaldas al jugador
+    };
+    static constexpr int SLOT_COUNT = static_cast<int>(sizeof(SPAWNS) / sizeof(SPAWNS[0]));
 
-    void moveTo(int index) {
-        m_spawnIndex = index % SPAWN_COUNT;
-        body.position = { SPAWNS[m_spawnIndex][0], 0.0f, SPAWNS[m_spawnIndex][1] };
+    void spawn() {
+        body.position = { SPAWNS[m_slot][0], 0.0f, SPAWNS[m_slot][1] };
         body.shadowRadius = SHADOW_RADIUS;
         m_state = State::IDLE;
         m_timer = 0.0f;
+        reroll();
     }
 
     State m_state = State::IDLE;
     float m_timer = 0.0f;
-    int m_spawnIndex = 0;
+    float m_baseChance = 50.0f;
+    int m_slot = 0;
 };

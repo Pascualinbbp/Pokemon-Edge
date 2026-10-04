@@ -1,22 +1,29 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 #include <DirectXMath.h>
+#include "../core/gameStatus.hpp"
 #include "../core/input.hpp"
 #include "../physics/physicsWorld.hpp"
+#include "../../utils/core/randomUtil.hpp"
 #include "camera.hpp"
+#include "captureRules.hpp"
 #include "captureTarget.hpp"
 #include "player.hpp"
 #include "pokeball.hpp"
 
 struct Scene {
     static constexpr float HALF_SIZE = Physics::World::HALF_SIZE;
+    static constexpr int TARGET_COUNT = 4;
 
     // Lanzamiento
     static constexpr float THROW_SPEED = 26.0f;       // m/s (alcance máximo ~34 m con g = 20)
     static constexpr float THROW_COOLDOWN = 0.45f;    // segundos entre lanzamientos
     static constexpr float MAX_AIM_DISTANCE = 25.0f;  // si el rayo de apuntado no choca con nada, se apunta a esta distancia
+    static constexpr float RANGE = 24.0f;             // alcance del jugador: porcentaje visible y fijado de cámara
+    static constexpr float LOCK_RELEASE_MARGIN = 3.0f; // el fijado se mantiene un poco más allá del alcance
     static constexpr float SPAWN_SIDE = 0.35f;        // la pokéball sale por el hombro derecho
     static constexpr float SPAWN_FORWARD = 0.5f;
     static constexpr float SPAWN_HEIGHT = 1.1f;
@@ -27,34 +34,53 @@ struct Scene {
     Physics::World world;
     Player player;
     Camera camera;
-    CaptureTarget target;
+    std::array<CaptureTarget, TARGET_COUNT> targets = { CaptureTarget(0), CaptureTarget(1), CaptureTarget(2), CaptureTarget(3) };
     std::vector<Pokeball> balls;
 
     int captures = 0;
-    float captureNotice = 0.0f; // segundos restantes del aviso "¡Capturado!"
+    int noticeKind = 0;       // 1 = capturado, 2 = se ha escapado
+    float noticeTime = 0.0f;
     float throwCooldown = 0.0f;
+    bool aimMode = false;     // modo lanzamiento activado con el clic derecho
+    int lockedIndex = -1;     // objetivo al que está fijada la cámara (-1 = ninguno)
 
-    void update(float dt, const InputState& input) {
-        camera.rotate(input.lookX, input.lookY);
-        camera.update(dt, input.aim);
+    // Devuelve true si hay que pausar el juego (ESC fuera del modo lanzamiento).
+    bool update(float dt, const InputState& input) {
+        bool pause = false;
+        if (input.escape) {
+            if (aimMode) aimMode = false;
+            else pause = true;
+        }
+        if (input.aimToggle) aimMode = !aimMode;
+        m_aiming = aimMode || input.aimHold;
 
-        player.aiming = input.aim;
+        if (input.lockCancel) lockedIndex = -1;
+        else if (input.lockTap) cycleLock();
+        validateLock();
+
+        camera.update(dt, m_aiming);
+        if (lockedIndex >= 0) camera.trackToward(player.body.position, targets[lockedIndex].center(), dt);
+        else camera.rotate(input.lookX, input.lookY);
+
+        player.aiming = m_aiming;
         player.update(dt, input, camera.yaw(), world);
 
         throwCooldown = (std::max)(0.0f, throwCooldown - dt);
-        captureNotice = (std::max)(0.0f, captureNotice - dt);
-        if (input.aim && input.throwBall && throwCooldown <= 0.0f) throwBall();
+        noticeTime = (std::max)(0.0f, noticeTime - dt);
+        if (m_aiming && input.throwBall && throwCooldown <= 0.0f) throwBall();
 
-        target.update(dt);
+        for (CaptureTarget& target : targets) target.update(dt);
         updateBalls(dt);
+        updateAimInfo();
+        return pause;
     }
 
-    // Recorre todos los cuerpos de la escena (jugador, objetivo y pokéballs; después NPCs, pokémon...).
+    // Recorre todos los cuerpos de la escena (jugador, objetivos y pokéballs; después NPCs, pokémon...).
     // Es el único sitio que hay que ampliar al añadir entidades: sombras y física lo usan.
     template <typename Fn>
     void forEachBody(Fn&& fn) const {
         fn(player.body);
-        fn(target.body);
+        for (const CaptureTarget& target : targets) fn(target.body);
         for (const Pokeball& ball : balls) fn(ball.body);
     }
 
@@ -62,19 +88,135 @@ struct Scene {
         return camera.viewMatrix(player.body.position);
     }
 
+    GameStatus status() const {
+        GameStatus s;
+        s.aimBlend = camera.aimBlend();
+        s.captures = captures;
+        s.notice = noticeTime > 0.0f ? noticeKind : 0;
+        s.locked = lockedIndex >= 0;
+        if (m_aimTarget >= 0) {
+            const CaptureTarget& t = targets[m_aimTarget];
+            s.hasAimTarget = true;
+            s.behind = isBehind(t);
+            s.hidden = player.crouched();
+            s.chancePercent = static_cast<int>(std::lround(chancePercent(t)));
+        }
+        return s;
+    }
+
     private:
+    // --- Porcentaje de captura ---
+    bool isBehind(const CaptureTarget& t) const {
+        return CaptureRules::isBehind(t.body.position, t.yaw(), player.body.position);
+    }
+
+    float chancePercent(const CaptureTarget& t) const {
+        return CaptureRules::percent(t.baseChance(), isBehind(t), player.crouched());
+    }
+
+    void resolveCapture(CaptureTarget& t) {
+        if (RandomUtil::roll(chancePercent(t))) {
+            t.capture();
+            ++captures;
+            noticeKind = 1;
+        } else {
+            t.reroll(); // el porcentaje vuelve a cambiar
+            noticeKind = 2;
+        }
+        noticeTime = NOTICE_TIME;
+    }
+
+    // --- Fijado de cámara ---
+    float distanceXZ(const CaptureTarget& t) const {
+        return std::hypot(t.body.position.x - player.body.position.x, t.body.position.z - player.body.position.z);
+    }
+
+    // Ángulo horizontal del objetivo respecto a hacia donde mira la cámara (positivo = a la derecha).
+    float relativeAngle(const CaptureTarget& t) const {
+        const float dx = t.body.position.x - player.body.position.x;
+        const float dz = t.body.position.z - player.body.position.z;
+        return DirectX::XMScalarModAngle(std::atan2(dx, dz) - camera.yaw());
+    }
+
+    // Objetivos disponibles para fijar (vivos y dentro del alcance).
+    std::vector<int> lockCandidates(int exclude) const {
+        std::vector<int> result;
+        for (int i = 0; i < TARGET_COUNT; ++i) {
+            if (i != exclude && targets[i].hittable() && distanceXZ(targets[i]) <= RANGE) result.push_back(i);
+        }
+        return result;
+    }
+
+    int closestToCenter(const std::vector<int>& candidates) const {
+        int best = candidates.front();
+        for (const int i : candidates) {
+            if (std::fabs(relativeAngle(targets[i])) < std::fabs(relativeAngle(targets[best]))) best = i;
+        }
+        return best;
+    }
+
+    // Una pulsación: fija el objetivo más cercano al centro; si ya hay uno, pasa al siguiente (hacia la derecha).
+    void cycleLock() {
+        std::vector<int> candidates = lockCandidates(-1);
+        if (candidates.empty()) return;
+        if (lockedIndex < 0) {
+            lockedIndex = closestToCenter(candidates);
+            return;
+        }
+
+        std::sort(candidates.begin(), candidates.end(),
+            [this](int a, int b) { return relativeAngle(targets[a]) < relativeAngle(targets[b]); });
+        const auto it = std::find(candidates.begin(), candidates.end(), lockedIndex);
+        if (it == candidates.end()) lockedIndex = closestToCenter(candidates);
+        else lockedIndex = (it + 1 == candidates.end()) ? candidates.front() : *(it + 1);
+    }
+
+    // Si el objetivo fijado se captura o queda fuera de alcance, salta a otro cercano; si no hay, se suelta.
+    void validateLock() {
+        if (lockedIndex < 0) return;
+        const CaptureTarget& t = targets[lockedIndex];
+        if (t.hittable() && distanceXZ(t) <= RANGE + LOCK_RELEASE_MARGIN) return;
+
+        const std::vector<int> candidates = lockCandidates(lockedIndex);
+        lockedIndex = candidates.empty() ? -1 : closestToCenter(candidates);
+    }
+
+    // --- Apuntado ---
+    // Pokémon más cercano que atraviesa el rayo. Devuelve su índice (-1 si ninguno) y la distancia al impacto.
+    int nearestHit(const DirectX::XMFLOAT3& eye, const DirectX::XMFLOAT3& dir, float& distance, bool inRangeOnly) const {
+        int best = -1;
+        distance = 1.0e9f;
+        for (int i = 0; i < TARGET_COUNT; ++i) {
+            float t = 0.0f;
+            if (inRangeOnly && distanceXZ(targets[i]) > RANGE) continue;
+            if (targets[i].raycast(eye, dir, t) && t < distance) {
+                distance = t;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    // Pokémon al que apunta ahora la cruceta (para mostrar su porcentaje).
+    void updateAimInfo() {
+        m_aimTarget = -1;
+        if (!m_aiming) return;
+        float distance;
+        m_aimTarget = nearestHit(camera.eye(player.body.position), camera.forward(), distance, true);
+    }
+
     // Lanza una pokéball hacia el punto que señala la cruceta (centro de la pantalla).
     void throwBall() {
         using namespace DirectX;
         const XMFLOAT3 eye = camera.eye(player.body.position);
         const XMFLOAT3 dir = camera.forward();
 
-        // Punto apuntado: primer impacto del rayo de la cámara con el suelo o el objetivo.
+        // Punto apuntado: primer impacto del rayo de la cámara con el suelo o un pokémon.
         float distance = MAX_AIM_DISTANCE;
         const float ground = world.groundHeight(eye.x, eye.z);
         if (dir.y < -1.0e-4f) distance = (std::min)(distance, (std::max)((ground - eye.y) / dir.y, 0.0f));
         float hit = 0.0f;
-        if (target.raycast(eye, dir, hit)) distance = (std::min)(distance, hit);
+        if (nearestHit(eye, dir, hit, false) >= 0) distance = (std::min)(distance, hit);
         const XMFLOAT3 aim = { eye.x + dir.x * distance, eye.y + dir.y * distance, eye.z + dir.z * distance };
 
         float sinYaw, cosYaw;
@@ -113,7 +255,7 @@ struct Scene {
         return { dx / d * THROW_SPEED * cosA, THROW_SPEED * sinA, dz / d * THROW_SPEED * cosA };
     }
 
-    // Física de las pokéballs en pasos pequeños (así una bola rápida no atraviesa el objetivo).
+    // Física de las pokéballs en pasos pequeños (así una bola rápida no atraviesa un objetivo).
     void updateBalls(float dt) {
         if (balls.empty()) return;
 
@@ -125,14 +267,17 @@ struct Scene {
 
                 world.step(ball.body, h);
                 ball.age += h;
-                if (target.hitBy(ball.body.position, Pokeball::RADIUS)) {
-                    target.capture();
-                    ++captures;
-                    captureNotice = NOTICE_TIME;
+                for (CaptureTarget& target : targets) {
+                    if (!target.hitBy(ball.body.position, Pokeball::RADIUS)) continue;
+                    resolveCapture(target);
                     ball.age = Pokeball::LIFETIME; // la pokéball se consume
+                    break;
                 }
             }
         }
         balls.erase(std::remove_if(balls.begin(), balls.end(), [](const Pokeball& b) { return b.expired(); }), balls.end());
     }
+
+    bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
+    int m_aimTarget = -1;  // pokémon al que apunta la cruceta dentro del alcance
 };

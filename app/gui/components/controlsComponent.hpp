@@ -26,13 +26,17 @@ namespace ControlsComponent {
         inline constexpr const char* NOTES_KEYBOARD[] = {
             "Agacharse: pulsa SHIFT (otra vez para levantarte). Corriendo, SHIFT inicia un deslizamiento corto sin mantener la tecla.",
             "Durante el deslizamiento, A y D cambian la dirección. Saltar desde un deslizamiento conserva el impulso.",
-            "Apuntar: mantén el clic derecho. Lanzar Pokéball: clic izquierdo mientras apuntas.",
+            "Apuntar: clic derecho (otra vez o ESC para salir). Lanzar Pokéball: clic izquierdo mientras apuntas.",
+            "TAB: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
+            "Más captura: x1.5 por la espalda del pokémon y x2 si vas agachado sin que te detecte.",
             "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
         };
         inline constexpr const char* NOTES_GAMEPAD[] = {
             "Agacharse: pulsa el botón derecho (otra vez para levantarte). Corriendo (L3), inicia un deslizamiento corto.",
             "Durante el deslizamiento, inclina el stick izquierdo a un lado para girar. Saltar desde él conserva el impulso.",
-            "Apuntar: mantén L2 (gatillo izquierdo). Lanzar Pokéball: R2 (gatillo derecho) mientras apuntas.",
+            "Apuntar: mantén L2. Lanzar Pokéball: R2 mientras apuntas.",
+            "R3: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
+            "Más captura: x1.5 por la espalda del pokémon y x2 si vas agachado sin que te detecte.",
             "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
             "Menús: stick izquierdo o cruceta para moverte, botón inferior para aceptar y botón derecho para volver.",
         };
@@ -61,9 +65,11 @@ namespace ControlsComponent {
             keyRow(dl, offset(o, 40.0f, 204.0f), { "SHIFT" }, "Agacharse / Deslizarse", 90.0f);
 
             keyRow(dl, offset(o, 420.0f, 30.0f), { "ESPACIO" }, "Saltar", 150.0f);
-            keyRow(dl, offset(o, 420.0f, 90.0f), { "ESC" }, "Pausa / Volver", 60.0f);
-            mouse(dl, offset(o, 440.0f, 150.0f));
-            label(dl, o.x + 504.0f, o.y + 177.0f, "Mover la cámara");
+            keyRow(dl, offset(o, 420.0f, 90.0f), { "ESC" }, "Pausa / Salir de apuntar", 60.0f);
+            keyRow(dl, offset(o, 420.0f, 150.0f), { "TAB" }, "Fijar objetivo (mantener: soltar)", 60.0f);
+            mouse(dl, offset(o, 440.0f, 204.0f));
+            label(dl, o.x + 504.0f, o.y + 206.0f, "Mover la cámara");
+            label(dl, o.x + 504.0f, o.y + 228.0f, "Der.: apuntar · Izq.: lanzar");
         }
 
         inline void drawGamepad(ImDrawList* dl, const ImVec2& o, InputDevice device) {
@@ -139,7 +145,9 @@ namespace ControlsComponent {
                 label(dl, o.x + textX, o.y + elbowY, text);
             };
             callout(layout.lsX, layout.lsY, layout.lsElbowY, 210.0f, "Mover / Correr (pulsar L3)");
-            callout(layout.rsX, layout.rsY, layout.rsElbowY, 550.0f, "Mover la cámara");
+            callout(layout.rsX, layout.rsY, layout.rsElbowY, 550.0f, "Cámara · Fijar objetivo (R3)");
+            callout(302.0f, 40.0f, 40.0f, 210.0f, "Apuntar (L2)");
+            callout(457.0f, 40.0f, 40.0f, 550.0f, "Lanzar (R2)");
             callout(fx + 27.0f, fy, fy, 550.0f, "Agacharse / Deslizarse");
             callout(fx, fy + 27.0f, fy + 58.0f, 550.0f, "Saltar");
             callout(pauseX, pauseY, 14.0f, 550.0f, "Pausa");

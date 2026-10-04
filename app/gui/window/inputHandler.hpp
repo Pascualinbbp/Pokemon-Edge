@@ -21,9 +21,13 @@ namespace InputHandler {
         // --- Teclado y ratón ---
         struct Keyboard {
             bool up = false, down = false, left = false, right = false; // mantenidas
-            bool aim = false;                                           // clic derecho mantenido
             bool jump = false, crouch = false, sprint = false;          // eventos de un frame
-            bool throwBall = false;                                     // clic izquierdo (evento de un frame)
+            bool throwBall = false;                                     // clic izquierdo
+            bool aimToggle = false;                                     // clic derecho
+            bool escape = false;                                        // ESC (solo mientras se juega)
+            bool lockTap = false;                                       // TAB pulsado y soltado rápido
+            bool tabDown = false, tabFired = false;                     // TAB mantenido
+            DWORD tabSince = 0;
         };
         inline Keyboard keys;
         inline float mouseDX = 0.0f;
@@ -39,6 +43,8 @@ namespace InputHandler {
         inline std::optional<InputDevice> padType;  // tipo del mando conectado; vacío si no hay
         inline uint16_t padPrevButtons = 0;
         inline bool padPrevTriggerDown = false;     // R2 en el frame anterior (para detectar la pulsación)
+        inline DWORD padLockSince = 0;              // R3 pulsado desde...
+        inline bool padLockFired = false;
         inline bool sonyRegistered = false;
         inline bool devicesDirty = false;
 
@@ -46,6 +52,7 @@ namespace InputHandler {
         inline void clearEvents() {
             mouseDX = mouseDY = 0.0f;
             keys.jump = keys.crouch = keys.sprint = keys.throwBall = false;
+            keys.aimToggle = keys.escape = keys.lockTap = false;
         }
 
         inline bool readPad(GamepadState& out) {
@@ -131,6 +138,20 @@ namespace InputHandler {
             case VK_SHIFT: // solo el shift izquierdo (por su scancode)
                 if (newPress && ((lParam >> 16) & 0xFF) == detail::LEFT_SHIFT_SCANCODE) k.crouch = true;
                 break;
+            case VK_TAB:
+                if (newPress && detail::captured) {
+                    k.tabDown = true;
+                    k.tabFired = false;
+                    k.tabSince = GetTickCount();
+                } else if (!pressed) {
+                    if (k.tabDown && !k.tabFired) k.lockTap = true;
+                    k.tabDown = false;
+                }
+                break;
+            case VK_ESCAPE:
+                if (newPress && detail::captured) k.escape = true;
+                gameKey = false;
+                break;
             default:
                 gameKey = false;
                 break;
@@ -139,17 +160,13 @@ namespace InputHandler {
         if (gameKey && newPress) detail::active = InputDevice::KEYBOARD_MOUSE;
     }
 
-    // Botones del ratón: clic derecho (mantener) = apuntar, clic izquierdo = lanzar.
-    // Soltar siempre se registra (aunque se suelte en un menú); pulsar solo cuenta mientras se juega.
+    // Botones del ratón: clic derecho = entrar / salir del modo lanzamiento, clic izquierdo = lanzar.
+    // Solo cuentan las pulsaciones mientras se juega.
     inline void onMouseButton(bool right, bool pressed) {
         detail::Keyboard& k = detail::keys;
-        if (!pressed) {
-            if (right) k.aim = false;
-            return;
-        }
-        if (!detail::captured) return;
+        if (!pressed || !detail::captured) return;
 
-        if (right) k.aim = true;
+        if (right) k.aimToggle = true;
         else k.throwBall = true;
         detail::active = InputDevice::KEYBOARD_MOUSE;
     }
@@ -198,7 +215,9 @@ namespace InputHandler {
         if (capture == detail::captured) return;
         detail::captured = capture;
         detail::clearEvents();
-        detail::keys.aim = false;
+        detail::keys.tabDown = false;
+        detail::padLockFired = false;
+        detail::padLockSince = 0;
         RawInputUtil::registerDevice(detail::window, RawInputUtil::USAGE_MOUSE, capture);
 
         if (capture) {
@@ -242,8 +261,25 @@ namespace InputHandler {
             input.crouch = (pressed & InputBindings::PAD_CROUCH) != 0;
             input.sprint = (pressed & InputBindings::PAD_SPRINT) != 0;
             input.pause = (pressed & InputBindings::PAD_PAUSE) != 0;
-            input.aim = pad.lt > InputBindings::TRIGGER_THRESHOLD;
+            input.aimHold = pad.lt > InputBindings::TRIGGER_THRESHOLD;
             input.throwBall = triggerDown && !detail::padPrevTriggerDown;
+
+            // R3: pulsación corta = fijar / cambiar; mantenido = soltar.
+            const bool lockDown = (pad.buttons & InputBindings::PAD_LOCK) != 0;
+            const DWORD now = GetTickCount();
+            if (pressed & InputBindings::PAD_LOCK) {
+                detail::padLockSince = now;
+                detail::padLockFired = false;
+            }
+            if (lockDown) {
+                if (!detail::padLockFired && now - detail::padLockSince >= InputBindings::LOCK_HOLD_MS) {
+                    detail::padLockFired = true;
+                    input.lockCancel = true;
+                }
+            } else if (detail::padPrevButtons & InputBindings::PAD_LOCK) {
+                if (!detail::padLockFired) input.lockTap = true;
+                detail::padLockFired = false;
+            }
         } else {
             const detail::Keyboard& k = detail::keys;
             input.moveX = static_cast<float>(k.right) - static_cast<float>(k.left);
@@ -253,8 +289,14 @@ namespace InputHandler {
             input.jump = k.jump;
             input.crouch = k.crouch;
             input.sprint = k.sprint;
-            input.aim = k.aim;
             input.throwBall = k.throwBall;
+            input.aimToggle = k.aimToggle;
+            input.escape = k.escape;
+            input.lockTap = k.lockTap;
+            if (k.tabDown && !k.tabFired && GetTickCount() - k.tabSince >= InputBindings::LOCK_HOLD_MS) {
+                detail::keys.tabFired = true;
+                input.lockCancel = true;
+            }
         }
 
         if (padOk) {

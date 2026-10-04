@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <cmath>
 #include <DirectXMath.h>
 
 // Cámara orbital en 3ª persona: gira alrededor de un objetivo (el jugador).
@@ -22,6 +23,7 @@ class Camera {
     static constexpr float AIM_MIN_PITCH    = -0.3f;   // al apuntar se puede mirar algo hacia arriba
     static constexpr float AIM_SENSITIVITY_SCALE = 0.6f; // más precisión al apuntar
     static constexpr float BLEND_SPEED      = 7.0f;    // la transición dura ~1/7 s
+    static constexpr float LOCK_SMOOTH      = 10.0f;   // rapidez con la que la cámara se fija al objetivo
 
     // Rotación libre alrededor del jugador (no afecta a hacia dónde camina el personaje).
     void rotate(float dx, float dy) {
@@ -31,6 +33,28 @@ class Camera {
         m_yaw = DirectX::XMScalarModAngle(m_yaw + dx * sensitivity);
         // Ratón hacia arriba = cámara más baja (mirando hacia arriba).
         m_pitch = (std::clamp)(m_pitch + dy * sensitivity, minPitch(), MAX_PITCH);
+    }
+
+    // Fijar objetivo: gira la cámara suavemente hasta que el rayo desde su posición (con el desplazamiento
+    // del hombro) pase por "point". "target" es el jugador.
+    void trackToward(const DirectX::XMFLOAT3& target, const DirectX::XMFLOAT3& point, float dt) {
+        Camera probe = *this;
+        for (int i = 0; i < 4; ++i) {
+            DirectX::XMFLOAT3 at, eyePos;
+            probe.compute(target, at, eyePos);
+            const float dx = point.x - eyePos.x;
+            const float dy = point.y - eyePos.y;
+            const float dz = point.z - eyePos.z;
+            const float horizontal = std::sqrt(dx * dx + dz * dz);
+            if (horizontal < 1.0e-3f) return;
+            probe.m_yaw = std::atan2(dx, dz);
+            probe.m_pitch = (std::clamp)(std::atan2(-dy, horizontal), minPitch(), MAX_PITCH);
+        }
+
+        const float k = (std::min)(1.0f, LOCK_SMOOTH * dt);
+        float dYaw = DirectX::XMScalarModAngle(probe.m_yaw - m_yaw);
+        m_yaw = DirectX::XMScalarModAngle(m_yaw + dYaw * k);
+        m_pitch += (probe.m_pitch - m_pitch) * k;
     }
 
     // Avanza la transición entre cámara normal y de apuntado.
