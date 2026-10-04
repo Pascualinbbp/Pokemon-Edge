@@ -49,6 +49,8 @@ class Player {
         m_heightScale = m_sliding ? SLIDE_HEIGHT : ((m_crouching || m_crouchQueued) ? CROUCH_HEIGHT : 1.0f);
     }
 
+    bool crouched() const { return m_crouching; }
+
     private:
     static constexpr float FORWARD_THRESHOLD = 0.3f;   // inclinación mínima del stick para contar como "avanzar"
     static constexpr float DIRECTION_JUMP = 0.35f;     // salto de la entrada entre dos frames que cuenta como "cambio de dirección"
@@ -139,8 +141,6 @@ class Player {
         const float remaining = (std::clamp)((SLIDE_DURATION - m_slideTime) / SLIDE_EASE_OUT, 0.0f, 1.0f);
         return SPRINT_SPEED + (SLIDE_SPEED - SPRINT_SPEED) * remaining;
     }
-
-    bool crouched() const { return m_crouching; }
 
     // Velocidad al caminar por el suelo según la postura.
     float groundSpeed() const {
