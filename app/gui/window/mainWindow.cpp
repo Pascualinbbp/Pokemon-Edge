@@ -39,7 +39,8 @@ namespace {
     constexpr DWORD kMenuPollMs = 50;            // lectura del mando en los menús (solo con un mando conectado)
     constexpr float kMaxFrameSeconds = 0.1f;     // una pausa larga no debe disparar la simulación
     constexpr float kAutosaveSeconds = 60.0f;    // intervalo del autoguardado (solo cuenta mientras se juega)
-    constexpr float kSavedNoticeSeconds = 2.0f;  // cuánto se muestra el aviso "Partida guardada"
+    constexpr float kSavedNoticeSeconds = 2.0f;  // cuánto se muestra el aviso de guardado en el HUD
+    constexpr float kSavedNoticeFade = 0.4f;     // desvanecido final del aviso
 
     HWND g_hwnd = nullptr;
     Texture g_logo;
@@ -49,9 +50,8 @@ namespace {
     int g_selectedSlot = -1;    // ranura pendiente de confirmar en la pantalla de reemplazo
     bool g_resizing = false;    // el usuario está arrastrando el borde de la ventana
     bool g_focused = false;
-    bool g_saved = false;       // mostrar el aviso de "partida guardada" en la pausa
     float g_autosaveTimer = 0.0f;  // segundos de juego desde el último guardado
-    float g_savedNotice = 0.0f;    // segundos restantes del aviso de autoguardado en el HUD
+    float g_savedNotice = 0.0f;    // segundos restantes del aviso de guardado en el HUD
 
     // Redimensiona el swap chain solo si el tamaño del área cliente cambió de verdad.
     void applyResize(HWND hwnd) {
@@ -65,7 +65,6 @@ namespace {
     // Arranca la pantalla de carga de la partida que acaba de prepararse.
     void beginLoading() {
         g_loadTimer = 0.0f;
-        g_saved = false;
         g_autosaveTimer = 0.0f;
         g_savedNotice = 0.0f;
         g_state = GameState::LOADING;
@@ -310,10 +309,10 @@ void MainWindow::run() {
                 LoadingComponent::render(g_state, g_loadTimer);
                 break;
             case GameState::PLAYING:
-                HudComponent::render(InputHandler::activeDevice(), engine.status(), g_savedNotice > 0.0f);
+                HudComponent::render(InputHandler::activeDevice(), engine.status(), (std::min)(1.0f, g_savedNotice / kSavedNoticeFade));
                 break;
             case GameState::PAUSED:
-                if (PauseComponent::render(g_state, g_saved)) g_saved = SessionManager::saveCurrent();
+                PauseComponent::render(g_state);
                 break;
             case GameState::CONTROLS:
                 ControlsComponent::render(g_state, InputHandler::activeDevice());
@@ -329,10 +328,11 @@ void MainWindow::run() {
         if (g_state != prevState) {
             redrawFrames = 2;
             g_fullscreen.set(g_hwnd, isFullscreen(g_state));
-            if (g_state == GameState::PLAYING) g_saved = false;
+            if (isInGame(prevState) && !isInGame(g_state)) SessionManager::saveCurrent(); // salir al menú guarda la partida
         } else if (redrawFrames > 0) {
             --redrawFrames;
         }
     }
+    if (isInGame(g_state)) SessionManager::saveCurrent(); // cerrar el juego en plena partida también guarda
     cleanup();
 }

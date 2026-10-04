@@ -41,6 +41,7 @@ class SaveManager {
         j["version"] = SAVE_VERSION;
         j["savedAt"] = static_cast<long long>(now);
         j["player"]["position"] = data.playerPosition;
+        j["world"]["time"] = data.worldTime;
 
         if (!JsonUtil::saveToFile(PathsUtil::saveSlotPath(slot), j)) return false;
         s_slots[slot] = { true, TimeUtil::formatLocal(now) };
@@ -59,6 +60,7 @@ class SaveManager {
 
         SaveData data;
         data.playerPosition = *position;
+        data.worldTime = JsonUtil::find<float>(j, { "world", "time" }).value_or(-1.0f); // partidas antiguas: sin dato
         return data;
     }
 

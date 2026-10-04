@@ -58,9 +58,13 @@ class Renderer3D {
     static Mesh createCube(ID3D11Device* device, const DirectX::XMFLOAT3& tint);
     static Mesh createSphere(ID3D11Device* device);
 
-    void setObject(ID3D11DeviceContext* context, DirectX::CXMMATRIX world, DirectX::CXMMATRIX worldViewProj, float alpha) const;
+    void setObject(ID3D11DeviceContext* context, DirectX::CXMMATRIX world, DirectX::CXMMATRIX worldViewProj,
+        float alpha, float sunlight) const;
     void drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) const;
-    void drawMesh(ID3D11DeviceContext* context, const Mesh& mesh, DirectX::CXMMATRIX world, DirectX::CXMMATRIX viewProj) const;
+    void drawMesh(ID3D11DeviceContext* context, const Mesh& mesh, DirectX::CXMMATRIX world, DirectX::CXMMATRIX viewProj,
+        float sunlight = 1.0f) const;
+    // Fracción de luz que recibe un cuerpo (0 = a la sombra de una pared, 1 = a pleno sol), probando tres alturas.
+    static float sunlight(const Scene& scene, const DirectX::XMFLOAT3& feet, float height, const DirectX::XMFLOAT3& toLight);
     void drawShadow(ID3D11DeviceContext* context, const Mesh& mesh, DirectX::CXMMATRIX world,
         DirectX::CXMMATRIX shadowViewProj, float opacity) const;
     void updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, DirectX::CXMMATRIX view);
@@ -83,6 +87,7 @@ class Renderer3D {
     Mesh m_cube;   // cuerpo del pokémon de pruebas (cubo unitario centrado en el origen)
     Mesh m_nose;   // cubito amarillo que marca hacia dónde mira
     Mesh m_sphere; // pokéball (esfera unitaria)
+    Mesh m_wall;   // paredes (cubo unitario que se escala)
 
     // La proyección solo se recalcula cuando cambia el aspecto de la ventana o el campo de visión (apuntado).
     DirectX::XMFLOAT4X4 m_proj = {};

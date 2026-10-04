@@ -6,8 +6,8 @@
 #include "../window/guiInput.hpp"
 
 namespace PauseComponent {
-    // saved: mostrar el aviso de "partida guardada". Devuelve true si se pulsó "GUARDAR PARTIDA".
-    inline bool render(GameState& state, bool saved) {
+    // La partida se guarda sola (periódicamente y al salir), así que no hay botón de guardar.
+    inline void render(GameState& state) {
         GuiLayout::dimBackground();
 
         GuiLayout::beginAt(0.22f);
@@ -19,11 +19,7 @@ namespace PauseComponent {
             state = GameState::PLAYING;
         }
 
-        const bool saveRequested = GuiLayout::menuButton("GUARDAR PARTIDA");
         if (GuiLayout::menuButton("CONTROLES")) state = GameState::CONTROLS;
         if (GuiLayout::menuButton("MENU PRINCIPAL")) state = GameState::MAIN_MENU;
-
-        if (saved) GuiLayout::centeredText("Partida guardada", GuiStyle::SUCCESS);
-        return saveRequested;
     }
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <cstdio>
 #include "imgui.h"
 #include "../style/guiPrompts.hpp"
@@ -23,6 +24,33 @@ namespace HudComponent {
             const ImVec2 pos(center.x - extent.x * 0.5f, center.y);
             dl->AddText(font, size, ImVec2(pos.x + 1.5f, pos.y + 1.5f), IM_COL32(0, 0, 0, 200), text);
             dl->AddText(font, size, pos, color, text);
+        }
+
+        // Aviso de autoguardado (esquina inferior derecha): contorno de pokéball transparente que gira + texto.
+        inline void drawSaving(ImDrawList* dl, float alpha) {
+            const ImVec2 size = ImGui::GetIO().DisplaySize;
+            const int a = static_cast<int>(alpha * 255.0f);
+            const ImU32 color = IM_COL32(235, 235, 235, a);
+            const ImU32 shadow = IM_COL32(0, 0, 0, static_cast<int>(a * 0.5f));
+            constexpr float RADIUS = 11.0f;
+            constexpr float BUTTON = 4.5f;
+            constexpr float MARGIN = 26.0f;
+
+            const ImVec2 c(size.x - MARGIN - RADIUS, size.y - MARGIN - RADIUS);
+            const char* text = "Guardando...";
+            const ImVec2 textSize = ImGui::CalcTextSize(text);
+            const ImVec2 textPos(c.x - RADIUS - 10.0f - textSize.x, c.y - textSize.y * 0.5f);
+            dl->AddText(ImVec2(textPos.x + 1.0f, textPos.y + 1.0f), shadow, text);
+            dl->AddText(textPos, color, text);
+
+            // Solo bordes: aro exterior, ecuador giratorio con hueco para el botón central, y el aro del botón.
+            const float angle = static_cast<float>(ImGui::GetTime()) * 5.0f;
+            const ImVec2 d(std::cos(angle), std::sin(angle));
+            dl->AddCircle(c, RADIUS, shadow, 28, 4.0f);
+            dl->AddCircle(c, RADIUS, color, 28, 2.0f);
+            dl->AddLine(ImVec2(c.x - d.x * RADIUS, c.y - d.y * RADIUS), ImVec2(c.x - d.x * BUTTON, c.y - d.y * BUTTON), color, 2.0f);
+            dl->AddLine(ImVec2(c.x + d.x * BUTTON, c.y + d.y * BUTTON), ImVec2(c.x + d.x * RADIUS, c.y + d.y * RADIUS), color, 2.0f);
+            dl->AddCircle(c, BUTTON, color, 14, 2.0f);
         }
 
         // Mira redonda (anillo con punto central); cambia de color al apuntar a un pokémon en rango.
@@ -61,7 +89,8 @@ namespace HudComponent {
     }
 
     // La pausa con ESC la gestiona la escena (ESC sale primero del modo lanzamiento).
-    inline void render(InputDevice device, const GameStatus& status, bool autosaved) {
+    // saving: 0 = sin aviso, 1 = aviso de autoguardado a plena opacidad.
+    inline void render(InputDevice device, const GameStatus& status, float saving) {
         ImGui::SetCursorPos(ImVec2(10.0f, 10.0f));
         ImGui::Text("FPS: %.0f", ImGui::GetIO().Framerate);
 
@@ -79,12 +108,7 @@ namespace HudComponent {
         ImGui::Dummy(ImVec2(0.0f, 36.0f));
         ImGui::Text("Capturas: %d", status.captures);
 
-        if (autosaved) {
-            const ImVec2 size = ImGui::GetIO().DisplaySize;
-            const char* text = "Partida guardada";
-            const float width = ImGui::CalcTextSize(text).x;
-            dl->AddText(ImVec2(size.x - width - 16.0f, 12.0f), IM_COL32(220, 220, 220, 230), text);
-        }
+        if (saving > 0.0f) detail::drawSaving(dl, saving);
 
         if (status.aimBlend > 0.05f) detail::drawCrosshair(dl, status);
 

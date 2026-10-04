@@ -36,6 +36,12 @@ class DayCycle {
 
     float time() const { return m_time; }
 
+    // Restaura la hora de una partida guardada (un valor no válido deja la hora de inicio).
+    void setTime(float seconds) {
+        if (!std::isfinite(seconds) || seconds < 0.0f) return;
+        m_time = std::fmod(seconds, CYCLE_SECONDS);
+    }
+
     Lighting lighting() const {
         using DirectX::XMFLOAT3;
         const float a = angle();

@@ -24,7 +24,11 @@ class Player {
     // Lo asigna la escena antes de cada update.
     bool aiming = false;
 
-    Player() { body.shadowRadius = SHADOW_RADIUS; }
+    Player() {
+        body.shadowRadius = SHADOW_RADIUS;
+        body.collisionRadius = 0.4f;
+        body.collisionHeight = 1.4f;
+    }
 
     // Escala vertical del modelo según la postura (de pie, agachado o deslizándose).
     float heightScale() const { return m_heightScale; }

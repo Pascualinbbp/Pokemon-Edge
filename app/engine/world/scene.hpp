@@ -46,10 +46,17 @@ struct Scene {
     bool aimMode = false;     // modo lanzamiento activado con el clic derecho
     int lockedIndex = -1;     // objetivo al que está fijada la cámara (-1 = ninguno)
 
+    // Dos paredes sencillas, más altas que el personaje: bloquean el paso, las pokéballs y la luz.
+    Scene() {
+        world.obstacles = {
+            { {  6.0f, 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
+            { { -7.0f, 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
+        };
+    }
+
     // Devuelve true si hay que pausar el juego (ESC fuera del modo lanzamiento).
     bool update(float dt, const InputState& input) {
         bool pause = false;
-        dayCycle.update(dt);
         if (input.escape) {
             if (aimMode) aimMode = false;
             else pause = true;

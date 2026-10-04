@@ -20,6 +20,8 @@ struct Pokeball {
         body.restitution = RESTITUTION;
         body.groundDrag = DRAG;
         body.shadowRadius = SHADOW;
+        body.collisionRadius = RADIUS;
+        body.collisionHeight = RADIUS * 2.0f;
         body.onGround = false;
     }
 

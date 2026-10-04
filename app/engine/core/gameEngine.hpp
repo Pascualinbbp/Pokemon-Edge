@@ -21,17 +21,20 @@ class GameEngine {
     void applySave(const SaveData& save) {
         m_scene = Scene{};
         m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
+        m_scene.dayCycle.setTime(save.worldTime);
     }
 
     SaveData captureSave() const {
         const DirectX::XMFLOAT3& p = m_scene.player.body.position;
         SaveData save;
         save.playerPosition = { p.x, p.y, p.z };
+        save.worldTime = m_scene.dayCycle.time();
         return save;
     }
 
     // Devuelve true si se pide pausar (ESC fuera del modo lanzamiento).
     bool update(float dt, const InputState& input) {
+        m_scene.dayCycle.update(dt); // el tiempo del mundo corre siempre mientras se juega, haga lo que haga el jugador
         return m_scene.update(dt, input);
     }
 

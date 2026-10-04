@@ -32,6 +32,11 @@ namespace {
         indices.push_back(static_cast<uint16_t>(c));
     }
 
+    XMMATRIX wallWorld(const Physics::World::Box& wall) {
+        return XMMatrixScaling(wall.half.x * 2.0f, wall.half.y * 2.0f, wall.half.z * 2.0f) *
+               XMMatrixTranslation(wall.center.x, wall.center.y, wall.center.z);
+    }
+
     constexpr float kShadowLift = 0.03f;   // la sombra flota un poco sobre el suelo para evitar z-fighting
     constexpr float kMinLightHeight = 0.2f; // con la luz casi horizontal las sombras serían infinitas
     constexpr float kMaxShadowSlope = 4.0f;
@@ -40,7 +45,7 @@ namespace {
         cbuffer Object : register(b0) {
             matrix WorldViewProj;
             matrix World;
-            float4 Tint;
+            float4 Tint; // x = fracción de luz directa que recibe el objeto, a = opacidad de la sombra
         }
         cbuffer Frame : register(b1) {
             matrix InvSky;
@@ -71,7 +76,7 @@ namespace {
             float3 n = normalize(input.nrm);
             float diffuse = saturate(dot(n, LightDir.xyz));
             float3 ambient = lerp(AmbientGround.rgb, AmbientSky.rgb, n.y * 0.5f + 0.5f);
-            return float4(saturate(input.col.rgb * (ambient + LightColor.rgb * diffuse)), 1.0f);
+            return float4(saturate(input.col.rgb * (ambient + LightColor.rgb * diffuse * Tint.x)), 1.0f);
         }
 
         // --- Sombras proyectadas sobre el suelo ---
@@ -358,13 +363,15 @@ void Renderer3D::init(ID3D11Device* device) {
     m_cube = createCube(device, { 1.0f, 0.55f, 0.10f });
     m_nose = createCube(device, { 1.0f, 0.90f, 0.15f });
     m_sphere = createSphere(device);
+    m_wall = createCube(device, { 0.62f, 0.58f, 0.52f });
 }
 
-void Renderer3D::setObject(ID3D11DeviceContext* context, CXMMATRIX world, CXMMATRIX worldViewProj, float alpha) const {
+void Renderer3D::setObject(ID3D11DeviceContext* context, CXMMATRIX world, CXMMATRIX worldViewProj,
+                           float alpha, float sunlight) const {
     ObjectConstants cb;
     XMStoreFloat4x4(&cb.worldViewProj, XMMatrixTranspose(worldViewProj));
     XMStoreFloat4x4(&cb.world, XMMatrixTranspose(world));
-    cb.tint = { 1.0f, 1.0f, 1.0f, alpha };
+    cb.tint = { sunlight, 1.0f, 1.0f, alpha };
     context->UpdateSubresource(m_objectBuffer.Get(), 0, nullptr, &cb, 0, 0);
 }
 
@@ -376,8 +383,9 @@ void Renderer3D::drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) con
     context->DrawIndexed(mesh.indexCount, 0, 0);
 }
 
-void Renderer3D::drawMesh(ID3D11DeviceContext* context, const Mesh& mesh, CXMMATRIX world, CXMMATRIX viewProj) const {
-    setObject(context, world, world * viewProj, 1.0f);
+void Renderer3D::drawMesh(ID3D11DeviceContext* context, const Mesh& mesh, CXMMATRIX world, CXMMATRIX viewProj,
+                          float sunlight) const {
+    setObject(context, world, world * viewProj, 1.0f, sunlight);
     drawIndexed(context, mesh);
 }
 
@@ -386,8 +394,19 @@ void Renderer3D::drawMesh(ID3D11DeviceContext* context, const Mesh& mesh, CXMMAT
 // caras que miran a la luz, así que cada punto del suelo se oscurece una sola vez.
 void Renderer3D::drawShadow(ID3D11DeviceContext* context, const Mesh& mesh, CXMMATRIX world,
                             CXMMATRIX shadowViewProj, float opacity) const {
-    setObject(context, world, world * shadowViewProj, opacity);
+    setObject(context, world, world * shadowViewProj, opacity, 1.0f);
     drawIndexed(context, mesh);
+}
+
+float Renderer3D::sunlight(const Scene& scene, const XMFLOAT3& feet, float height, const XMFLOAT3& toLight) {
+    if (scene.world.obstacles.empty()) return 1.0f;
+    constexpr float samples[3] = { 0.2f, 0.5f, 0.8f };
+    int lit = 0;
+    for (const float s : samples) {
+        const XMFLOAT3 point = { feet.x, feet.y + height * s, feet.z };
+        if (!scene.world.blocked(point, toLight)) ++lit;
+    }
+    return static_cast<float>(lit) / 3.0f;
 }
 
 void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, CXMMATRIX view) {
@@ -446,28 +465,43 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     const XMFLOAT3& p = scene.player.body.position;
     const XMMATRIX playerWorld = XMMatrixScaling(1.0f, scene.player.heightScale(), 1.0f) * XMMatrixTranslation(p.x, p.y, p.z);
 
-    drawMesh(context, m_floor, XMMatrixIdentity(), viewProj);
-    drawMesh(context, m_player, playerWorld, viewProj);
+    // Qué luz recibe cada cuerpo: una pared entre él y el sol (o la luna) lo deja solo con luz ambiente.
+    const XMFLOAT3& toLight = light.lightDir;
+    const float playerLight = sunlight(scene, p, 1.4f * scene.player.heightScale(), toLight);
 
-    for (const CaptureTarget& target : scene.targets) {
+    drawMesh(context, m_floor, XMMatrixIdentity(), viewProj);
+    for (const Physics::World::Box& wall : scene.world.obstacles) {
+        drawMesh(context, m_wall, wallWorld(wall), viewProj);
+    }
+    drawMesh(context, m_player, playerWorld, viewProj, playerLight);
+
+    float targetLight[Scene::TARGET_COUNT];
+    for (int i = 0; i < Scene::TARGET_COUNT; ++i) {
+        const CaptureTarget& target = scene.targets[i];
+        targetLight[i] = 1.0f;
         if (!target.visible()) continue;
+
         const float size = target.scale();
         const XMFLOAT3 c = target.center();
-        drawMesh(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), viewProj);
+        targetLight[i] = sunlight(scene, target.body.position, CaptureTarget::SIZE, toLight);
+        drawMesh(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), viewProj, targetLight[i]);
 
         const float nose = size * 0.4f;
         drawMesh(context, m_nose,
             XMMatrixScaling(nose, nose, nose) *
             XMMatrixTranslation(c.x + std::sin(target.yaw()) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(target.yaw()) * size * 0.5f),
-            viewProj);
+            viewProj, targetLight[i]);
     }
     for (const Pokeball& ball : scene.balls) {
         const XMFLOAT3& b = ball.body.position;
+        const XMFLOAT3 feet = { b.x, b.y - Pokeball::RADIUS, b.z };
         drawMesh(context, m_sphere,
-            XMMatrixScaling(Pokeball::RADIUS, Pokeball::RADIUS, Pokeball::RADIUS) * XMMatrixTranslation(b.x, b.y, b.z), viewProj);
+            XMMatrixScaling(Pokeball::RADIUS, Pokeball::RADIUS, Pokeball::RADIUS) * XMMatrixTranslation(b.x, b.y, b.z),
+            viewProj, sunlight(scene, feet, Pokeball::RADIUS * 2.0f, toLight));
     }
 
     // 3. Sombras: la luz activa (sol o luna) aplasta cada objeto sobre el suelo. Van al final porque son transparentes.
+    // Las paredes proyectan sombra sobre el suelo; los cuerpos que ya están a la sombra de una pared no añaden la suya.
     if (light.shadowOpacity <= 0.01f) return;
 
     const float ly = (std::max)(light.lightDir.y, kMinLightHeight);
@@ -487,18 +521,24 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     context->OMSetBlendState(m_shadowBlend.Get(), nullptr, 0xFFFFFFFF);
     context->OMSetDepthStencilState(m_shadowDepth.Get(), 0);
 
-    drawShadow(context, m_player, playerWorld, shadowViewProj, opacity);
-    for (const CaptureTarget& target : scene.targets) {
+    for (const Physics::World::Box& wall : scene.world.obstacles) {
+        drawShadow(context, m_wall, wallWorld(wall), shadowViewProj, opacity);
+    }
+    drawShadow(context, m_player, playerWorld, shadowViewProj, opacity * playerLight);
+    for (int i = 0; i < Scene::TARGET_COUNT; ++i) {
+        const CaptureTarget& target = scene.targets[i];
         if (!target.visible()) continue;
         const float size = target.scale();
         const XMFLOAT3 c = target.center();
-        drawShadow(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), shadowViewProj, opacity);
+        drawShadow(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z),
+            shadowViewProj, opacity * targetLight[i]);
     }
     for (const Pokeball& ball : scene.balls) {
         const XMFLOAT3& b = ball.body.position;
+        const XMFLOAT3 feet = { b.x, b.y - Pokeball::RADIUS, b.z };
         drawShadow(context, m_sphere,
             XMMatrixScaling(Pokeball::RADIUS, Pokeball::RADIUS, Pokeball::RADIUS) * XMMatrixTranslation(b.x, b.y, b.z),
-            shadowViewProj, opacity);
+            shadowViewProj, opacity * sunlight(scene, feet, Pokeball::RADIUS * 2.0f, toLight));
     }
 
     context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
@@ -518,6 +558,7 @@ void Renderer3D::cleanup() {
     m_inputLayout.Reset();
     m_pixelShader.Reset();
     m_vertexShader.Reset();
+    m_wall = {};
     m_sphere = {};
     m_nose = {};
     m_cube = {};
