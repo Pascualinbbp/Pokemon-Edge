@@ -25,9 +25,9 @@ class Player {
     bool aiming = false;
 
     Player() {
-        body.shadowRadius = SHADOW_RADIUS;
         body.collisionRadius = 0.4f;
         body.collisionHeight = 1.4f;
+        body.hitsCreatures = true;
     }
 
     // Escala vertical del modelo según la postura (de pie, agachado o deslizándose).
@@ -62,7 +62,6 @@ class Player {
     static constexpr float MOMENTUM_DECAY = 2.0f;      // pérdida de impulso por segundo en el aire
     static constexpr float CROUCH_HEIGHT = 0.6f;
     static constexpr float SLIDE_HEIGHT = 0.45f;
-    static constexpr float SHADOW_RADIUS = 0.55f;
 
     // La cámara orbita libremente alrededor del jugador: girarla NO desvía al personaje.
     // El ángulo de referencia del movimiento (m_moveYaw) solo se toma de la cámara:

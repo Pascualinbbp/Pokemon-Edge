@@ -27,6 +27,7 @@ namespace InputHandler {
             bool escape = false;                                        // ESC (solo mientras se juega)
             bool lockTap = false;                                       // TAB pulsado y soltado rápido
             bool tabDown = false, tabFired = false;                     // TAB mantenido
+            int ballSwitch = 0;                                         // Q (-1), E (+1) o rueda del ratón
             DWORD tabSince = 0;
         };
         inline Keyboard keys;
@@ -53,6 +54,7 @@ namespace InputHandler {
             mouseDX = mouseDY = 0.0f;
             keys.jump = keys.crouch = keys.sprint = keys.throwBall = false;
             keys.aimToggle = keys.escape = keys.lockTap = false;
+            keys.ballSwitch = 0;
         }
 
         inline bool readPad(GamepadState& out) {
@@ -132,6 +134,12 @@ namespace InputHandler {
             case 'S': k.down = pressed; break;
             case 'A': k.left = pressed; break;
             case 'D': k.right = pressed; break;
+            case 'Q':
+                if (newPress) k.ballSwitch = -1;
+                break;
+            case 'E':
+                if (newPress) k.ballSwitch = 1;
+                break;
             case VK_SPACE:
                 if (newPress) k.jump = true;
                 break;
@@ -168,6 +176,13 @@ namespace InputHandler {
 
         if (right) k.aimToggle = true;
         else k.throwBall = true;
+        detail::active = InputDevice::KEYBOARD_MOUSE;
+    }
+
+    // Rueda del ratón: cambia de pokéball (hacia delante = anterior, hacia atrás = siguiente).
+    inline void onMouseWheel(int delta) {
+        if (!detail::captured || delta == 0) return;
+        detail::keys.ballSwitch = delta > 0 ? -1 : 1;
         detail::active = InputDevice::KEYBOARD_MOUSE;
     }
 
@@ -263,6 +278,8 @@ namespace InputHandler {
             input.pause = (pressed & InputBindings::PAD_PAUSE) != 0;
             input.aimHold = pad.lt > InputBindings::TRIGGER_THRESHOLD;
             input.throwBall = triggerDown && !detail::padPrevTriggerDown;
+            if (pressed & InputBindings::PAD_BALL_PREV) input.ballSwitch = -1;
+            else if (pressed & InputBindings::PAD_BALL_NEXT) input.ballSwitch = 1;
 
             // R3: pulsación corta = fijar / cambiar; mantenido = soltar.
             const bool lockDown = (pad.buttons & InputBindings::PAD_LOCK) != 0;
@@ -293,6 +310,7 @@ namespace InputHandler {
             input.aimToggle = k.aimToggle;
             input.escape = k.escape;
             input.lockTap = k.lockTap;
+            input.ballSwitch = k.ballSwitch;
             if (k.tabDown && !k.tabFired && GetTickCount() - k.tabSince >= InputBindings::LOCK_HOLD_MS) {
                 detail::keys.tabFired = true;
                 input.lockCancel = true;

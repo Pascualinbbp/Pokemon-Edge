@@ -37,19 +37,30 @@ namespace {
                XMMatrixTranslation(wall.center.x, wall.center.y, wall.center.z);
     }
 
-    constexpr float kShadowLift = 0.03f;   // la sombra flota un poco sobre el suelo para evitar z-fighting
-    constexpr float kMinLightHeight = 0.12f; // con la luz casi horizontal las sombras serían infinitas
-    constexpr float kMaxShadowSlope = 7.0f;
-    constexpr float kLightSmoothing = 8.0f;  // rapidez (1/s) con la que cambia la luz recibida al entrar o salir de una sombra
+    const XMFLOAT4 kWhite = { 1.0f, 1.0f, 1.0f, 1.0f };
+    const XMFLOAT4 kWallTint = { 0.62f, 0.58f, 0.52f, 1.0f };
+    const XMFLOAT4 kTargetTint = { 1.0f, 0.55f, 0.10f, 1.0f };
+    const XMFLOAT4 kNoseTint = { 1.0f, 0.90f, 0.15f, 1.0f };
+
+    // Mapa de sombras: una proyección ortográfica fija que cubre todo el mundo (así las sombras no "nadan"
+    // al moverse el jugador) vista desde la dirección de la luz activa.
+    constexpr UINT kShadowMapSize = 3072;
+    constexpr float kShadowHalfExtent = 58.0f; // cubre la diagonal del mundo (80 x 80)
+    constexpr float kLightDistance = 90.0f;
+    constexpr float kLightNear = 20.0f;
+    constexpr float kLightFar = 160.0f;
+    constexpr float kShadowNormalOffset = 0.05f; // evita el moteado en superficies casi paralelas a la luz
+    constexpr float kShadowDepthBias = 0.0004f;
 
     constexpr const char* kShaderCode = R"(
         cbuffer Object : register(b0) {
             matrix WorldViewProj;
             matrix World;
-            float4 Tint; // x = fracción de luz directa que recibe el objeto, a = opacidad de la sombra
+            float4 Tint;
         }
         cbuffer Frame : register(b1) {
             matrix InvSky;
+            matrix LightViewProj;
             float4 LightDir;
             float4 LightColor;
             float4 AmbientSky;
@@ -59,34 +70,52 @@ namespace {
             float4 SkyZenith;
             float4 SkyHorizon;
             float4 SkyParams;
+            float4 ShadowParams; // x = texel, y = desplazamiento por la normal, z = sesgo
         }
+        Texture2D ShadowMap : register(t0);
+        SamplerComparisonState ShadowSampler : register(s0);
 
         // --- Objetos iluminados ---
         struct VS_IN { float3 pos : POSITION; float3 nrm : NORMAL; float4 col : COLOR; };
-        struct PS_IN { float4 pos : SV_POSITION; float3 nrm : TEXCOORD0; float4 col : COLOR; };
+        struct PS_IN { float4 pos : SV_POSITION; float3 nrm : TEXCOORD0; float3 wpos : TEXCOORD1; float4 col : COLOR; };
 
         PS_IN VS(VS_IN input) {
             PS_IN output;
             output.pos = mul(float4(input.pos, 1.0f), WorldViewProj);
+            output.wpos = mul(float4(input.pos, 1.0f), World).xyz;
             output.nrm = mul(input.nrm, (float3x3)World);
             output.col = input.col;
             return output;
         }
 
+        // Fracción de luz directa que llega a un punto (1 = iluminado, 0 = en sombra). Promedia 3x3 lecturas
+        // con comparación por hardware: el borde de la sombra (y la penumbra de una sombra tapada a medias) es suave.
+        float Shadow(float3 wpos, float3 n) {
+            float4 lp = mul(float4(wpos + n * ShadowParams.y, 1.0f), LightViewProj);
+            float2 uv = lp.xy * float2(0.5f, -0.5f) + 0.5f;
+            float depth = lp.z - ShadowParams.z;
+            float sum = 0.0f;
+            [unroll] for (int y = -1; y <= 1; ++y) {
+                [unroll] for (int x = -1; x <= 1; ++x) {
+                    sum += ShadowMap.SampleCmpLevelZero(ShadowSampler, uv + float2(x, y) * ShadowParams.x, depth);
+                }
+            }
+            return sum / 9.0f;
+        }
+
         float4 PS(PS_IN input) : SV_Target {
             float3 n = normalize(input.nrm);
             float diffuse = saturate(dot(n, LightDir.xyz));
+            float lit = 0.0f;
+            if (diffuse > 0.0f) lit = Shadow(input.wpos, n);
             float3 ambient = lerp(AmbientGround.rgb, AmbientSky.rgb, n.y * 0.5f + 0.5f);
-            return float4(saturate(input.col.rgb * (ambient + LightColor.rgb * diffuse * Tint.x)), 1.0f);
+            float3 albedo = input.col.rgb * Tint.rgb;
+            return float4(saturate(albedo * (ambient + LightColor.rgb * diffuse * lit)), 1.0f);
         }
 
-        // --- Sombras proyectadas sobre el suelo ---
+        // --- Mapa de sombras: solo profundidad ---
         float4 VS_SHADOW(VS_IN input) : SV_POSITION {
             return mul(float4(input.pos, 1.0f), WorldViewProj);
-        }
-
-        float4 PS_SHADOW() : SV_Target {
-            return float4(0.0f, 0.0f, 0.04f, Tint.a);
         }
 
         // --- Cielo: degradado, sol, luna y estrellas, todo en un triángulo a pantalla completa ---
@@ -234,8 +263,8 @@ Renderer3D::Mesh Renderer3D::createPlayer(ID3D11Device* device) {
     return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
 }
 
-// Cubo unitario centrado en el origen, de un solo color (el volumen lo da la iluminación).
-Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device, const XMFLOAT3& tint) {
+// Cubo unitario blanco centrado en el origen (el color lo pone el tinte y el volumen la iluminación).
+Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device) {
     struct Face { XMFLOAT3 n, u, v; float shade; };
     const Face faces[6] = {
         { { 0, 1, 0 },  { 1, 0, 0 }, { 0, 0, 1 }, 1.00f },
@@ -253,7 +282,7 @@ Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device, const XMFLOAT3& ti
 
     const XMFLOAT3 center = { 0.0f, 0.0f, 0.0f };
     for (const Face& f : faces) {
-        const XMFLOAT4 color = { tint.x, tint.y, tint.z, 1.0f };
+        const XMFLOAT4 color = { 1.0f, 1.0f, 1.0f, 1.0f };
         const int first = static_cast<int>(vertices.size());
         for (int k = 0; k < 4; ++k) {
             const float su = (k & 1) ? 0.5f : -0.5f;
@@ -268,7 +297,7 @@ Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device, const XMFLOAT3& ti
     return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
 }
 
-// Esfera unitaria gris clara (la normal de cada vértice es su posición); el sombreado lo da la luz.
+// Esfera unitaria blanca (la normal de cada vértice es su posición); el sombreado lo da la luz.
 Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
     constexpr int rings = 8;
     constexpr int segments = 12;
@@ -285,7 +314,7 @@ Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
         for (int s = 0; s < segments; ++s) {
             const float theta = static_cast<float>(s) / segments * XM_2PI;
             const XMFLOAT3 p = { std::cos(theta) * ring, y, std::sin(theta) * ring };
-            vertices.push_back({ p, p, { 0.88f, 0.88f, 0.88f, 1.0f } });
+            vertices.push_back({ p, p, { 1.0f, 1.0f, 1.0f, 1.0f } });
         }
     }
 
@@ -303,6 +332,7 @@ Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
 }
 
 
+
 void Renderer3D::init(ID3D11Device* device) {
     // 1. Shaders
     const ComPtr<ID3DBlob> vsBlob = D3dUtil::compileShader(kShaderCode, "VS", "vs_4_0");
@@ -311,16 +341,14 @@ void Renderer3D::init(ID3D11Device* device) {
     D3dUtil::check(device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &m_pixelShader), "CreatePixelShader");
 
     const ComPtr<ID3DBlob> shadowVsBlob = D3dUtil::compileShader(kShaderCode, "VS_SHADOW", "vs_4_0");
-    const ComPtr<ID3DBlob> shadowPsBlob = D3dUtil::compileShader(kShaderCode, "PS_SHADOW", "ps_4_0");
     D3dUtil::check(device->CreateVertexShader(shadowVsBlob->GetBufferPointer(), shadowVsBlob->GetBufferSize(), nullptr, &m_shadowVertexShader), "CreateVertexShader (shadow)");
-    D3dUtil::check(device->CreatePixelShader(shadowPsBlob->GetBufferPointer(), shadowPsBlob->GetBufferSize(), nullptr, &m_shadowPixelShader), "CreatePixelShader (shadow)");
 
     const ComPtr<ID3DBlob> skyVsBlob = D3dUtil::compileShader(kShaderCode, "VS_SKY", "vs_4_0");
     const ComPtr<ID3DBlob> skyPsBlob = D3dUtil::compileShader(kShaderCode, "PS_SKY", "ps_4_0");
     D3dUtil::check(device->CreateVertexShader(skyVsBlob->GetBufferPointer(), skyVsBlob->GetBufferSize(), nullptr, &m_skyVertexShader), "CreateVertexShader (sky)");
     D3dUtil::check(device->CreatePixelShader(skyPsBlob->GetBufferPointer(), skyPsBlob->GetBufferSize(), nullptr, &m_skyPixelShader), "CreatePixelShader (sky)");
 
-    // 2. Input layout (el cielo y las sombras reutilizan el de los objetos)
+    // 2. Input layout (el mapa de sombras reutiliza el de los objetos)
     const D3D11_INPUT_ELEMENT_DESC layout[] = {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,                        D3D11_INPUT_PER_VERTEX_DATA, 0 },
         { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
@@ -334,45 +362,107 @@ void Renderer3D::init(ID3D11Device* device) {
     m_frameBuffer = D3dUtil::createBuffer(device, sizeof(FrameConstants), D3D11_BIND_CONSTANT_BUFFER,
         nullptr, D3D11_USAGE_DEFAULT, "CreateBuffer (frame constants)");
 
-    // 4. Estados: sombras con mezcla alfa (la profundidad se prueba pero no se escribe) y cielo sin profundidad.
-    D3D11_BLEND_DESC blend = {};
-    blend.RenderTarget[0].BlendEnable = TRUE;
-    blend.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
-    blend.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    blend.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-    blend.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-    blend.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
-    blend.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    D3dUtil::check(device->CreateBlendState(&blend, &m_shadowBlend), "CreateBlendState (shadow)");
-
-    D3D11_DEPTH_STENCIL_DESC depth = {};
-    depth.DepthEnable = TRUE;
-    depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-    depth.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-    D3dUtil::check(device->CreateDepthStencilState(&depth, &m_shadowDepth), "CreateDepthStencilState (shadow)");
-
+    // 4. Estados: cielo sin profundidad y mapa de sombras (textura de profundidad legible desde el shader).
     D3D11_DEPTH_STENCIL_DESC skyDepth = {};
     skyDepth.DepthEnable = FALSE;
     skyDepth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
     skyDepth.DepthFunc = D3D11_COMPARISON_ALWAYS;
     D3dUtil::check(device->CreateDepthStencilState(&skyDepth, &m_skyDepth), "CreateDepthStencilState (sky)");
 
+    D3D11_TEXTURE2D_DESC shadowDesc = {};
+    shadowDesc.Width = kShadowMapSize;
+    shadowDesc.Height = kShadowMapSize;
+    shadowDesc.MipLevels = 1;
+    shadowDesc.ArraySize = 1;
+    shadowDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+    shadowDesc.SampleDesc.Count = 1;
+    shadowDesc.Usage = D3D11_USAGE_DEFAULT;
+    shadowDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    ComPtr<ID3D11Texture2D> shadowTexture;
+    D3dUtil::check(device->CreateTexture2D(&shadowDesc, nullptr, &shadowTexture), "CreateTexture2D (shadow map)");
+
+    D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+    D3dUtil::check(device->CreateDepthStencilView(shadowTexture.Get(), &dsvDesc, &m_shadowDsv), "CreateDepthStencilView (shadow map)");
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+    D3dUtil::check(device->CreateShaderResourceView(shadowTexture.Get(), &srvDesc, &m_shadowSrv), "CreateShaderResourceView (shadow map)");
+
+    D3D11_SAMPLER_DESC sampler = {};
+    sampler.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D11_TEXTURE_ADDRESS_BORDER;
+    sampler.BorderColor[0] = sampler.BorderColor[1] = sampler.BorderColor[2] = sampler.BorderColor[3] = 1.0f; // fuera del mapa: iluminado
+    sampler.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
+    sampler.MaxLOD = D3D11_FLOAT32_MAX;
+    D3dUtil::check(device->CreateSamplerState(&sampler, &m_shadowSampler), "CreateSamplerState (shadow)");
+
+    D3D11_RASTERIZER_DESC raster = {};
+    raster.FillMode = D3D11_FILL_SOLID;
+    raster.CullMode = D3D11_CULL_BACK;
+    raster.DepthClipEnable = TRUE;
+    raster.SlopeScaledDepthBias = 1.5f;
+    D3dUtil::check(device->CreateRasterizerState(&raster, &m_shadowRaster), "CreateRasterizerState (shadow)");
+
     // 5. Geometría
     m_floor = createFloor(device);
     m_player = createPlayer(device);
-    m_cube = createCube(device, { 1.0f, 0.55f, 0.10f });
-    m_nose = createCube(device, { 1.0f, 0.90f, 0.15f });
+    m_cube = createCube(device);
     m_sphere = createSphere(device);
-    m_wall = createCube(device, { 0.62f, 0.58f, 0.52f });
+    m_draws.reserve(32);
 }
 
-void Renderer3D::setObject(ID3D11DeviceContext* context, CXMMATRIX world, CXMMATRIX worldViewProj,
-                           float alpha, float sunlight) const {
+XMMATRIX Renderer3D::lightViewProj(const XMFLOAT3& lightDir) {
+    const XMVECTOR toLight = XMVector3Normalize(XMLoadFloat3(&lightDir));
+    const XMMATRIX view = XMMatrixLookAtLH(XMVectorScale(toLight, kLightDistance), XMVectorZero(), g_XMIdentityR1);
+    return view * XMMatrixOrthographicLH(2.0f * kShadowHalfExtent, 2.0f * kShadowHalfExtent, kLightNear, kLightFar);
+}
+
+void Renderer3D::add(const Mesh& mesh, CXMMATRIX world, const XMFLOAT4& tint) {
+    Draw draw = { &mesh, {}, tint };
+    XMStoreFloat4x4(&draw.world, world);
+    m_draws.push_back(draw);
+}
+
+// Lista única de lo que hay en el mundo: la usan el mapa de sombras y la pantalla.
+void Renderer3D::collect(const Scene& scene) {
+    m_draws.clear();
+
+    for (const Physics::World::Box& wall : scene.world.obstacles) {
+        add(m_cube, wallWorld(wall), kWallTint);
+    }
+
+    const XMFLOAT3& p = scene.player.body.position;
+    add(m_player, XMMatrixScaling(1.0f, scene.player.heightScale(), 1.0f) * XMMatrixTranslation(p.x, p.y, p.z), kWhite);
+
+    for (const CaptureTarget& target : scene.targets) {
+        if (!target.visible()) continue;
+
+        const float size = target.scale();
+        const XMFLOAT3 c = target.center();
+        add(m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), kTargetTint);
+
+        const float nose = size * 0.4f;
+        add(m_cube, XMMatrixScaling(nose, nose, nose) *
+            XMMatrixTranslation(c.x + std::sin(target.yaw()) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(target.yaw()) * size * 0.5f),
+            kNoseTint);
+    }
+
+    for (const Pokeball& ball : scene.balls) {
+        const XMFLOAT3& b = ball.body.position;
+        add(m_sphere, XMMatrixScaling(Pokeball::RADIUS, Pokeball::RADIUS, Pokeball::RADIUS) * XMMatrixTranslation(b.x, b.y, b.z),
+            { ball.color.x, ball.color.y, ball.color.z, 1.0f });
+    }
+}
+
+void Renderer3D::setObject(ID3D11DeviceContext* context, CXMMATRIX world, CXMMATRIX worldViewProj, const XMFLOAT4& tint) const {
     ObjectConstants cb;
     XMStoreFloat4x4(&cb.worldViewProj, XMMatrixTranspose(worldViewProj));
     XMStoreFloat4x4(&cb.world, XMMatrixTranspose(world));
-    cb.tint = { sunlight, 1.0f, 1.0f, alpha };
+    cb.tint = tint;
     context->UpdateSubresource(m_objectBuffer.Get(), 0, nullptr, &cb, 0, 0);
 }
 
@@ -384,39 +474,52 @@ void Renderer3D::drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) con
     context->DrawIndexed(mesh.indexCount, 0, 0);
 }
 
-void Renderer3D::drawMesh(ID3D11DeviceContext* context, const Mesh& mesh, CXMMATRIX world, CXMMATRIX viewProj,
-                          float sunlight) const {
-    setObject(context, world, world * viewProj, 1.0f, sunlight);
-    drawIndexed(context, mesh);
-}
-
-// Sombra de una malla convexa: se aplasta sobre el suelo siguiendo la dirección de la luz.
-// 'shadowViewProj' = proyección sobre el suelo * vista * proyección. Con el culling normal solo se dibujan las
-// caras que miran a la luz, así que cada punto del suelo se oscurece una sola vez.
-void Renderer3D::drawShadow(ID3D11DeviceContext* context, const Mesh& mesh, CXMMATRIX world,
-                            CXMMATRIX shadowViewProj, float opacity) const {
-    setObject(context, world, world * shadowViewProj, opacity, 1.0f);
-    drawIndexed(context, mesh);
-}
-
-float Renderer3D::sunlight(const Scene& scene, const XMFLOAT3& feet, float height, const XMFLOAT3& toLight) {
-    if (scene.world.obstacles.empty()) return 1.0f;
-    constexpr float samples[5] = { 0.1f, 0.3f, 0.5f, 0.7f, 0.9f };
-    int lit = 0;
-    for (const float s : samples) {
-        const XMFLOAT3 point = { feet.x, feet.y + height * s, feet.z };
-        if (!scene.world.blocked(point, toLight)) ++lit;
+// Dibuja todos los objetos del mundo con la cámara dada (la de la luz o la del jugador).
+void Renderer3D::drawAll(ID3D11DeviceContext* context, CXMMATRIX viewProj) const {
+    for (const Draw& draw : m_draws) {
+        const XMMATRIX world = XMLoadFloat4x4(&draw.world);
+        setObject(context, world, world * viewProj, draw.tint);
+        drawIndexed(context, *draw.mesh);
     }
-    return static_cast<float>(lit) / 5.0f;
 }
 
-void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, CXMMATRIX view) {
+// Pasada de profundidad desde la luz. El suelo no proyecta sombra (solo la recibe).
+void Renderer3D::renderShadowMap(ID3D11DeviceContext* context, CXMMATRIX lightViewProj) const {
+    ComPtr<ID3D11RenderTargetView> rtv;
+    ComPtr<ID3D11DepthStencilView> dsv;
+    context->OMGetRenderTargets(1, rtv.GetAddressOf(), dsv.GetAddressOf());
+    UINT viewportCount = 1;
+    D3D11_VIEWPORT viewport = {};
+    context->RSGetViewports(&viewportCount, &viewport);
+
+    ID3D11ShaderResourceView* none = nullptr;
+    context->PSSetShaderResources(0, 1, &none); // el mapa no puede estar a la vez como entrada y como destino
+
+    const D3D11_VIEWPORT shadowViewport = { 0.0f, 0.0f, static_cast<float>(kShadowMapSize), static_cast<float>(kShadowMapSize), 0.0f, 1.0f };
+    context->OMSetRenderTargets(0, nullptr, m_shadowDsv.Get());
+    context->ClearDepthStencilView(m_shadowDsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+    context->RSSetViewports(1, &shadowViewport);
+    context->RSSetState(m_shadowRaster.Get());
+
+    context->IASetInputLayout(m_inputLayout.Get());
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(m_shadowVertexShader.Get(), nullptr, 0);
+    context->PSSetShader(nullptr, nullptr, 0);
+    drawAll(context, lightViewProj);
+
+    context->RSSetState(nullptr);
+    context->RSSetViewports(1, &viewport);
+    context->OMSetRenderTargets(1, rtv.GetAddressOf(), dsv.Get());
+}
+
+void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, CXMMATRIX view, CXMMATRIX lightViewProj) {
     XMMATRIX viewRotation = view;
     viewRotation.r[3] = g_XMIdentityR3; // el cielo no se mueve con la posición de la cámara
     const XMMATRIX inverse = XMMatrixInverse(nullptr, viewRotation * XMLoadFloat4x4(&m_proj));
 
     FrameConstants fc;
     XMStoreFloat4x4(&fc.invSky, XMMatrixTranspose(inverse));
+    XMStoreFloat4x4(&fc.lightViewProj, XMMatrixTranspose(lightViewProj));
     fc.lightDir = { light.lightDir.x, light.lightDir.y, light.lightDir.z, 0.0f };
     fc.lightColor = { light.lightColor.x, light.lightColor.y, light.lightColor.z, 0.0f };
     fc.ambientSky = { light.ambientSky.x, light.ambientSky.y, light.ambientSky.z, 0.0f };
@@ -426,6 +529,7 @@ void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Light
     fc.skyZenith = { light.skyZenith.x, light.skyZenith.y, light.skyZenith.z, 0.0f };
     fc.skyHorizon = { light.skyHorizon.x, light.skyHorizon.y, light.skyHorizon.z, 0.0f };
     fc.skyParams = { light.starVisibility, light.warm, light.angle, light.time };
+    fc.shadowParams = { 1.0f / static_cast<float>(kShadowMapSize), kShadowNormalOffset, kShadowDepthBias, 0.0f };
     context->UpdateSubresource(m_frameBuffer.Get(), 0, nullptr, &fc, 0, 0);
 }
 
@@ -443,13 +547,18 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     const DayCycle::Lighting light = scene.dayCycle.lighting();
     const XMMATRIX view = scene.getViewMatrix();
     const XMMATRIX viewProj = view * XMLoadFloat4x4(&m_proj);
-    updateFrame(context, light, view);
+    const XMMATRIX lightMatrix = lightViewProj(light.lightDir);
+    collect(scene);
+    updateFrame(context, light, view, lightMatrix);
 
     ID3D11Buffer* buffers[2] = { m_objectBuffer.Get(), m_frameBuffer.Get() };
     context->VSSetConstantBuffers(0, 2, buffers);
     context->PSSetConstantBuffers(0, 2, buffers);
 
-    // 1. Cielo (cubre toda la pantalla; no usa la profundidad).
+    // 1. Mapa de sombras: la luz activa (sol o luna) ve todos los objetos.
+    renderShadowMap(context, lightMatrix);
+
+    // 2. Cielo (cubre toda la pantalla; no usa la profundidad).
     context->IASetInputLayout(nullptr);
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context->VSSetShader(m_skyVertexShader.Get(), nullptr, 0);
@@ -458,122 +567,36 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     context->Draw(3, 0);
     context->OMSetDepthStencilState(nullptr, 0);
 
-    // 2. Objetos iluminados por el sol o la luna.
+    // 3. Suelo y objetos, iluminados por el sol o la luna y con las sombras del mapa.
+    ID3D11ShaderResourceView* shadowSrv = m_shadowSrv.Get();
+    ID3D11SamplerState* shadowSampler = m_shadowSampler.Get();
+    context->PSSetShaderResources(0, 1, &shadowSrv);
+    context->PSSetSamplers(0, 1, &shadowSampler);
     context->IASetInputLayout(m_inputLayout.Get());
     context->VSSetShader(m_vertexShader.Get(), nullptr, 0);
     context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
 
-    const XMFLOAT3& p = scene.player.body.position;
-    const XMMATRIX playerWorld = XMMatrixScaling(1.0f, scene.player.heightScale(), 1.0f) * XMMatrixTranslation(p.x, p.y, p.z);
-
-    // Qué luz recibe cada cuerpo: una pared entre él y el sol (o la luna) lo deja solo con luz ambiente.
-    const XMFLOAT3& toLight = light.lightDir;
-    const auto now = std::chrono::steady_clock::now();
-    const float dt = std::chrono::duration<float>(now - m_lastRender).count();
-    m_lastRender = now;
-    const bool snap = !m_lightInit || dt > 0.25f;
-    m_lightInit = true;
-    const float blend = snap ? 1.0f : 1.0f - std::exp(-kLightSmoothing * dt);
-    const auto smoothTo = [blend](float& current, float target) { current += (target - current) * blend; };
-
-    smoothTo(m_playerLight, sunlight(scene, p, 1.4f * scene.player.heightScale(), toLight));
-    const float playerLight = m_playerLight;
-
-    drawMesh(context, m_floor, XMMatrixIdentity(), viewProj);
-    for (const Physics::World::Box& wall : scene.world.obstacles) {
-        drawMesh(context, m_wall, wallWorld(wall), viewProj);
-    }
-    drawMesh(context, m_player, playerWorld, viewProj, playerLight);
-
-    for (int i = 0; i < Scene::TARGET_COUNT; ++i) {
-        const CaptureTarget& target = scene.targets[i];
-        if (!target.visible()) {
-            m_targetLight[i] = -1.0f; // al reaparecer se calcula de nuevo sin transición
-            continue;
-        }
-
-        const float size = target.scale();
-        const XMFLOAT3 c = target.center();
-        const float targetSun = sunlight(scene, target.body.position, CaptureTarget::SIZE, toLight);
-        if (m_targetLight[i] < 0.0f) m_targetLight[i] = targetSun;
-        else smoothTo(m_targetLight[i], targetSun);
-        drawMesh(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), viewProj, m_targetLight[i]);
-
-        const float nose = size * 0.4f;
-        drawMesh(context, m_nose,
-            XMMatrixScaling(nose, nose, nose) *
-            XMMatrixTranslation(c.x + std::sin(target.yaw()) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(target.yaw()) * size * 0.5f),
-            viewProj, m_targetLight[i]);
-    }
-    for (const Pokeball& ball : scene.balls) {
-        const XMFLOAT3& b = ball.body.position;
-        const XMFLOAT3 feet = { b.x, b.y - Pokeball::RADIUS, b.z };
-        drawMesh(context, m_sphere,
-            XMMatrixScaling(Pokeball::RADIUS, Pokeball::RADIUS, Pokeball::RADIUS) * XMMatrixTranslation(b.x, b.y, b.z),
-            viewProj, sunlight(scene, feet, Pokeball::RADIUS * 2.0f, toLight));
-    }
-
-    // 3. Sombras: la luz activa (sol o luna) aplasta cada objeto sobre el suelo. Van al final porque son transparentes.
-    // Las paredes proyectan sombra sobre el suelo; los cuerpos que ya están a la sombra de una pared no añaden la suya.
-    if (light.shadowOpacity <= 0.002f) return;
-
-    const float ly = (std::max)(light.lightDir.y, kMinLightHeight);
-    const float sx = std::clamp(light.lightDir.x / ly, -kMaxShadowSlope, kMaxShadowSlope);
-    const float sz = std::clamp(light.lightDir.z / ly, -kMaxShadowSlope, kMaxShadowSlope);
-    // Proyección (vectores fila): x' = x - sx*y, z' = z - sz*y, y' = kShadowLift.
-    const XMMATRIX flatten(
-        1.0f,                  0.0f,         0.0f,                  0.0f,
-        -sx,                   0.0f,         -sz,                   0.0f,
-        0.0f,                  0.0f,         1.0f,                  0.0f,
-        sx * kShadowLift,      kShadowLift,  sz * kShadowLift,      1.0f);
-    const XMMATRIX shadowViewProj = flatten * viewProj;
-    const float opacity = light.shadowOpacity;
-
-    context->VSSetShader(m_shadowVertexShader.Get(), nullptr, 0);
-    context->PSSetShader(m_shadowPixelShader.Get(), nullptr, 0);
-    context->OMSetBlendState(m_shadowBlend.Get(), nullptr, 0xFFFFFFFF);
-    context->OMSetDepthStencilState(m_shadowDepth.Get(), 0);
-
-    for (const Physics::World::Box& wall : scene.world.obstacles) {
-        drawShadow(context, m_wall, wallWorld(wall), shadowViewProj, opacity);
-    }
-    drawShadow(context, m_player, playerWorld, shadowViewProj, opacity * playerLight);
-    for (int i = 0; i < Scene::TARGET_COUNT; ++i) {
-        const CaptureTarget& target = scene.targets[i];
-        if (!target.visible()) continue;
-        const float size = target.scale();
-        const XMFLOAT3 c = target.center();
-        drawShadow(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z),
-            shadowViewProj, opacity * (std::max)(m_targetLight[i], 0.0f));
-    }
-    for (const Pokeball& ball : scene.balls) {
-        const XMFLOAT3& b = ball.body.position;
-        const XMFLOAT3 feet = { b.x, b.y - Pokeball::RADIUS, b.z };
-        drawShadow(context, m_sphere,
-            XMMatrixScaling(Pokeball::RADIUS, Pokeball::RADIUS, Pokeball::RADIUS) * XMMatrixTranslation(b.x, b.y, b.z),
-            shadowViewProj, opacity * sunlight(scene, feet, Pokeball::RADIUS * 2.0f, toLight));
-    }
-
-    context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
-    context->OMSetDepthStencilState(nullptr, 0);
+    setObject(context, XMMatrixIdentity(), viewProj, kWhite);
+    drawIndexed(context, m_floor);
+    drawAll(context, viewProj);
 }
 
 void Renderer3D::cleanup() {
+    m_draws.clear();
+    m_shadowRaster.Reset();
+    m_shadowSampler.Reset();
+    m_shadowSrv.Reset();
+    m_shadowDsv.Reset();
     m_skyDepth.Reset();
-    m_shadowDepth.Reset();
-    m_shadowBlend.Reset();
     m_frameBuffer.Reset();
     m_objectBuffer.Reset();
     m_skyPixelShader.Reset();
     m_skyVertexShader.Reset();
-    m_shadowPixelShader.Reset();
     m_shadowVertexShader.Reset();
     m_inputLayout.Reset();
     m_pixelShader.Reset();
     m_vertexShader.Reset();
-    m_wall = {};
     m_sphere = {};
-    m_nose = {};
     m_cube = {};
     m_player = {};
     m_floor = {};

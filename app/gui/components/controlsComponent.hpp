@@ -11,7 +11,7 @@
 namespace ControlsComponent {
     namespace detail {
         inline constexpr float PANEL_WIDTH = 760.0f;
-        inline constexpr float PANEL_HEIGHT = 280.0f;
+        inline constexpr float PANEL_HEIGHT = 320.0f;
 
         // Posiciones (en el panel) de los elementos que cambian entre mandos.
         struct PadLayout {
@@ -27,6 +27,7 @@ namespace ControlsComponent {
             "Agacharse: pulsa SHIFT (otra vez para levantarte). Corriendo, SHIFT inicia un deslizamiento corto sin mantener la tecla.",
             "Durante el deslizamiento, A y D cambian la dirección. Saltar desde un deslizamiento conserva el impulso.",
             "Apuntar: clic derecho (otra vez o ESC para salir). Lanzar Pokéball: clic izquierdo mientras apuntas.",
+            "Q / E o la rueda del ratón (apuntando): cambian de Pokéball. Cada tipo tiene un ratio de captura distinto.",
             "TAB: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
             "Más captura: x1.15 por la espalda del pokémon y x1.25 si vas agachado sin que te detecte.",
             "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
@@ -34,7 +35,7 @@ namespace ControlsComponent {
         inline constexpr const char* NOTES_GAMEPAD[] = {
             "Agacharse: pulsa el botón derecho (otra vez para levantarte). Corriendo (L3), inicia un deslizamiento corto.",
             "Durante el deslizamiento, inclina el stick izquierdo a un lado para girar. Saltar desde él conserva el impulso.",
-            "Apuntar: mantén L2. Lanzar Pokéball: R2 mientras apuntas.",
+            "Apuntar: mantén L2. Lanzar Pokéball: R2 mientras apuntas. L1 / R1 (apuntando): cambian de Pokéball.",
             "R3: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
             "Más captura: x1.15 por la espalda del pokémon y x1.25 si vas agachado sin que te detecte.",
             "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
@@ -63,6 +64,7 @@ namespace ControlsComponent {
 
             keyRow(dl, offset(o, 40.0f, 144.0f), { "W", "W" }, "Correr (pulsa W dos veces)");
             keyRow(dl, offset(o, 40.0f, 204.0f), { "SHIFT" }, "Agacharse / Deslizarse", 90.0f);
+            keyRow(dl, offset(o, 40.0f, 264.0f), { "Q", "E" }, "Cambiar de Pokéball (o rueda)");
 
             keyRow(dl, offset(o, 420.0f, 30.0f), { "ESPACIO" }, "Saltar", 150.0f);
             keyRow(dl, offset(o, 420.0f, 90.0f), { "ESC" }, "Pausa / Salir de apuntar", 60.0f);
@@ -148,6 +150,8 @@ namespace ControlsComponent {
             callout(layout.rsX, layout.rsY, layout.rsElbowY, 550.0f, "Cámara · Fijar objetivo (R3)");
             callout(302.0f, 40.0f, 40.0f, 210.0f, "Apuntar (L2)");
             callout(457.0f, 40.0f, 40.0f, 550.0f, "Lanzar (R2)");
+            callout(285.0f, 64.0f, 64.0f, 210.0f, "Pokéball anterior (L1)");
+            callout(475.0f, 64.0f, 64.0f, 550.0f, "Pokéball siguiente (R1)");
             callout(fx + 27.0f, fy, fy, 550.0f, "Agacharse / Deslizarse");
             callout(fx, fy + 27.0f, fy + 58.0f, 550.0f, "Saltar");
             callout(pauseX, pauseY, 14.0f, 550.0f, "Pausa");

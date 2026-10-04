@@ -7,11 +7,13 @@
 #include "../core/gameStatus.hpp"
 #include "../core/input.hpp"
 #include "../physics/physicsWorld.hpp"
+#include "../../models/pokeballType.hpp"
 #include "../../utils/core/randomUtil.hpp"
 #include "camera.hpp"
 #include "captureRules.hpp"
 #include "captureTarget.hpp"
 #include "dayCycle.hpp"
+#include "inventory.hpp"
 #include "player.hpp"
 #include "pokeball.hpp"
 
@@ -38,16 +40,18 @@ struct Scene {
     std::array<CaptureTarget, TARGET_COUNT> targets = { CaptureTarget(0), CaptureTarget(1), CaptureTarget(2), CaptureTarget(3) };
     std::vector<Pokeball> balls;
     DayCycle dayCycle;
+    Inventory inventory;
 
     int captures = 0;
-    int noticeKind = 0;       // 1 = capturado, 2 = se ha escapado
+    int noticeKind = 0;       // 1 = capturado, 2 = se ha escapado, 3 = sin unidades
     float noticeTime = 0.0f;
     float throwCooldown = 0.0f;
     bool aimMode = false;     // modo lanzamiento activado con el clic derecho
     int lockedIndex = -1;     // objetivo al que está fijada la cámara (-1 = ninguno)
 
     // Dos paredes sencillas, más altas que el personaje: bloquean el paso, las pokéballs y la luz.
-    Scene() {
+    explicit Scene(const std::vector<PokeballType>& ballTypes = {}) {
+        inventory.setTypes(ballTypes);
         world.obstacles = {
             { {  6.0f, 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
             { { -7.0f, 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
@@ -63,6 +67,7 @@ struct Scene {
         }
         if (input.aimToggle) aimMode = !aimMode;
         m_aiming = aimMode || input.aimHold;
+        if (m_aiming && input.ballSwitch != 0) inventory.cycle(input.ballSwitch);
 
         if (input.lockCancel) lockedIndex = -1;
         else if (input.lockTap) cycleLock();
@@ -72,6 +77,10 @@ struct Scene {
         if (lockedIndex >= 0) camera.trackToward(player.body.position, targets[lockedIndex].center(), dt);
         else camera.rotate(input.lookX, input.lookY);
 
+        // Los pokémon son sólidos para quien los pisa: el jugador los rodea igual que a las paredes.
+        world.creatures.clear();
+        for (const CaptureTarget& target : targets) if (target.hittable()) world.creatures.push_back(target.solid());
+
         player.aiming = m_aiming;
         player.update(dt, input, camera.yaw(), world);
 
@@ -79,19 +88,10 @@ struct Scene {
         noticeTime = (std::max)(0.0f, noticeTime - dt);
         if (m_aiming && input.throwBall && throwCooldown <= 0.0f) throwBall();
 
-        for (CaptureTarget& target : targets) target.update(dt);
+        for (CaptureTarget& target : targets) target.update(dt, world);
         updateBalls(dt);
         updateAimInfo();
         return pause;
-    }
-
-    // Recorre todos los cuerpos de la escena (jugador, objetivos y pokéballs; después NPCs, pokémon...).
-    // Es el único sitio que hay que ampliar al añadir entidades: sombras y física lo usan.
-    template <typename Fn>
-    void forEachBody(Fn&& fn) const {
-        fn(player.body);
-        for (const CaptureTarget& target : targets) fn(target.body);
-        for (const Pokeball& ball : balls) fn(ball.body);
     }
 
     DirectX::XMMATRIX getViewMatrix() const {
@@ -104,12 +104,13 @@ struct Scene {
         s.captures = captures;
         s.notice = noticeTime > 0.0f ? noticeKind : 0;
         s.locked = lockedIndex >= 0;
+        s.inventory = &inventory;
         if (m_aimTarget >= 0) {
             const CaptureTarget& t = targets[m_aimTarget];
             s.hasAimTarget = true;
             s.behind = isBehind(t);
             s.hidden = player.crouched();
-            s.chancePercent = static_cast<int>(std::lround(chancePercent(t)));
+            s.chancePercent = static_cast<int>(std::lround(chancePercent(t, inventory.captureMultiplier())));
         }
         return s;
     }
@@ -120,12 +121,12 @@ struct Scene {
         return CaptureRules::isBehind(t.body.position, t.yaw(), player.body.position);
     }
 
-    float chancePercent(const CaptureTarget& t) const {
-        return CaptureRules::percent(t.baseChance(), isBehind(t), player.crouched());
+    float chancePercent(const CaptureTarget& t, float ballMultiplier) const {
+        return CaptureRules::percent(t.baseChance(), isBehind(t), player.crouched(), ballMultiplier);
     }
 
-    void resolveCapture(CaptureTarget& t) {
-        if (RandomUtil::roll(chancePercent(t))) {
+    void resolveCapture(CaptureTarget& t, const Pokeball& ball) {
+        if (RandomUtil::roll(chancePercent(t, ball.captureMultiplier))) {
             t.capture();
             ++captures;
             noticeKind = 1;
@@ -215,9 +216,16 @@ struct Scene {
         m_aimTarget = nearestHit(camera.eye(player.body.position), camera.forward(), distance, true);
     }
 
-    // Lanza una pokéball hacia el punto que señala la cruceta (centro de la pantalla).
+    // Lanza la pokéball equipada hacia el punto que señala la cruceta (centro de la pantalla).
     void throwBall() {
         using namespace DirectX;
+        throwCooldown = THROW_COOLDOWN;
+        if (!inventory.canThrow()) {
+            noticeKind = 3;
+            noticeTime = NOTICE_TIME;
+            return;
+        }
+
         const XMFLOAT3 eye = camera.eye(player.body.position);
         const XMFLOAT3 dir = camera.forward();
 
@@ -233,7 +241,10 @@ struct Scene {
         XMScalarSinCos(&sinYaw, &cosYaw, camera.yaw());
         const XMFLOAT3& p = player.body.position;
 
+        const PokeballType& type = inventory.selected().type;
         Pokeball ball;
+        ball.captureMultiplier = type.captureMultiplier;
+        ball.color = { type.r, type.g, type.b };
         ball.body.position = { p.x + cosYaw * SPAWN_SIDE + sinYaw * SPAWN_FORWARD,
                                p.y + SPAWN_HEIGHT * player.heightScale(),
                                p.z - sinYaw * SPAWN_SIDE + cosYaw * SPAWN_FORWARD };
@@ -241,7 +252,7 @@ struct Scene {
 
         if (balls.size() >= MAX_BALLS) balls.erase(balls.begin());
         balls.push_back(ball);
-        throwCooldown = THROW_COOLDOWN;
+        inventory.consume();
     }
 
     // Velocidad inicial (módulo THROW_SPEED) para que la parábola pase por 'aim' (trayectoria baja).
@@ -279,7 +290,7 @@ struct Scene {
                 ball.age += h;
                 for (CaptureTarget& target : targets) {
                     if (!target.hitBy(ball.body.position, Pokeball::RADIUS)) continue;
-                    resolveCapture(target);
+                    resolveCapture(target, ball);
                     ball.age = Pokeball::LIFETIME; // la pokéball se consume
                     break;
                 }

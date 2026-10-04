@@ -10,6 +10,8 @@ namespace InputBindings {
     inline constexpr uint16_t PAD_SPRINT = Gamepad::L3;    // pulsar el stick izquierdo
     inline constexpr uint16_t PAD_LOCK   = Gamepad::R3;    // pulsar el stick derecho: fijar / cambiar objetivo
     inline constexpr uint16_t PAD_PAUSE  = Gamepad::START; // Options en PlayStation, Menú en Xbox
+    inline constexpr uint16_t PAD_BALL_PREV = Gamepad::L1; // pokéball anterior
+    inline constexpr uint16_t PAD_BALL_NEXT = Gamepad::R1; // pokéball siguiente
 
     // Gatillos analógicos: L2 mantenido = apuntar; R2 (al cruzar el umbral) = lanzar.
     inline constexpr float TRIGGER_THRESHOLD = 0.5f;

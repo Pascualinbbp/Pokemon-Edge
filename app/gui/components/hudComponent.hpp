@@ -71,6 +71,60 @@ namespace HudComponent {
             dl->AddCircle(c, BUTTON, color, 16, 2.5f);
         }
 
+        // Pokéball de HUD: mitad de color, mitad blanca, con banda y botón central.
+        inline void drawBallIcon(ImDrawList* dl, const ImVec2& c, float r, const PokeballType& type, float alpha) {
+            const int a = static_cast<int>(255.0f * alpha);
+            const ImU32 color = IM_COL32(static_cast<int>(type.r * 255.0f), static_cast<int>(type.g * 255.0f), static_cast<int>(type.b * 255.0f), a);
+            const ImU32 white = IM_COL32(240, 240, 240, a);
+            const ImU32 dark = IM_COL32(20, 20, 25, a);
+
+            dl->AddCircleFilled(c, r, white, 28);
+            dl->PathArcTo(c, r, 3.1415927f, 6.2831853f, 20);
+            dl->PathFillConvex(color);
+            dl->AddCircle(c, r, dark, 28, 2.0f);
+            dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), dark, 2.0f);
+            dl->AddCircleFilled(c, r * 0.32f, white, 16);
+            dl->AddCircle(c, r * 0.32f, dark, 16, 2.0f);
+        }
+
+        // Selector de pokéball (solo al apuntar): todas las del inventario, la equipada resaltada, con sus unidades
+        // y el multiplicador de captura. Q / E o la rueda en teclado; L1 / R1 en mando.
+        inline void drawBallSelector(ImDrawList* dl, const GameStatus& status, InputDevice device) {
+            const Inventory& inventory = *status.inventory;
+            const int count = inventory.size();
+            const float alpha = status.aimBlend;
+            const int a = static_cast<int>(255.0f * alpha);
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+
+            constexpr float SPACING = 66.0f, SELECTED_RADIUS = 22.0f, OTHER_RADIUS = 15.0f;
+            const float centerY = screen.y - 110.0f;
+            const float startX = screen.x * 0.5f - SPACING * static_cast<float>(count - 1) * 0.5f;
+            char buffer[96];
+
+            for (int i = 0; i < count; ++i) {
+                const bool selected = i == inventory.selectedIndex();
+                const ImVec2 c(startX + SPACING * static_cast<float>(i), centerY);
+                if (selected) dl->AddCircle(c, SELECTED_RADIUS + 6.0f, IM_COL32(255, 255, 255, a), 32, 2.5f);
+                drawBallIcon(dl, c, selected ? SELECTED_RADIUS : OTHER_RADIUS, inventory.at(i).type, selected ? alpha : alpha * 0.55f);
+                if (!selected) {
+                    std::snprintf(buffer, sizeof(buffer), "x%d", inventory.at(i).count);
+                    centered(dl, ImVec2(c.x, c.y + OTHER_RADIUS + 6.0f), buffer, 0.8f, IM_COL32(220, 220, 220, static_cast<int>(a * 0.7f)));
+                }
+            }
+
+            const auto& slot = inventory.at(inventory.selectedIndex());
+            std::snprintf(buffer, sizeof(buffer), "%s   x%d   Captura x%.1f", slot.type.name.c_str(), slot.count, slot.type.captureMultiplier);
+            const ImU32 textColor = slot.count > 0 ? IM_COL32(255, 255, 255, a) : IM_COL32(235, 70, 60, a);
+            centered(dl, ImVec2(screen.x * 0.5f, centerY + SELECTED_RADIUS + 26.0f), buffer, 1.0f, textColor);
+
+            if (count > 1) {
+                const bool pad = isGamepad(device);
+                const float keyY = centerY - 14.0f;
+                GuiDraw::keycap(dl, ImVec2(startX - SELECTED_RADIUS - 52.0f, keyY), pad ? "L1" : "Q", 28.0f, 28.0f);
+                GuiDraw::keycap(dl, ImVec2(startX + SPACING * static_cast<float>(count - 1) + SELECTED_RADIUS + 24.0f, keyY), pad ? "R1" : "E", 28.0f, 28.0f);
+            }
+        }
+
         // Mira redonda (anillo con punto central); cambia de color al apuntar a un pokémon en rango.
         inline void drawCrosshair(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
@@ -128,13 +182,16 @@ namespace HudComponent {
 
         if (saving > 0.0f) detail::drawSaving(dl, saving);
 
-        if (status.aimBlend > 0.05f) detail::drawCrosshair(dl, status);
+        if (status.aimBlend > 0.05f) {
+            detail::drawCrosshair(dl, status);
+            if (status.inventory && !status.inventory->empty()) detail::drawBallSelector(dl, status, device);
+        }
 
         if (status.notice != 0) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
-            const bool ok = status.notice == 1;
-            detail::centered(dl, ImVec2(size.x * 0.5f, size.y * 0.2f), ok ? "¡CAPTURADO!" : "¡SE HA ESCAPADO!", 1.8f,
-                ok ? IM_COL32(80, 220, 110, 255) : IM_COL32(235, 70, 60, 255));
+            const char* text = status.notice == 1 ? "¡CAPTURADO!" : status.notice == 2 ? "¡SE HA ESCAPADO!" : "¡SIN UNIDADES!";
+            const ImU32 color = status.notice == 1 ? IM_COL32(80, 220, 110, 255) : status.notice == 2 ? IM_COL32(235, 70, 60, 255) : IM_COL32(255, 150, 40, 255);
+            detail::centered(dl, ImVec2(size.x * 0.5f, size.y * 0.2f), text, 1.8f, color);
         }
     }
 }

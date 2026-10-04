@@ -3,7 +3,7 @@
 #include <cmath>
 #include <utility>
 #include <DirectXMath.h>
-#include "../physics/body.hpp"
+#include "../physics/physicsWorld.hpp"
 #include "../../utils/core/randomUtil.hpp"
 #include "captureRules.hpp"
 
@@ -14,13 +14,16 @@ class CaptureTarget {
     public:
     static constexpr float SIZE          = 1.2f;  // arista del cubo
     static constexpr float HALF          = SIZE * 0.5f;
-    static constexpr float SHADOW_RADIUS = 0.9f;
     static constexpr float CAPTURE_TIME  = 0.5f;  // duración de la animación de captura
     static constexpr float RESPAWN_DELAY = 2.5f;  // segundos oculto antes de reaparecer
 
-    Physics::Body body; // inmóvil: nunca se integra con la física
+    Physics::Body body; // inmóvil, pero pasa por la misma física que el resto (suelo, paredes)
 
-    explicit CaptureTarget(int slot = 0) : m_slot(slot % SLOT_COUNT) { spawn(); }
+    explicit CaptureTarget(int slot = 0) : m_slot(slot % SLOT_COUNT) {
+        body.collisionRadius = HALF;
+        body.collisionHeight = SIZE;
+        spawn();
+    }
 
     bool hittable() const { return m_state == State::IDLE; }
     bool visible() const { return m_state != State::HIDDEN; }
@@ -37,6 +40,9 @@ class CaptureTarget {
             default:               return 0.0f;
         }
     }
+
+    // Hitbox sólida (la que ve el jugador al caminar); desaparece en cuanto empieza la captura.
+    Physics::World::Box solid() const { return { center(), { HALF, HALF, HALF } }; }
 
     DirectX::XMFLOAT3 center() const { return { body.position.x, body.position.y + HALF, body.position.z }; }
 
@@ -79,10 +85,10 @@ class CaptureTarget {
     void capture() {
         m_state = State::CAPTURING;
         m_timer = 0.0f;
-        body.shadowRadius = 0.0f;
     }
 
-    void update(float dt) {
+    void update(float dt, const Physics::World& world) {
+        world.step(body, dt);
         switch (m_state) {
             case State::IDLE:
                 break;
@@ -114,7 +120,6 @@ class CaptureTarget {
 
     void spawn() {
         body.position = { SPAWNS[m_slot][0], 0.0f, SPAWNS[m_slot][1] };
-        body.shadowRadius = SHADOW_RADIUS;
         m_state = State::IDLE;
         m_timer = 0.0f;
         reroll();

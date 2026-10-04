@@ -22,7 +22,6 @@ class DayCycle {
         DirectX::XMFLOAT3 skyHorizon;
         DirectX::XMFLOAT3 sunDir;
         DirectX::XMFLOAT3 moonDir;
-        float shadowOpacity;              // 0 = sin sombras
         float starVisibility;             // 0 = de día, 1 = noche cerrada
         float warm;                       // tinte anaranjado de amanecer y atardecer
         float angle;                      // posición del sol en su arco (radianes)
@@ -67,11 +66,9 @@ class DayCycle {
             const XMFLOAT3 noon = { 0.80f, 0.76f, 0.68f };
             const XMFLOAT3 dusk = { 0.85f, 0.45f, 0.24f };
             l.lightColor = scale(mix(noon, dusk, warm), sunI);
-            l.shadowOpacity = 0.50f * smooth(0.0f, 0.40f, sy);
         } else {
             l.lightDir = moon;
             l.lightColor = scale({ 0.26f, 0.31f, 0.48f }, moonI);
-            l.shadowOpacity = 0.25f * smooth(0.0f, 0.40f, -sy);
         }
 
         l.ambientSky = mix({ 0.19f, 0.23f, 0.37f }, { 0.44f, 0.49f, 0.58f }, day);

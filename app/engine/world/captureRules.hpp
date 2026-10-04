@@ -24,8 +24,8 @@ namespace CaptureRules {
         return (s * dx + c * dz) / length < BEHIND_DOT;
     }
 
-    inline float percent(float base, bool behind, bool hidden) {
-        float value = base;
+    inline float percent(float base, bool behind, bool hidden, float ballMultiplier = 1.0f) {
+        float value = base * ballMultiplier;
         if (behind) value *= BACK_MULTIPLIER;
         if (hidden) value *= STEALTH_MULTIPLIER;
         return (std::min)(value, MAX_PERCENT);

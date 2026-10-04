@@ -2,10 +2,12 @@
 #include "../utils/data/databaseUtil.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "../daos/typeDao.hpp"
+#include "../daos/pokeballDao.hpp"
 
 class DatabaseManager {
     private:
     inline static TypeDao typeDaoInstance;
+    inline static PokeballDao pokeballDaoInstance;
     
     public:
     static void init() {
@@ -15,5 +17,9 @@ class DatabaseManager {
     
     static TypeDao& getTypeDao() {
         return typeDaoInstance;
+    }
+
+    static PokeballDao& getPokeballDao() {
+        return pokeballDaoInstance;
     }
 };

@@ -11,6 +11,7 @@
 #include "../components/hudComponent.hpp"
 #include "../components/pauseComponent.hpp"
 #include "../components/controlsComponent.hpp"
+#include "../../managers/databaseManager.hpp"
 #include "../../managers/saveManager.hpp"
 #include "../../managers/sessionManager.hpp"
 #include "../../utils/core/pathsUtil.hpp"
@@ -134,6 +135,9 @@ namespace {
             case WM_RBUTTONUP:
                 InputHandler::onMouseButton(true, false);
                 return 0;
+            case WM_MOUSEWHEEL:
+                InputHandler::onMouseWheel(GET_WHEEL_DELTA_WPARAM(wParam));
+                return 0;
             case WM_INPUT:
                 InputHandler::onRawInput(lParam);
                 return DefWindowProc(hwnd, msg, wParam, lParam); // Raw Input exige llamar a DefWindowProc
@@ -180,6 +184,7 @@ void MainWindow::init() {
     ImGui_ImplDX11_Init(GraphicsDevice::device(), GraphicsDevice::context());
 
     SessionManager::engine().init(GraphicsDevice::device());
+    SessionManager::engine().setBallTypes(DatabaseManager::getPokeballDao().findAll());
 }
 
 void MainWindow::cleanup() {

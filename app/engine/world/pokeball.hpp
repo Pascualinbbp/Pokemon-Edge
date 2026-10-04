@@ -9,17 +9,17 @@ struct Pokeball {
     static constexpr float RESTITUTION = 0.45f;
     static constexpr float DRAG        = 2.0f;
     static constexpr float GRAVITY_SCALE = 0.5f; // cae más despacio que el resto: la trayectoria es más tensa
-    static constexpr float SHADOW      = 0.22f;
 
     Physics::Body body;
     float age = 0.0f;
+    float captureMultiplier = 1.0f;                 // del tipo de bola lanzada
+    DirectX::XMFLOAT3 color = { 1.0f, 1.0f, 1.0f }; // del tipo de bola lanzada
 
     Pokeball() {
         body.gravityScale = GRAVITY_SCALE;
         body.groundOffset = RADIUS; // 'position' es el centro de la esfera
         body.restitution = RESTITUTION;
         body.groundDrag = DRAG;
-        body.shadowRadius = SHADOW;
         body.collisionRadius = RADIUS;
         body.collisionHeight = RADIUS * 2.0f;
         body.onGround = false;
