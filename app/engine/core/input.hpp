@@ -10,9 +10,13 @@ struct InputState {
     float lookX = 0.0f;
     float lookY = 0.0f;
 
+    // Estado mantenido.
+    bool aim = false;       // apuntar: clic derecho / gatillo izquierdo (L2)
+
     // Eventos de un solo frame (nueva pulsación).
     bool jump = false;
-    bool crouch = false;  // agacharse / levantarse / deslizarse
-    bool sprint = false;  // doble toque en W o pulsar L3
-    bool pause = false;   // Options / Menú del mando
+    bool crouch = false;    // agacharse / levantarse / deslizarse
+    bool sprint = false;    // doble toque en W o pulsar L3
+    bool pause = false;     // Options / Menú del mando
+    bool throwBall = false; // lanzar Pokéball: clic izquierdo / gatillo derecho (R2)
 };

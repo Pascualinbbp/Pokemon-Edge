@@ -12,6 +12,7 @@ class Player {
     static constexpr float WALK_SPEED     = 5.0f;
     static constexpr float SPRINT_SPEED   = 9.0f;
     static constexpr float CROUCH_SPEED   = 2.5f;
+    static constexpr float AIM_SPEED      = 3.5f;  // caminar mientras se apunta
     static constexpr float SLIDE_SPEED    = 10.5f; // algo más rápido que correr
     static constexpr float SLIDE_DURATION = 0.9f;  // segundos
     static constexpr float SLIDE_EASE_OUT = 0.2f;  // al final baja hasta la velocidad de correr
@@ -19,7 +20,8 @@ class Player {
 
     Physics::Body body;
 
-    // Al apuntar (mecánica aún sin implementar) el personaje seguirá a la cámara de forma continua.
+    // Al apuntar el personaje se mueve siempre respecto a la cámara (la sigue de forma continua).
+    // Lo asigna la escena antes de cada update.
     bool aiming = false;
 
     Player() { body.shadowRadius = SHADOW_RADIUS; }
@@ -49,24 +51,26 @@ class Player {
 
     private:
     static constexpr float FORWARD_THRESHOLD = 0.3f;   // inclinación mínima del stick para contar como "avanzar"
-    static constexpr float DIRECTION_EPSILON = 0.1f;   // cambio mínimo de la entrada para fijar una dirección nueva
+    static constexpr float DIRECTION_JUMP = 0.35f;     // salto de la entrada entre dos frames que cuenta como "cambio de dirección"
     static constexpr float STEER_EPSILON = 0.05f;      // cambio mínimo de A/D o stick para girar el deslizamiento
     static constexpr float MOMENTUM_DECAY = 2.0f;      // pérdida de impulso por segundo en el aire
     static constexpr float CROUCH_HEIGHT = 0.6f;
     static constexpr float SLIDE_HEIGHT = 0.45f;
     static constexpr float SHADOW_RADIUS = 0.55f;
 
-    // La dirección de movimiento se fija respecto a la cámara en el momento en que el jugador cambia su
-    // entrada (pulsar o soltar una tecla, mover el stick). Girar la cámara después NO desvía al personaje:
-    // la cámara orbita libremente a su alrededor. Solo al apuntar el personaje sigue a la cámara.
+    // La cámara orbita libremente alrededor del jugador: girarla NO desvía al personaje.
+    // El ángulo de referencia del movimiento (m_moveYaw) solo se toma de la cámara:
+    //   - mientras no hay entrada (así la siguiente vez que se empieza a andar se usa la vista actual),
+    //   - cuando la entrada cambia de golpe (pulsar o soltar una tecla, mover el stick de un lado a otro),
+    //   - y continuamente mientras se apunta.
+    // Con la entrada estable (tecla mantenida) o cambiando poco a poco (stick), la referencia no se toca,
+    // así que el personaje mantiene su rumbo aunque se mueva la cámara.
     void updateMoveBasis(const InputState& input, float cameraYaw) {
-        const bool changed = std::fabs(input.moveX - m_lastMoveX) > DIRECTION_EPSILON ||
-                             std::fabs(input.moveY - m_lastMoveY) > DIRECTION_EPSILON;
-        if (changed) {
-            m_lastMoveX = input.moveX;
-            m_lastMoveY = input.moveY;
-        }
-        if (changed || aiming) m_moveYaw = cameraYaw;
+        const bool idle = input.moveX == 0.0f && input.moveY == 0.0f;
+        const float jump = std::hypot(input.moveX - m_prevMoveX, input.moveY - m_prevMoveY);
+        if (aiming || idle || jump > DIRECTION_JUMP) m_moveYaw = cameraYaw;
+        m_prevMoveX = input.moveX;
+        m_prevMoveY = input.moveY;
     }
 
     // Dirección unitaria en XZ para unos ejes de movimiento y un ángulo de referencia.
@@ -83,9 +87,9 @@ class Player {
         return (std::min)(length, 1.0f);
     }
 
-    // Correr: doble toque en W / L3, solo desde el suelo. Termina al dejar de avanzar. Levanta al personaje.
+    // Correr: doble toque en W / L3, solo desde el suelo. Termina al dejar de avanzar o al apuntar.
     void updateSprint(const InputState& input, bool grounded, bool forward) {
-        if (!forward) {
+        if (!forward || aiming) {
             m_sprinting = false;
         } else if (input.sprint && grounded) {
             m_sprinting = true;
@@ -136,6 +140,13 @@ class Player {
         return SPRINT_SPEED + (SLIDE_SPEED - SPRINT_SPEED) * remaining;
     }
 
+    // Velocidad al caminar por el suelo según la postura.
+    float groundSpeed() const {
+        if (m_sprinting) return SPRINT_SPEED;
+        if (m_crouching) return CROUCH_SPEED;
+        return aiming ? AIM_SPEED : WALK_SPEED;
+    }
+
     // Asigna la velocidad horizontal del cuerpo (la física la integra después).
     void updateHorizontal(float dt, bool grounded, float dirX, float dirZ, float amount) {
         float speed = 0.0f;
@@ -144,7 +155,7 @@ class Player {
             dirZ = m_slideDirZ;
             speed = slideSpeed();
         } else if (grounded) {
-            if (amount > 0.0f) speed = (m_sprinting ? SPRINT_SPEED : (m_crouching ? CROUCH_SPEED : WALK_SPEED)) * amount;
+            if (amount > 0.0f) speed = groundSpeed() * amount;
         } else {
             // En el aire se conserva el impulso (por ejemplo, el de un salto desde un deslizamiento).
             if (amount > 0.0f) {
@@ -185,8 +196,8 @@ class Player {
     }
 
     float m_moveYaw = 0.0f;     // ángulo de referencia del movimiento (el de la cámara cuando cambió la entrada)
-    float m_lastMoveX = 0.0f;
-    float m_lastMoveY = 0.0f;
+    float m_prevMoveX = 0.0f;   // entrada del frame anterior
+    float m_prevMoveY = 0.0f;
     float m_slideTime = 0.0f;
     float m_slideStrafe = 0.0f;
     float m_slideDirX = 0.0f;

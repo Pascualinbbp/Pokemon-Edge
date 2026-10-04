@@ -19,6 +19,7 @@ namespace Physics {
 
         // Integra un cuerpo: gravedad, desplazamiento por su velocidad, límites del mundo y colisión con el suelo.
         // Quien controla la entidad (jugador, IA...) solo asigna body.velocity.x/z antes de llamar.
+        // Los cuerpos con restitution > 0 (proyectiles) botan y ruedan; el resto se quedan en el suelo.
         void step(Body& body, float dt) const {
             if (!body.onGround) body.velocity.y -= GRAVITY * body.gravityScale * dt;
 
@@ -26,12 +27,32 @@ namespace Physics {
             body.position.z = (std::clamp)(body.position.z + body.velocity.z * dt, -HALF_SIZE, HALF_SIZE);
             body.position.y += body.velocity.y * dt;
 
-            const float ground = groundHeight(body.position.x, body.position.z);
-            body.onGround = body.position.y <= ground && body.velocity.y <= 0.0f;
-            if (body.onGround) {
-                body.position.y = ground;
-                body.velocity.y = 0.0f;
+            const float floorY = groundHeight(body.position.x, body.position.z) + body.groundOffset;
+            const bool touching = body.position.y <= floorY && body.velocity.y <= 0.0f;
+            body.onGround = touching;
+            if (!touching) return;
+
+            body.position.y = floorY;
+
+            // Bote: se pierde parte de la velocidad vertical y algo de la horizontal.
+            if (body.restitution > 0.0f && -body.velocity.y > BOUNCE_MIN_SPEED) {
+                body.velocity.y = -body.velocity.y * body.restitution;
+                body.velocity.x *= BOUNCE_FRICTION;
+                body.velocity.z *= BOUNCE_FRICTION;
+                body.onGround = false;
+                return;
+            }
+
+            body.velocity.y = 0.0f;
+            if (body.groundDrag > 0.0f) {
+                const float keep = (std::max)(0.0f, 1.0f - body.groundDrag * dt);
+                body.velocity.x *= keep;
+                body.velocity.z *= keep;
             }
         }
+
+        private:
+        static constexpr float BOUNCE_MIN_SPEED = 1.5f; // por debajo de esta velocidad de caída ya no bota
+        static constexpr float BOUNCE_FRICTION = 0.8f;  // fracción de velocidad horizontal que se conserva en cada bote
     };
 }

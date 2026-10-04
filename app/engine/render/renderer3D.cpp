@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
@@ -11,6 +12,22 @@ namespace {
     struct ConstantBuffer {
         XMFLOAT4X4 worldViewProj;
     };
+
+    // Añade un triángulo orientado hacia fuera (cara frontal = sentido horario visto desde fuera) en una
+    // forma convexa centrada en 'center'. Así no hay que acertar el orden de los vértices a mano.
+    template <typename V>
+    void addOutward(std::vector<uint16_t>& indices, const std::vector<V>& vertices, int a, int b, int c, const XMFLOAT3& center) {
+        const XMVECTOR pa = XMLoadFloat3(&vertices[a].pos);
+        const XMVECTOR pb = XMLoadFloat3(&vertices[b].pos);
+        const XMVECTOR pc = XMLoadFloat3(&vertices[c].pos);
+        const XMVECTOR normal = XMVector3Cross(XMVectorSubtract(pb, pa), XMVectorSubtract(pc, pa));
+        const XMVECTOR centroid = XMVectorScale(XMVectorAdd(XMVectorAdd(pa, pb), pc), 1.0f / 3.0f);
+        const XMVECTOR outward = XMVectorSubtract(centroid, XMLoadFloat3(&center));
+        if (XMVectorGetX(XMVector3Dot(normal, outward)) < 0.0f) std::swap(b, c);
+        indices.push_back(static_cast<uint16_t>(a));
+        indices.push_back(static_cast<uint16_t>(b));
+        indices.push_back(static_cast<uint16_t>(c));
+    }
 
     constexpr float kShadowLift = 0.03f;        // la sombra flota un poco sobre el suelo para evitar z-fighting
     constexpr float kShadowOpacity = 0.5f;
@@ -137,6 +154,75 @@ Renderer3D::Mesh Renderer3D::createPlayer(ID3D11Device* device) {
     return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
 }
 
+// Cubo unitario centrado en el origen. Cada cara tiene un tono distinto para que se note el volumen
+// (el shader no tiene iluminación).
+Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device) {
+    struct Face { XMFLOAT3 n, u, v; float shade; };
+    const Face faces[6] = {
+        { { 0, 1, 0 },  { 1, 0, 0 }, { 0, 0, 1 }, 1.00f },
+        { { 0, -1, 0 }, { 1, 0, 0 }, { 0, 0, 1 }, 0.45f },
+        { { 1, 0, 0 },  { 0, 1, 0 }, { 0, 0, 1 }, 0.80f },
+        { { -1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, 0.65f },
+        { { 0, 0, 1 },  { 1, 0, 0 }, { 0, 1, 0 }, 0.90f },
+        { { 0, 0, -1 }, { 1, 0, 0 }, { 0, 1, 0 }, 0.70f },
+    };
+
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+    vertices.reserve(24);
+    indices.reserve(36);
+
+    const XMFLOAT3 center = { 0.0f, 0.0f, 0.0f };
+    for (const Face& f : faces) {
+        const XMFLOAT4 color = { 1.0f * f.shade, 0.55f * f.shade, 0.10f * f.shade, 1.0f };
+        const int first = static_cast<int>(vertices.size());
+        for (int k = 0; k < 4; ++k) {
+            const float su = (k & 1) ? 0.5f : -0.5f;
+            const float sv = (k & 2) ? 0.5f : -0.5f;
+            vertices.push_back({ { f.n.x * 0.5f + f.u.x * su + f.v.x * sv,
+                                   f.n.y * 0.5f + f.u.y * su + f.v.y * sv,
+                                   f.n.z * 0.5f + f.u.z * su + f.v.z * sv }, color });
+        }
+        addOutward(indices, vertices, first, first + 1, first + 2, center);
+        addOutward(indices, vertices, first + 2, first + 1, first + 3, center);
+    }
+    return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
+}
+
+// Esfera unitaria sin color propio: gris que se aclara hacia arriba para que se aprecie la forma.
+Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
+    constexpr int rings = 8;
+    constexpr int segments = 12;
+
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+    vertices.reserve((rings + 1) * segments);
+    indices.reserve(rings * segments * 6);
+
+    for (int r = 0; r <= rings; ++r) {
+        const float phi = XM_PI * static_cast<float>(r) / rings; // 0 = polo superior
+        const float y = std::cos(phi);
+        const float ring = std::sin(phi);
+        const float shade = 0.55f + 0.45f * (y * 0.5f + 0.5f);
+        for (int s = 0; s < segments; ++s) {
+            const float theta = static_cast<float>(s) / segments * XM_2PI;
+            vertices.push_back({ { std::cos(theta) * ring, y, std::sin(theta) * ring }, { shade, shade, shade, 1.0f } });
+        }
+    }
+
+    const XMFLOAT3 center = { 0.0f, 0.0f, 0.0f };
+    for (int r = 0; r < rings; ++r) {
+        for (int s = 0; s < segments; ++s) {
+            const int next = (s + 1) % segments;
+            const int a = r * segments + s, b = r * segments + next;
+            const int c = (r + 1) * segments + s, d = (r + 1) * segments + next;
+            addOutward(indices, vertices, a, b, c, center);
+            addOutward(indices, vertices, c, b, d, center);
+        }
+    }
+    return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
+}
+
 // Disco unitario en XZ con opacidad que cae del centro (y = 1) al borde (y = 0): una sombra suave.
 Renderer3D::Mesh Renderer3D::createShadowDisc(ID3D11Device* device) {
     constexpr int segments = 16;
@@ -217,6 +303,8 @@ void Renderer3D::init(ID3D11Device* device) {
     // 5. Geometría
     m_floor = createFloor(device);
     m_player = createPlayer(device);
+    m_cube = createCube(device);
+    m_sphere = createSphere(device);
     m_shadowDisc = createShadowDisc(device);
     createShadowInstances(device, kInitialShadowCapacity);
     m_shadows.reserve(kInitialShadowCapacity);
@@ -288,9 +376,11 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     if (width <= 0 || height <= 0) return;
 
     const float aspect = static_cast<float>(width) / height;
-    if (aspect != m_aspect) {
+    const float fov = scene.camera.fov();
+    if (aspect != m_aspect || fov != m_fov) {
         m_aspect = aspect;
-        XMStoreFloat4x4(&m_proj, XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 250.0f));
+        m_fov = fov;
+        XMStoreFloat4x4(&m_proj, XMMatrixPerspectiveFovLH(fov, aspect, 0.1f, 250.0f));
     }
 
     context->IASetInputLayout(m_inputLayout.Get());
@@ -307,6 +397,17 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     drawMesh(context, m_player,
         XMMatrixScaling(1.0f, scene.player.heightScale(), 1.0f) * XMMatrixTranslation(p.x, p.y, p.z), viewProj);
 
+    if (scene.target.visible()) {
+        const float size = scene.target.scale();
+        const XMFLOAT3 c = scene.target.center();
+        drawMesh(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), viewProj);
+    }
+    for (const Pokeball& ball : scene.balls) {
+        const XMFLOAT3& b = ball.body.position;
+        drawMesh(context, m_sphere,
+            XMMatrixScaling(Pokeball::RADIUS, Pokeball::RADIUS, Pokeball::RADIUS) * XMMatrixTranslation(b.x, b.y, b.z), viewProj);
+    }
+
     // Las sombras van al final: son transparentes y dependen de la profundidad ya dibujada.
     drawShadows(context, scene, viewProj);
 }
@@ -321,6 +422,8 @@ void Renderer3D::cleanup() {
     m_shadowLayout.Reset();
     m_shadowPixelShader.Reset();
     m_shadowVertexShader.Reset();
+    m_sphere = {};
+    m_cube = {};
     m_player = {};
     m_floor = {};
     m_constantBuffer.Reset();

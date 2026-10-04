@@ -106,6 +106,18 @@ namespace {
             case WM_MOUSEMOVE:
                 InputHandler::onMouseMove(lParam);
                 return 0;
+            case WM_LBUTTONDOWN:
+                InputHandler::onMouseButton(false, true);
+                return 0;
+            case WM_LBUTTONUP:
+                InputHandler::onMouseButton(false, false);
+                return 0;
+            case WM_RBUTTONDOWN:
+                InputHandler::onMouseButton(true, true);
+                return 0;
+            case WM_RBUTTONUP:
+                InputHandler::onMouseButton(true, false);
+                return 0;
             case WM_INPUT:
                 InputHandler::onRawInput(lParam);
                 return DefWindowProc(hwnd, msg, wParam, lParam); // Raw Input exige llamar a DefWindowProc
@@ -282,7 +294,7 @@ void MainWindow::run() {
                 LoadingComponent::render(g_state, g_loadTimer);
                 break;
             case GameState::PLAYING:
-                HudComponent::render(g_state, InputHandler::activeDevice());
+                HudComponent::render(g_state, InputHandler::activeDevice(), engine.status());
                 break;
             case GameState::PAUSED:
                 if (PauseComponent::render(g_state, g_saved)) g_saved = SessionManager::saveCurrent();

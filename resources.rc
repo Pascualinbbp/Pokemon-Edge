@@ -1,6 +1,6 @@
-#define IDR_DATABASE 101
-#define IDI_ICON1 102
+#include "app/utils/core/resourceIds.h"
 
 IDR_DATABASE RCDATA "app/data/db/pokemonEdge.db"
 
 IDI_ICON1 ICON "app/data/icon.ico"
+

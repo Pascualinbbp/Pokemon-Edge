@@ -21,7 +21,9 @@ namespace InputHandler {
         // --- Teclado y ratón ---
         struct Keyboard {
             bool up = false, down = false, left = false, right = false; // mantenidas
+            bool aim = false;                                           // clic derecho mantenido
             bool jump = false, crouch = false, sprint = false;          // eventos de un frame
+            bool throwBall = false;                                     // clic izquierdo (evento de un frame)
         };
         inline Keyboard keys;
         inline float mouseDX = 0.0f;
@@ -36,13 +38,14 @@ namespace InputHandler {
         inline InputDevice active = InputDevice::KEYBOARD_MOUSE;
         inline std::optional<InputDevice> padType;  // tipo del mando conectado; vacío si no hay
         inline uint16_t padPrevButtons = 0;
+        inline bool padPrevTriggerDown = false;     // R2 en el frame anterior (para detectar la pulsación)
         inline bool sonyRegistered = false;
         inline bool devicesDirty = false;
 
         // Descarta lo que no debe arrastrarse entre frames o entre estados (pausa, carga...).
         inline void clearEvents() {
             mouseDX = mouseDY = 0.0f;
-            keys.jump = keys.crouch = keys.sprint = false;
+            keys.jump = keys.crouch = keys.sprint = keys.throwBall = false;
         }
 
         inline bool readPad(GamepadState& out) {
@@ -65,6 +68,7 @@ namespace InputHandler {
             padType = type;
             active = type.value_or(InputDevice::KEYBOARD_MOUSE);
             padPrevButtons = 0;
+            padPrevTriggerDown = false;
         }
 
         inline void rescanGamepads() {
@@ -76,7 +80,9 @@ namespace InputHandler {
         // Evita que un botón ya mantenido al empezar a jugar cuente como pulsación nueva.
         inline void primePad() {
             GamepadState pad;
-            padPrevButtons = readPad(pad) ? pad.buttons : 0;
+            const bool ok = readPad(pad);
+            padPrevButtons = ok ? pad.buttons : 0;
+            padPrevTriggerDown = ok && pad.rt > InputBindings::TRIGGER_THRESHOLD;
         }
     }
 
@@ -133,6 +139,21 @@ namespace InputHandler {
         if (gameKey && newPress) detail::active = InputDevice::KEYBOARD_MOUSE;
     }
 
+    // Botones del ratón: clic derecho (mantener) = apuntar, clic izquierdo = lanzar.
+    // Soltar siempre se registra (aunque se suelte en un menú); pulsar solo cuenta mientras se juega.
+    inline void onMouseButton(bool right, bool pressed) {
+        detail::Keyboard& k = detail::keys;
+        if (!pressed) {
+            if (right) k.aim = false;
+            return;
+        }
+        if (!detail::captured) return;
+
+        if (right) k.aim = true;
+        else k.throwBall = true;
+        detail::active = InputDevice::KEYBOARD_MOUSE;
+    }
+
     // Movimiento del ratón sobre la ventana (menús). Mover el ratón pasa la interfaz a teclado y ratón.
     inline void onMouseMove(LPARAM lParam) {
         if (detail::captured) return; // jugando, el ratón llega por Raw Input
@@ -177,6 +198,7 @@ namespace InputHandler {
         if (capture == detail::captured) return;
         detail::captured = capture;
         detail::clearEvents();
+        detail::keys.aim = false;
         RawInputUtil::registerDevice(detail::window, RawInputUtil::USAGE_MOUSE, capture);
 
         if (capture) {
@@ -206,6 +228,7 @@ namespace InputHandler {
     inline InputState poll(float dt) {
         GamepadState pad;
         const bool padOk = readGamepad(pad);
+        const bool triggerDown = padOk && pad.rt > InputBindings::TRIGGER_THRESHOLD;
 
         InputState input;
         if (padOk && isGamepad(detail::active)) {
@@ -219,6 +242,8 @@ namespace InputHandler {
             input.crouch = (pressed & InputBindings::PAD_CROUCH) != 0;
             input.sprint = (pressed & InputBindings::PAD_SPRINT) != 0;
             input.pause = (pressed & InputBindings::PAD_PAUSE) != 0;
+            input.aim = pad.lt > InputBindings::TRIGGER_THRESHOLD;
+            input.throwBall = triggerDown && !detail::padPrevTriggerDown;
         } else {
             const detail::Keyboard& k = detail::keys;
             input.moveX = static_cast<float>(k.right) - static_cast<float>(k.left);
@@ -228,9 +253,14 @@ namespace InputHandler {
             input.jump = k.jump;
             input.crouch = k.crouch;
             input.sprint = k.sprint;
+            input.aim = k.aim;
+            input.throwBall = k.throwBall;
         }
 
-        if (padOk) detail::padPrevButtons = pad.buttons;
+        if (padOk) {
+            detail::padPrevButtons = pad.buttons;
+            detail::padPrevTriggerDown = triggerDown;
+        }
         detail::clearEvents();
         return input;
     }

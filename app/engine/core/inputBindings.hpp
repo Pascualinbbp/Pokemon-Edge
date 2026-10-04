@@ -10,6 +10,9 @@ namespace InputBindings {
     inline constexpr uint16_t PAD_SPRINT = Gamepad::L3;    // pulsar el stick izquierdo
     inline constexpr uint16_t PAD_PAUSE  = Gamepad::START; // Options en PlayStation, Menú en Xbox
 
+    // Gatillos analógicos: L2 mantenido = apuntar; R2 (al cruzar el umbral) = lanzar.
+    inline constexpr float TRIGGER_THRESHOLD = 0.5f;
+
     inline constexpr float STICK_DEADZONE = 0.2f;
     inline constexpr float LOOK_SPEED = 1000.0f; // "píxeles" por segundo con el stick derecho a fondo
 }

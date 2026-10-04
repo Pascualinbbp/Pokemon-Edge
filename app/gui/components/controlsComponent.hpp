@@ -26,10 +26,14 @@ namespace ControlsComponent {
         inline constexpr const char* NOTES_KEYBOARD[] = {
             "Agacharse: pulsa SHIFT (otra vez para levantarte). Corriendo, SHIFT inicia un deslizamiento corto sin mantener la tecla.",
             "Durante el deslizamiento, A y D cambian la dirección. Saltar desde un deslizamiento conserva el impulso.",
+            "Apuntar: mantén el clic derecho. Lanzar Pokéball: clic izquierdo mientras apuntas.",
+            "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
         };
         inline constexpr const char* NOTES_GAMEPAD[] = {
             "Agacharse: pulsa el botón derecho (otra vez para levantarte). Corriendo (L3), inicia un deslizamiento corto.",
             "Durante el deslizamiento, inclina el stick izquierdo a un lado para girar. Saltar desde él conserva el impulso.",
+            "Apuntar: mantén L2 (gatillo izquierdo). Lanzar Pokéball: R2 (gatillo derecho) mientras apuntas.",
+            "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
             "Menús: stick izquierdo o cruceta para moverte, botón inferior para aceptar y botón derecho para volver.",
         };
 

@@ -2,6 +2,7 @@
 #include "../world/scene.hpp"
 #include "../render/renderer3D.hpp"
 #include "../../models/saveData.hpp"
+#include "gameStatus.hpp"
 #include "input.hpp"
 
 class GameEngine {
@@ -35,6 +36,10 @@ class GameEngine {
 
     void render(ID3D11DeviceContext* context, int screenW, int screenH) {
         m_renderer.render(context, m_scene, screenW, screenH);
+    }
+
+    GameStatus status() const {
+        return { m_scene.camera.aimBlend(), m_scene.captures, m_scene.captureNotice > 0.0f };
     }
 
     void cleanup() {

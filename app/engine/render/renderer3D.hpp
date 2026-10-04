@@ -43,6 +43,8 @@ class Renderer3D {
         const std::vector<uint16_t>& indices);
     static Mesh createFloor(ID3D11Device* device);
     static Mesh createPlayer(ID3D11Device* device);
+    static Mesh createCube(ID3D11Device* device);
+    static Mesh createSphere(ID3D11Device* device);
     static Mesh createShadowDisc(ID3D11Device* device);
 
     void createShadowInstances(ID3D11Device* device, UINT capacity);
@@ -58,6 +60,8 @@ class Renderer3D {
 
     Mesh m_floor;
     Mesh m_player;
+    Mesh m_cube;   // objetivo de capturas (cubo unitario centrado en el origen)
+    Mesh m_sphere; // pokéball (esfera unitaria)
 
     // Sombras: un único disco dibujado con instancias (una sola llamada para todas).
     ComPtr<ID3D11VertexShader> m_shadowVertexShader;
@@ -70,7 +74,8 @@ class Renderer3D {
     UINT m_shadowCapacity = 0;
     std::vector<ShadowInstance> m_shadows; // se reutiliza cada frame
 
-    // La proyección solo se recalcula cuando cambia el aspecto de la ventana.
+    // La proyección solo se recalcula cuando cambia el aspecto de la ventana o el campo de visión (apuntado).
     DirectX::XMFLOAT4X4 m_proj = {};
     float m_aspect = 0.0f;
+    float m_fov = 0.0f;
 };

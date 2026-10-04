@@ -133,7 +133,7 @@ jobs:
           Copy-Item "PokemonEdge.exe" "$out/"
           Copy-Item "app/data/version.json" "$out/app/data/"
           if (Test-Path "app/data/logo.png") { Copy-Item "app/data/logo.png" "$out/app/data/" }
-          if (Test-Path "app/data/icon.ico") { Copy-Item "app/data/icon.ico" "$out/app/data/" }
+          # icon.ico y la base de datos van incrustados en el .exe (resources.rc): no hace falta enviarlos aparte.
 
           Compress-Archive -Path "$out/*" -DestinationPath "PokemonEdge.zip" -Force
 

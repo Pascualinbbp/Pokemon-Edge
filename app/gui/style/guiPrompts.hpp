@@ -6,7 +6,7 @@
 // Ayudas de "qué botón pulsar" dentro del juego. El icono depende del dispositivo en uso, así que
 // cambian solas al pasar de teclado a mando (y de un mando a otro).
 namespace GuiPrompts {
-    enum class Action { JUMP, CROUCH, SPRINT, PAUSE };
+    enum class Action { JUMP, CROUCH, SPRINT, PAUSE, AIM, THROW };
 
     namespace detail {
         inline constexpr float HEIGHT = 24.0f;
@@ -20,11 +20,15 @@ namespace GuiPrompts {
                     case Action::CROUCH: return "SHIFT";
                     case Action::SPRINT: return "W W";
                     case Action::PAUSE:  return "ESC";
+                    case Action::AIM:    return "CLIC DER.";
+                    case Action::THROW:  return "CLIC IZQ.";
                 }
             }
             switch (action) {
                 case Action::SPRINT: return "L3";
                 case Action::PAUSE:  return device == InputDevice::XBOX ? "MENU" : "OPTIONS";
+                case Action::AIM:    return "L2";
+                case Action::THROW:  return "R2";
                 default:             return "";
             }
         }
