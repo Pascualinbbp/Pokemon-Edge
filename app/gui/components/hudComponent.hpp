@@ -46,12 +46,12 @@ namespace HudComponent {
 
                 float y = c.y + RADIUS + 8.0f + ImGui::GetFontSize() * 1.6f + 4.0f;
                 if (status.behind) {
-                    std::snprintf(buffer, sizeof(buffer), "ESPALDA x%.1f", CaptureRules::BACK_MULTIPLIER);
+                    std::snprintf(buffer, sizeof(buffer), "ESPALDA x%.2f", CaptureRules::BACK_MULTIPLIER);
                     centered(dl, ImVec2(c.x, y), buffer, 0.9f, IM_COL32(120, 200, 255, a));
                     y += ImGui::GetFontSize() * 0.9f + 2.0f;
                 }
                 if (status.hidden) {
-                    std::snprintf(buffer, sizeof(buffer), "SIGILO x%.0f", CaptureRules::STEALTH_MULTIPLIER);
+                    std::snprintf(buffer, sizeof(buffer), "SIGILO x%.2f", CaptureRules::STEALTH_MULTIPLIER);
                     centered(dl, ImVec2(c.x, y), buffer, 0.9f, IM_COL32(120, 200, 255, a));
                 }
             }
@@ -61,7 +61,7 @@ namespace HudComponent {
     }
 
     // La pausa con ESC la gestiona la escena (ESC sale primero del modo lanzamiento).
-    inline void render(InputDevice device, const GameStatus& status) {
+    inline void render(InputDevice device, const GameStatus& status, bool autosaved) {
         ImGui::SetCursorPos(ImVec2(10.0f, 10.0f));
         ImGui::Text("FPS: %.0f", ImGui::GetIO().Framerate);
 
@@ -78,6 +78,13 @@ namespace HudComponent {
 
         ImGui::Dummy(ImVec2(0.0f, 36.0f));
         ImGui::Text("Capturas: %d", status.captures);
+
+        if (autosaved) {
+            const ImVec2 size = ImGui::GetIO().DisplaySize;
+            const char* text = "Partida guardada";
+            const float width = ImGui::CalcTextSize(text).x;
+            dl->AddText(ImVec2(size.x - width - 16.0f, 12.0f), IM_COL32(220, 220, 220, 230), text);
+        }
 
         if (status.aimBlend > 0.05f) detail::drawCrosshair(dl, status);
 

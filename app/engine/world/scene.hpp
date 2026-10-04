@@ -11,6 +11,7 @@
 #include "camera.hpp"
 #include "captureRules.hpp"
 #include "captureTarget.hpp"
+#include "dayCycle.hpp"
 #include "player.hpp"
 #include "pokeball.hpp"
 
@@ -19,7 +20,7 @@ struct Scene {
     static constexpr int TARGET_COUNT = 4;
 
     // Lanzamiento
-    static constexpr float THROW_SPEED = 26.0f;       // m/s (alcance máximo ~34 m con g = 20)
+    static constexpr float THROW_SPEED = 40.0f;       // m/s: trayectoria tensa (la pokéball cae con la mitad de gravedad)
     static constexpr float THROW_COOLDOWN = 0.45f;    // segundos entre lanzamientos
     static constexpr float MAX_AIM_DISTANCE = 25.0f;  // si el rayo de apuntado no choca con nada, se apunta a esta distancia
     static constexpr float RANGE = 24.0f;             // alcance del jugador: porcentaje visible y fijado de cámara
@@ -28,7 +29,7 @@ struct Scene {
     static constexpr float SPAWN_FORWARD = 0.5f;
     static constexpr float SPAWN_HEIGHT = 1.1f;
     static constexpr size_t MAX_BALLS = 12;
-    static constexpr float MAX_SUBSTEP = 1.0f / 60.0f; // paso máximo de la física de los proyectiles
+    static constexpr float MAX_SUBSTEP = 1.0f / 120.0f; // paso máximo de la física de los proyectiles
     static constexpr float NOTICE_TIME = 2.0f;
 
     Physics::World world;
@@ -36,6 +37,7 @@ struct Scene {
     Camera camera;
     std::array<CaptureTarget, TARGET_COUNT> targets = { CaptureTarget(0), CaptureTarget(1), CaptureTarget(2), CaptureTarget(3) };
     std::vector<Pokeball> balls;
+    DayCycle dayCycle;
 
     int captures = 0;
     int noticeKind = 0;       // 1 = capturado, 2 = se ha escapado
@@ -47,6 +49,7 @@ struct Scene {
     // Devuelve true si hay que pausar el juego (ESC fuera del modo lanzamiento).
     bool update(float dt, const InputState& input) {
         bool pause = false;
+        dayCycle.update(dt);
         if (input.escape) {
             if (aimMode) aimMode = false;
             else pause = true;
@@ -246,7 +249,7 @@ struct Scene {
         if (d < 0.5f) return { cameraDir.x * THROW_SPEED, cameraDir.y * THROW_SPEED, cameraDir.z * THROW_SPEED };
 
         const float v2 = THROW_SPEED * THROW_SPEED;
-        const float g = Physics::World::GRAVITY;
+        const float g = Physics::World::GRAVITY * Pokeball::GRAVITY_SCALE;
         const float discriminant = v2 * v2 - g * (g * d * d + 2.0f * dy * v2);
         const float tanA = discriminant >= 0.0f ? (v2 - std::sqrt(discriminant)) / (g * d) : 1.0f;
 

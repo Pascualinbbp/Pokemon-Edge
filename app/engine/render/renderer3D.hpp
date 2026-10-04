@@ -4,6 +4,7 @@
 #include <d3d11.h>
 #include <DirectXMath.h>
 #include <wrl/client.h>
+#include "../world/dayCycle.hpp"
 #include "../world/scene.hpp"
 
 class Renderer3D {
@@ -17,18 +18,29 @@ class Renderer3D {
 
     struct Vertex {
         DirectX::XMFLOAT3 pos;
+        DirectX::XMFLOAT3 normal;
         DirectX::XMFLOAT4 color;
     };
 
-    // Vértice del disco de sombra: y = opacidad relativa (1 en el centro, 0 en el borde).
-    struct ShadowVertex {
-        DirectX::XMFLOAT3 pos;
+    // Datos por objeto (registro b0). Se envían traspuestos.
+    struct ObjectConstants {
+        DirectX::XMFLOAT4X4 worldViewProj;
+        DirectX::XMFLOAT4X4 world;
+        DirectX::XMFLOAT4 tint; // a = opacidad de la sombra
     };
 
-    // Datos por instancia de una sombra: centro (xyz), radio (w) y opacidad.
-    struct ShadowInstance {
-        DirectX::XMFLOAT4 positionRadius;
-        float opacity;
+    // Datos de todo el frame: luz, ambiente y cielo (registro b1).
+    struct FrameConstants {
+        DirectX::XMFLOAT4X4 invSky; // inversa de (vista sin traslación * proyección)
+        DirectX::XMFLOAT4 lightDir;
+        DirectX::XMFLOAT4 lightColor;
+        DirectX::XMFLOAT4 ambientSky;
+        DirectX::XMFLOAT4 ambientGround;
+        DirectX::XMFLOAT4 sunDir;
+        DirectX::XMFLOAT4 moonDir;
+        DirectX::XMFLOAT4 skyZenith;
+        DirectX::XMFLOAT4 skyHorizon;
+        DirectX::XMFLOAT4 skyParams; // x = estrellas, y = tinte cálido, z = ángulo del cielo, w = segundos
     };
 
     // Geometría inmutable e indexada: cada vértice se comparte entre triángulos.
@@ -45,35 +57,32 @@ class Renderer3D {
     static Mesh createPlayer(ID3D11Device* device);
     static Mesh createCube(ID3D11Device* device, const DirectX::XMFLOAT3& tint);
     static Mesh createSphere(ID3D11Device* device);
-    static Mesh createShadowDisc(ID3D11Device* device);
 
-    void createShadowInstances(ID3D11Device* device, UINT capacity);
-    void setTransform(ID3D11DeviceContext* context, DirectX::CXMMATRIX worldViewProj) const;
-    void drawMesh(ID3D11DeviceContext* context, const Mesh& mesh,
-        DirectX::CXMMATRIX world, DirectX::CXMMATRIX viewProj) const;
-    void drawShadows(ID3D11DeviceContext* context, const Scene& scene, DirectX::CXMMATRIX viewProj);
+    void setObject(ID3D11DeviceContext* context, DirectX::CXMMATRIX world, DirectX::CXMMATRIX worldViewProj, float alpha) const;
+    void drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) const;
+    void drawMesh(ID3D11DeviceContext* context, const Mesh& mesh, DirectX::CXMMATRIX world, DirectX::CXMMATRIX viewProj) const;
+    void drawShadow(ID3D11DeviceContext* context, const Mesh& mesh, DirectX::CXMMATRIX world,
+        DirectX::CXMMATRIX shadowViewProj, float opacity) const;
+    void updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, DirectX::CXMMATRIX view);
 
     ComPtr<ID3D11VertexShader> m_vertexShader;
     ComPtr<ID3D11PixelShader> m_pixelShader;
     ComPtr<ID3D11InputLayout> m_inputLayout;
-    ComPtr<ID3D11Buffer> m_constantBuffer;
+    ComPtr<ID3D11VertexShader> m_shadowVertexShader;
+    ComPtr<ID3D11PixelShader> m_shadowPixelShader;
+    ComPtr<ID3D11VertexShader> m_skyVertexShader;
+    ComPtr<ID3D11PixelShader> m_skyPixelShader;
+    ComPtr<ID3D11Buffer> m_objectBuffer;
+    ComPtr<ID3D11Buffer> m_frameBuffer;
+    ComPtr<ID3D11BlendState> m_shadowBlend;
+    ComPtr<ID3D11DepthStencilState> m_shadowDepth; // prueba de profundidad sin escribirla
+    ComPtr<ID3D11DepthStencilState> m_skyDepth;    // el cielo ignora la profundidad
 
     Mesh m_floor;
     Mesh m_player;
     Mesh m_cube;   // cuerpo del pokémon de pruebas (cubo unitario centrado en el origen)
     Mesh m_nose;   // cubito amarillo que marca hacia dónde mira
     Mesh m_sphere; // pokéball (esfera unitaria)
-
-    // Sombras: un único disco dibujado con instancias (una sola llamada para todas).
-    ComPtr<ID3D11VertexShader> m_shadowVertexShader;
-    ComPtr<ID3D11PixelShader> m_shadowPixelShader;
-    ComPtr<ID3D11InputLayout> m_shadowLayout;
-    ComPtr<ID3D11BlendState> m_shadowBlend;
-    ComPtr<ID3D11DepthStencilState> m_shadowDepth;
-    ComPtr<ID3D11Buffer> m_shadowInstances;
-    Mesh m_shadowDisc;
-    UINT m_shadowCapacity = 0;
-    std::vector<ShadowInstance> m_shadows; // se reutiliza cada frame
 
     // La proyección solo se recalcula cuando cambia el aspecto de la ventana o el campo de visión (apuntado).
     DirectX::XMFLOAT4X4 m_proj = {};

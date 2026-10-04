@@ -28,7 +28,7 @@ namespace ControlsComponent {
             "Durante el deslizamiento, A y D cambian la dirección. Saltar desde un deslizamiento conserva el impulso.",
             "Apuntar: clic derecho (otra vez o ESC para salir). Lanzar Pokéball: clic izquierdo mientras apuntas.",
             "TAB: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
-            "Más captura: x1.5 por la espalda del pokémon y x2 si vas agachado sin que te detecte.",
+            "Más captura: x1.15 por la espalda del pokémon y x1.25 si vas agachado sin que te detecte.",
             "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
         };
         inline constexpr const char* NOTES_GAMEPAD[] = {
@@ -36,7 +36,7 @@ namespace ControlsComponent {
             "Durante el deslizamiento, inclina el stick izquierdo a un lado para girar. Saltar desde él conserva el impulso.",
             "Apuntar: mantén L2. Lanzar Pokéball: R2 mientras apuntas.",
             "R3: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
-            "Más captura: x1.5 por la espalda del pokémon y x2 si vas agachado sin que te detecte.",
+            "Más captura: x1.15 por la espalda del pokémon y x1.25 si vas agachado sin que te detecte.",
             "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
             "Menús: stick izquierdo o cruceta para moverte, botón inferior para aceptar y botón derecho para volver.",
         };

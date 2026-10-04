@@ -8,13 +8,14 @@ struct Pokeball {
     static constexpr float LIFETIME    = 8.0f;  // segundos hasta desaparecer
     static constexpr float RESTITUTION = 0.45f;
     static constexpr float DRAG        = 2.0f;
+    static constexpr float GRAVITY_SCALE = 0.5f; // cae más despacio que el resto: la trayectoria es más tensa
     static constexpr float SHADOW      = 0.22f;
 
     Physics::Body body;
     float age = 0.0f;
 
     Pokeball() {
-        body.gravityScale = 1.0f;
+        body.gravityScale = GRAVITY_SCALE;
         body.groundOffset = RADIUS; // 'position' es el centro de la esfera
         body.restitution = RESTITUTION;
         body.groundDrag = DRAG;

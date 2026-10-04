@@ -18,6 +18,7 @@
 #include "../../utils/core/timeUtil.hpp"
 #include "../../utils/graphics/windowUtil.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <windows.h>
 #include <dbt.h>
@@ -37,6 +38,8 @@ namespace {
     constexpr UINT kDeviceRescanDelayMs = 1000;  // segunda búsqueda de mandos tras un cambio de dispositivos
     constexpr DWORD kMenuPollMs = 50;            // lectura del mando en los menús (solo con un mando conectado)
     constexpr float kMaxFrameSeconds = 0.1f;     // una pausa larga no debe disparar la simulación
+    constexpr float kAutosaveSeconds = 60.0f;    // intervalo del autoguardado (solo cuenta mientras se juega)
+    constexpr float kSavedNoticeSeconds = 2.0f;  // cuánto se muestra el aviso "Partida guardada"
 
     HWND g_hwnd = nullptr;
     Texture g_logo;
@@ -47,6 +50,8 @@ namespace {
     bool g_resizing = false;    // el usuario está arrastrando el borde de la ventana
     bool g_focused = false;
     bool g_saved = false;       // mostrar el aviso de "partida guardada" en la pausa
+    float g_autosaveTimer = 0.0f;  // segundos de juego desde el último guardado
+    float g_savedNotice = 0.0f;    // segundos restantes del aviso de autoguardado en el HUD
 
     // Redimensiona el swap chain solo si el tamaño del área cliente cambió de verdad.
     void applyResize(HWND hwnd) {
@@ -61,6 +66,8 @@ namespace {
     void beginLoading() {
         g_loadTimer = 0.0f;
         g_saved = false;
+        g_autosaveTimer = 0.0f;
+        g_savedNotice = 0.0f;
         g_state = GameState::LOADING;
     }
 
@@ -230,11 +237,20 @@ void MainWindow::run() {
 
         const float dt = timer.tick(kMaxFrameSeconds);
 
+        bool justPaused = false;
         if (g_state == GameState::PLAYING) {
             const InputState input = InputHandler::poll(dt);
             if (input.pause || engine.update(dt, input)) {
                 g_state = GameState::PAUSED;
                 redrawFrames = 2;
+                justPaused = true;
+            } else {
+                g_savedNotice = (std::max)(0.0f, g_savedNotice - dt);
+                g_autosaveTimer += dt;
+                if (g_autosaveTimer >= kAutosaveSeconds) {
+                    g_autosaveTimer = 0.0f;
+                    if (SessionManager::saveCurrent()) g_savedNotice = kSavedNoticeSeconds;
+                }
             }
         } else if (g_state == GameState::LOADING) {
             g_loadTimer += dt;
@@ -249,6 +265,8 @@ void MainWindow::run() {
         ImGui_ImplWin32_NewFrame();
         if (g_state != GameState::PLAYING) GuiInput::feed();
         ImGui::NewFrame();
+        // El ESC que acaba de pausar el juego no debe llegar también al menú de pausa (la cerraría al instante).
+        if (justPaused) ImGui::GetIO().ClearInputKeys();
 
         const GameState prevState = g_state;
 
@@ -292,7 +310,7 @@ void MainWindow::run() {
                 LoadingComponent::render(g_state, g_loadTimer);
                 break;
             case GameState::PLAYING:
-                HudComponent::render(InputHandler::activeDevice(), engine.status());
+                HudComponent::render(InputHandler::activeDevice(), engine.status(), g_savedNotice > 0.0f);
                 break;
             case GameState::PAUSED:
                 if (PauseComponent::render(g_state, g_saved)) g_saved = SessionManager::saveCurrent();
