@@ -38,9 +38,11 @@ namespace {
     constexpr UINT kDeviceRescanDelayMs = 1000;  // segunda búsqueda de mandos tras un cambio de dispositivos
     constexpr DWORD kMenuPollMs = 50;            // lectura del mando en los menús (solo con un mando conectado)
     constexpr float kMaxFrameSeconds = 0.1f;     // una pausa larga no debe disparar la simulación
-    constexpr float kAutosaveSeconds = 60.0f;    // intervalo del autoguardado (solo cuenta mientras se juega)
-    constexpr float kSavedNoticeSeconds = 2.0f;  // cuánto se muestra el aviso de guardado en el HUD
-    constexpr float kSavedNoticeFade = 0.4f;     // desvanecido final del aviso
+    constexpr float kAutosaveSeconds = 30.0f;    // intervalo del autoguardado (solo cuenta mientras se juega)
+    constexpr float kFirstAutosaveSeconds = 10.0f; // primer autoguardado tras entrar a la partida
+    constexpr float kSavedNoticeSeconds = 2.5f;  // cuánto se muestra el aviso de guardado en el HUD
+    constexpr float kSavedNoticeFadeIn = 0.25f;  // aparición del aviso
+    constexpr float kSavedNoticeFadeOut = 0.5f;  // desvanecido final del aviso
 
     HWND g_hwnd = nullptr;
     Texture g_logo;
@@ -52,6 +54,14 @@ namespace {
     bool g_focused = false;
     float g_autosaveTimer = 0.0f;  // segundos de juego desde el último guardado
     float g_savedNotice = 0.0f;    // segundos restantes del aviso de guardado en el HUD
+
+    // Opacidad del aviso de guardado: aparece y se desvanece suavemente.
+    float savingAlpha() {
+        if (g_savedNotice <= 0.0f) return 0.0f;
+        const float fadeIn = (kSavedNoticeSeconds - g_savedNotice) / kSavedNoticeFadeIn;
+        const float fadeOut = g_savedNotice / kSavedNoticeFadeOut;
+        return (std::clamp)((std::min)(fadeIn, fadeOut), 0.0f, 1.0f);
+    }
 
     // Redimensiona el swap chain solo si el tamaño del área cliente cambió de verdad.
     void applyResize(HWND hwnd) {
@@ -65,7 +75,7 @@ namespace {
     // Arranca la pantalla de carga de la partida que acaba de prepararse.
     void beginLoading() {
         g_loadTimer = 0.0f;
-        g_autosaveTimer = 0.0f;
+        g_autosaveTimer = kAutosaveSeconds - kFirstAutosaveSeconds;
         g_savedNotice = 0.0f;
         g_state = GameState::LOADING;
     }
@@ -309,7 +319,7 @@ void MainWindow::run() {
                 LoadingComponent::render(g_state, g_loadTimer);
                 break;
             case GameState::PLAYING:
-                HudComponent::render(InputHandler::activeDevice(), engine.status(), (std::min)(1.0f, g_savedNotice / kSavedNoticeFade));
+                HudComponent::render(InputHandler::activeDevice(), engine.status(), savingAlpha());
                 break;
             case GameState::PAUSED:
                 PauseComponent::render(g_state);

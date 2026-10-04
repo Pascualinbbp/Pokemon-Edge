@@ -38,8 +38,9 @@ namespace {
     }
 
     constexpr float kShadowLift = 0.03f;   // la sombra flota un poco sobre el suelo para evitar z-fighting
-    constexpr float kMinLightHeight = 0.2f; // con la luz casi horizontal las sombras serían infinitas
-    constexpr float kMaxShadowSlope = 4.0f;
+    constexpr float kMinLightHeight = 0.12f; // con la luz casi horizontal las sombras serían infinitas
+    constexpr float kMaxShadowSlope = 7.0f;
+    constexpr float kLightSmoothing = 8.0f;  // rapidez (1/s) con la que cambia la luz recibida al entrar o salir de una sombra
 
     constexpr const char* kShaderCode = R"(
         cbuffer Object : register(b0) {
@@ -400,13 +401,13 @@ void Renderer3D::drawShadow(ID3D11DeviceContext* context, const Mesh& mesh, CXMM
 
 float Renderer3D::sunlight(const Scene& scene, const XMFLOAT3& feet, float height, const XMFLOAT3& toLight) {
     if (scene.world.obstacles.empty()) return 1.0f;
-    constexpr float samples[3] = { 0.2f, 0.5f, 0.8f };
+    constexpr float samples[5] = { 0.1f, 0.3f, 0.5f, 0.7f, 0.9f };
     int lit = 0;
     for (const float s : samples) {
         const XMFLOAT3 point = { feet.x, feet.y + height * s, feet.z };
         if (!scene.world.blocked(point, toLight)) ++lit;
     }
-    return static_cast<float>(lit) / 3.0f;
+    return static_cast<float>(lit) / 5.0f;
 }
 
 void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, CXMMATRIX view) {
@@ -467,7 +468,16 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
 
     // Qué luz recibe cada cuerpo: una pared entre él y el sol (o la luna) lo deja solo con luz ambiente.
     const XMFLOAT3& toLight = light.lightDir;
-    const float playerLight = sunlight(scene, p, 1.4f * scene.player.heightScale(), toLight);
+    const auto now = std::chrono::steady_clock::now();
+    const float dt = std::chrono::duration<float>(now - m_lastRender).count();
+    m_lastRender = now;
+    const bool snap = !m_lightInit || dt > 0.25f;
+    m_lightInit = true;
+    const float blend = snap ? 1.0f : 1.0f - std::exp(-kLightSmoothing * dt);
+    const auto smoothTo = [blend](float& current, float target) { current += (target - current) * blend; };
+
+    smoothTo(m_playerLight, sunlight(scene, p, 1.4f * scene.player.heightScale(), toLight));
+    const float playerLight = m_playerLight;
 
     drawMesh(context, m_floor, XMMatrixIdentity(), viewProj);
     for (const Physics::World::Box& wall : scene.world.obstacles) {
@@ -475,22 +485,25 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     }
     drawMesh(context, m_player, playerWorld, viewProj, playerLight);
 
-    float targetLight[Scene::TARGET_COUNT];
     for (int i = 0; i < Scene::TARGET_COUNT; ++i) {
         const CaptureTarget& target = scene.targets[i];
-        targetLight[i] = 1.0f;
-        if (!target.visible()) continue;
+        if (!target.visible()) {
+            m_targetLight[i] = -1.0f; // al reaparecer se calcula de nuevo sin transición
+            continue;
+        }
 
         const float size = target.scale();
         const XMFLOAT3 c = target.center();
-        targetLight[i] = sunlight(scene, target.body.position, CaptureTarget::SIZE, toLight);
-        drawMesh(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), viewProj, targetLight[i]);
+        const float targetSun = sunlight(scene, target.body.position, CaptureTarget::SIZE, toLight);
+        if (m_targetLight[i] < 0.0f) m_targetLight[i] = targetSun;
+        else smoothTo(m_targetLight[i], targetSun);
+        drawMesh(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), viewProj, m_targetLight[i]);
 
         const float nose = size * 0.4f;
         drawMesh(context, m_nose,
             XMMatrixScaling(nose, nose, nose) *
             XMMatrixTranslation(c.x + std::sin(target.yaw()) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(target.yaw()) * size * 0.5f),
-            viewProj, targetLight[i]);
+            viewProj, m_targetLight[i]);
     }
     for (const Pokeball& ball : scene.balls) {
         const XMFLOAT3& b = ball.body.position;
@@ -502,7 +515,7 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
 
     // 3. Sombras: la luz activa (sol o luna) aplasta cada objeto sobre el suelo. Van al final porque son transparentes.
     // Las paredes proyectan sombra sobre el suelo; los cuerpos que ya están a la sombra de una pared no añaden la suya.
-    if (light.shadowOpacity <= 0.01f) return;
+    if (light.shadowOpacity <= 0.002f) return;
 
     const float ly = (std::max)(light.lightDir.y, kMinLightHeight);
     const float sx = std::clamp(light.lightDir.x / ly, -kMaxShadowSlope, kMaxShadowSlope);
@@ -531,7 +544,7 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
         const float size = target.scale();
         const XMFLOAT3 c = target.center();
         drawShadow(context, m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z),
-            shadowViewProj, opacity * targetLight[i]);
+            shadowViewProj, opacity * (std::max)(m_targetLight[i], 0.0f));
     }
     for (const Pokeball& ball : scene.balls) {
         const XMFLOAT3& b = ball.body.position;

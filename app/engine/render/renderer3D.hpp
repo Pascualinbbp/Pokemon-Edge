@@ -1,4 +1,6 @@
 #pragma once
+#include <array>
+#include <chrono>
 #include <cstdint>
 #include <vector>
 #include <d3d11.h>
@@ -93,4 +95,11 @@ class Renderer3D {
     DirectX::XMFLOAT4X4 m_proj = {};
     float m_aspect = 0.0f;
     float m_fov = 0.0f;
+
+    // Luz recibida (suavizada en el tiempo) por el jugador y cada objetivo: las sombras de las paredes
+    // aparecen y desaparecen poco a poco en lugar de cambiar de golpe.
+    float m_playerLight = 1.0f;
+    std::array<float, Scene::TARGET_COUNT> m_targetLight = { 1.0f, 1.0f, 1.0f, 1.0f };
+    bool m_lightInit = false;
+    std::chrono::steady_clock::time_point m_lastRender = {};
 };
