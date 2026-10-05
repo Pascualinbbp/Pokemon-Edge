@@ -8,7 +8,6 @@
 #include "../core/input.hpp"
 #include "../physics/physicsWorld.hpp"
 #include "../../models/pokeballType.hpp"
-#include "../../utils/core/randomUtil.hpp"
 #include "camera.hpp"
 #include "captureRules.hpp"
 #include "captureTarget.hpp"
@@ -43,7 +42,7 @@ struct Scene {
     Inventory inventory;
 
     int captures = 0;
-    int noticeKind = 0;       // 1 = capturado, 2 = se ha escapado, 3 = sin unidades
+    Notice notice = Notice::NONE;
     float noticeTime = 0.0f;
     float throwCooldown = 0.0f;
     bool aimMode = false;     // modo lanzamiento activado con el clic derecho
@@ -88,7 +87,7 @@ struct Scene {
         noticeTime = (std::max)(0.0f, noticeTime - dt);
         if (m_aiming && input.throwBall && throwCooldown <= 0.0f) throwBall();
 
-        for (CaptureTarget& target : targets) target.update(dt, world);
+        for (CaptureTarget& target : targets) handleCaptureEvent(target, target.update(dt, world));
         updateBalls(dt);
         updateAimInfo();
         return pause;
@@ -102,7 +101,7 @@ struct Scene {
         GameStatus s;
         s.aimBlend = camera.aimBlend();
         s.captures = captures;
-        s.notice = noticeTime > 0.0f ? noticeKind : 0;
+        s.notice = noticeTime > 0.0f ? notice : Notice::NONE;
         s.locked = lockedIndex >= 0;
         s.inventory = &inventory;
         if (m_aimTarget >= 0) {
@@ -125,16 +124,25 @@ struct Scene {
         return CaptureRules::percent(t.baseChance(), isBehind(t), player.crouched(), ballMultiplier);
     }
 
-    void resolveCapture(CaptureTarget& t, const Pokeball& ball) {
-        if (RandomUtil::roll(chancePercent(t, ball.captureMultiplier))) {
-            t.capture();
-            ++captures;
-            noticeKind = 1;
-        } else {
-            t.reroll(); // el porcentaje vuelve a cambiar
-            noticeKind = 2;
-        }
+    void showNotice(Notice kind) {
+        notice = kind;
         noticeTime = NOTICE_TIME;
+    }
+
+    // El resultado se decide al tocar la bola al pokémon, pero se anuncia cuando la animación lo revela.
+    void handleCaptureEvent(const CaptureTarget& target, CaptureTarget::Event event) {
+        if (event == CaptureTarget::Event::NONE) return;
+        if (event == CaptureTarget::Event::ESCAPED) {
+            showNotice(Notice::ESCAPED);
+            return;
+        }
+
+        ++captures;
+        switch (target.throwKind()) {
+            case CaptureRules::Throw::LUCKY:       showNotice(Notice::LUCKY); break;
+            case CaptureRules::Throw::SUPER_LUCKY: showNotice(Notice::SUPER_LUCKY); break;
+            default:                               showNotice(Notice::CAPTURED); break;
+        }
     }
 
     // --- Fijado de cámara ---
@@ -221,8 +229,7 @@ struct Scene {
         using namespace DirectX;
         throwCooldown = THROW_COOLDOWN;
         if (!inventory.canThrow()) {
-            noticeKind = 3;
-            noticeTime = NOTICE_TIME;
+            showNotice(Notice::OUT_OF_STOCK);
             return;
         }
 
@@ -244,7 +251,7 @@ struct Scene {
         const PokeballType& type = inventory.selected().type;
         Pokeball ball;
         ball.captureMultiplier = type.captureMultiplier;
-        ball.color = { type.r, type.g, type.b };
+        ball.color = PokeballStyle::color(type.id);
         ball.body.position = { p.x + cosYaw * SPAWN_SIDE + sinYaw * SPAWN_FORWARD,
                                p.y + SPAWN_HEIGHT * player.heightScale(),
                                p.z - sinYaw * SPAWN_SIDE + cosYaw * SPAWN_FORWARD };
@@ -289,9 +296,9 @@ struct Scene {
                 world.step(ball.body, h);
                 ball.age += h;
                 for (CaptureTarget& target : targets) {
-                    if (!target.hitBy(ball.body.position, Pokeball::RADIUS)) continue;
-                    resolveCapture(target, ball);
-                    ball.age = Pokeball::LIFETIME; // la pokéball se consume
+                    if (!target.hitBy(ball.body.position, Pokeball::RADIUS + Pokeball::CONTACT_MARGIN)) continue;
+                    target.beginCapture(ball, CaptureRules::roll(chancePercent(target, ball.captureMultiplier)));
+                    ball.age = Pokeball::LIFETIME; // la bola pasa a ser la de la animación de captura
                     break;
                 }
             }

@@ -6,9 +6,21 @@
 #include "../../engine/core/gameStatus.hpp"
 #include "../../engine/core/inputDevice.hpp"
 #include "../../engine/world/captureRules.hpp"
+#include "../../engine/world/pokeball.hpp"
 
 namespace HudComponent {
     namespace detail {
+        // Texto y color de cada aviso, en el orden de Notice (NONE no se dibuja).
+        struct NoticeStyle { const char* text; ImU32 color; };
+        inline const NoticeStyle NOTICES[] = {
+            { "", 0 },
+            { "¡CAPTURADO!",                IM_COL32(80, 220, 110, 255) },
+            { "¡SE HA ESCAPADO!",           IM_COL32(235, 70, 60, 255) },
+            { "¡LANZAMIENTO CON SUERTE!",   IM_COL32(255, 215, 70, 255) },
+            { "¡SUPER SUERTE!",             IM_COL32(150, 235, 255, 255) },
+            { "¡SIN UNIDADES!",             IM_COL32(255, 150, 40, 255) },
+        };
+
         // Color según la probabilidad de captura: verde muy alta, amarillo buena, naranja dudosa, rojo muy baja.
         inline ImU32 chanceColor(int percent, int alpha) {
             if (percent >= 70) return IM_COL32(80, 220, 110, alpha);
@@ -74,7 +86,8 @@ namespace HudComponent {
         // Pokéball de HUD: mitad de color, mitad blanca, con banda y botón central.
         inline void drawBallIcon(ImDrawList* dl, const ImVec2& c, float r, const PokeballType& type, float alpha) {
             const int a = static_cast<int>(255.0f * alpha);
-            const ImU32 color = IM_COL32(static_cast<int>(type.r * 255.0f), static_cast<int>(type.g * 255.0f), static_cast<int>(type.b * 255.0f), a);
+            const DirectX::XMFLOAT3 tone = PokeballStyle::color(type.id);
+            const ImU32 color = IM_COL32(static_cast<int>(tone.x * 255.0f), static_cast<int>(tone.y * 255.0f), static_cast<int>(tone.z * 255.0f), a);
             const ImU32 white = IM_COL32(240, 240, 240, a);
             const ImU32 dark = IM_COL32(20, 20, 25, a);
 
@@ -115,7 +128,10 @@ namespace HudComponent {
             const auto& slot = inventory.at(inventory.selectedIndex());
             std::snprintf(buffer, sizeof(buffer), "%s   x%d   Captura x%.1f", slot.type.name.c_str(), slot.count, slot.type.captureMultiplier);
             const ImU32 textColor = slot.count > 0 ? IM_COL32(255, 255, 255, a) : IM_COL32(235, 70, 60, a);
-            centered(dl, ImVec2(screen.x * 0.5f, centerY + SELECTED_RADIUS + 26.0f), buffer, 1.0f, textColor);
+            const float nameY = centerY + SELECTED_RADIUS + 26.0f;
+            centered(dl, ImVec2(screen.x * 0.5f, nameY), buffer, 1.0f, textColor);
+            centered(dl, ImVec2(screen.x * 0.5f, nameY + ImGui::GetFontSize() + 4.0f), slot.type.description.c_str(), 0.85f,
+                IM_COL32(200, 200, 210, static_cast<int>(a * 0.8f)));
 
             if (count > 1) {
                 const bool pad = isGamepad(device);
@@ -187,11 +203,10 @@ namespace HudComponent {
             if (status.inventory && !status.inventory->empty()) detail::drawBallSelector(dl, status, device);
         }
 
-        if (status.notice != 0) {
+        if (status.notice != Notice::NONE) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
-            const char* text = status.notice == 1 ? "¡CAPTURADO!" : status.notice == 2 ? "¡SE HA ESCAPADO!" : "¡SIN UNIDADES!";
-            const ImU32 color = status.notice == 1 ? IM_COL32(80, 220, 110, 255) : status.notice == 2 ? IM_COL32(235, 70, 60, 255) : IM_COL32(255, 150, 40, 255);
-            detail::centered(dl, ImVec2(size.x * 0.5f, size.y * 0.2f), text, 1.8f, color);
+            const detail::NoticeStyle& style = detail::NOTICES[static_cast<int>(status.notice)];
+            detail::centered(dl, ImVec2(size.x * 0.5f, size.y * 0.2f), style.text, 1.8f, style.color);
         }
     }
 }

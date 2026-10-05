@@ -1,11 +1,14 @@
 #pragma once
 #include "../world/inventory.hpp"
 
+// Avisos grandes en pantalla.
+enum class Notice { NONE, CAPTURED, ESCAPED, LUCKY, SUPER_LUCKY, OUT_OF_STOCK };
+
 // Estado del juego que la interfaz necesita mostrar (el HUD no conoce la escena).
 struct GameStatus {
     float aimBlend = 0.0f;      // 0 = cámara normal, 1 = cámara de apuntado completa
     int captures = 0;           // capturas de esta sesión
-    int notice = 0;             // aviso en pantalla: 0 = ninguno, 1 = capturado, 2 = se ha escapado, 3 = sin unidades
+    Notice notice = Notice::NONE;
     bool locked = false;        // cámara fijada a un objetivo
     const Inventory* inventory = nullptr; // inventario de pokéballs (válido durante el frame)
 

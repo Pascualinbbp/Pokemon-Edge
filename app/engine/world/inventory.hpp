@@ -7,6 +7,8 @@
 // Inventario de pokéballs del personaje: una ranura por tipo, con su cantidad, y la ranura equipada.
 class Inventory {
     public:
+    static constexpr int STARTING_STOCK = 30; // unidades de cada tipo al empezar una partida
+
     struct Slot {
         PokeballType type;
         int count = 0;
@@ -15,7 +17,7 @@ class Inventory {
     void setTypes(const std::vector<PokeballType>& types) {
         m_slots.clear();
         m_slots.reserve(types.size());
-        for (const PokeballType& type : types) m_slots.push_back({ type, type.startingStock });
+        for (const PokeballType& type : types) m_slots.push_back({ type, STARTING_STOCK });
         m_selected = 0;
     }
 

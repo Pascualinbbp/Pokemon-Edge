@@ -14,6 +14,12 @@ namespace RandomUtil {
         return distribution(engine());
     }
 
+    // Entero en [low, high] (ambos incluidos).
+    inline int integer(int low, int high) {
+        std::uniform_int_distribution<int> distribution(low, high);
+        return distribution(engine());
+    }
+
     // true con la probabilidad indicada (0..100).
     inline bool roll(float percent) {
         return range(0.0f, 100.0f) < percent;

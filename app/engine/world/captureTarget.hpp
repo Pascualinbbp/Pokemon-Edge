@@ -6,16 +6,18 @@
 #include "../physics/physicsWorld.hpp"
 #include "../../utils/core/randomUtil.hpp"
 #include "captureRules.hpp"
+#include "captureSequence.hpp"
 
 // Objetivo de pruebas: un cubo inmóvil que hace de pokémon (el cubito amarillo marca hacia dónde mira).
-// Al capturarlo se encoge y desaparece; si la captura falla, cambia su porcentaje base al azar.
-// Tras unos segundos reaparece en su sitio con un porcentaje nuevo.
+// Una pokéball que lo toca lo captura: el resultado se decide al instante y CaptureSequence lo anima.
+// Si se captura desaparece unos segundos y reaparece en su sitio con un porcentaje nuevo; si escapa, sale de la bola.
 class CaptureTarget {
     public:
     static constexpr float SIZE          = 1.2f;  // arista del cubo
     static constexpr float HALF          = SIZE * 0.5f;
-    static constexpr float CAPTURE_TIME  = 0.5f;  // duración de la animación de captura
     static constexpr float RESPAWN_DELAY = 2.5f;  // segundos oculto antes de reaparecer
+
+    enum class Event { NONE, CAPTURED, ESCAPED }; // se emite en el instante en que la animación revela el resultado
 
     Physics::Body body; // inmóvil, pero pasa por la misma física que el resto (suelo, paredes)
 
@@ -26,25 +28,38 @@ class CaptureTarget {
     }
 
     bool hittable() const { return m_state == State::IDLE; }
-    bool visible() const { return m_state != State::HIDDEN; }
     float yaw() const { return SPAWNS[m_slot][2]; }
     float baseChance() const { return m_baseChance; }
+    CaptureRules::Throw throwKind() const { return m_sequence.kind(); }
 
     void reroll() { m_baseChance = RandomUtil::range(CaptureRules::MIN_BASE, CaptureRules::MAX_BASE); }
 
-    // Arista actual del cubo dibujado (se encoge al capturarlo).
+    // Arista actual del cubo dibujado (se encoge al entrar en la bola).
     float scale() const {
         switch (m_state) {
             case State::IDLE:      return SIZE;
-            case State::CAPTURING: return SIZE * (std::max)(0.0f, 1.0f - m_timer / CAPTURE_TIME);
+            case State::CAPTURING: return SIZE * m_sequence.pokemonScale();
             default:               return 0.0f;
         }
     }
 
+    // Centro físico (fijo) y centro dibujado (se acerca a la bola mientras entra o sale de ella).
+    DirectX::XMFLOAT3 center() const { return { body.position.x, body.position.y + HALF, body.position.z }; }
+
+    DirectX::XMFLOAT3 drawCenter() const {
+        const DirectX::XMFLOAT3 c = center();
+        if (m_state != State::CAPTURING) return c;
+
+        const DirectX::XMFLOAT3& b = m_sequence.ball().body.position;
+        const float t = m_sequence.pokemonBlend();
+        return { c.x + (b.x - c.x) * t, c.y + (b.y - c.y) * t, c.z + (b.z - c.z) * t };
+    }
+
+    // Animación de captura en curso (nullptr si no hay).
+    const CaptureSequence* sequence() const { return m_state == State::CAPTURING ? &m_sequence : nullptr; }
+
     // Hitbox sólida (la que ve el jugador al caminar); desaparece en cuanto empieza la captura.
     Physics::World::Box solid() const { return { center(), { HALF, HALF, HALF } }; }
-
-    DirectX::XMFLOAT3 center() const { return { body.position.x, body.position.y + HALF, body.position.z }; }
 
     // ¿Toca una esfera (centro, radio) al cubo?
     bool hitBy(const DirectX::XMFLOAT3& c, float radius) const {
@@ -82,21 +97,29 @@ class CaptureTarget {
         return true;
     }
 
-    void capture() {
+    // La bola ha tocado al pokémon: empieza la animación del resultado ya decidido.
+    void beginCapture(const Pokeball& ball, const CaptureRules::Result& result) {
         m_state = State::CAPTURING;
-        m_timer = 0.0f;
+        m_sequence.start(ball, result);
     }
 
-    void update(float dt, const Physics::World& world) {
+    Event update(float dt, const Physics::World& world) {
         world.step(body, dt);
+
+        Event event = Event::NONE;
         switch (m_state) {
             case State::IDLE:
                 break;
             case State::CAPTURING:
-                m_timer += dt;
-                if (m_timer >= CAPTURE_TIME) {
-                    m_state = State::HIDDEN;
-                    m_timer = 0.0f;
+                if (m_sequence.update(dt, world)) event = m_sequence.captured() ? Event::CAPTURED : Event::ESCAPED;
+                if (m_sequence.finished()) {
+                    if (m_sequence.captured()) {
+                        m_state = State::HIDDEN;
+                        m_timer = 0.0f;
+                    } else {
+                        m_state = State::IDLE; // escapó: ya está de nuevo en su sitio, con otro porcentaje
+                        reroll();
+                    }
                 }
                 break;
             case State::HIDDEN:
@@ -104,6 +127,7 @@ class CaptureTarget {
                 if (m_timer >= RESPAWN_DELAY) spawn();
                 break;
         }
+        return event;
     }
 
     private:
@@ -126,6 +150,7 @@ class CaptureTarget {
     }
 
     State m_state = State::IDLE;
+    CaptureSequence m_sequence;
     float m_timer = 0.0f;
     float m_baseChance = 50.0f;
     int m_slot = 0;

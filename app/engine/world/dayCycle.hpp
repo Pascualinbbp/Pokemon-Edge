@@ -11,6 +11,7 @@ class DayCycle {
     static constexpr float NIGHT_SECONDS = 120.0f; // sol bajo el horizonte
     static constexpr float CYCLE_SECONDS = DAY_SECONDS + NIGHT_SECONDS;
     static constexpr float START_TIME    = 25.0f;  // se empieza por la mañana
+    static constexpr float MIN_LIGHT_ELEVATION = 0.22f; // la luz nunca llega más rasante: así las sombras siguen existiendo al amanecer y al atardecer
 
     // Todo lo que el renderer necesita para dibujar el cielo, la luz y las sombras de este instante.
     struct Lighting {
@@ -62,12 +63,12 @@ class DayCycle {
         l.starVisibility = 1.0f - smooth(-0.20f, 0.05f, sy);
 
         if (sy > 0.0f) {
-            l.lightDir = sun;
+            l.lightDir = raised(sun);
             const XMFLOAT3 noon = { 0.80f, 0.76f, 0.68f };
             const XMFLOAT3 dusk = { 0.85f, 0.45f, 0.24f };
             l.lightColor = scale(mix(noon, dusk, warm), sunI);
         } else {
-            l.lightDir = moon;
+            l.lightDir = raised(moon);
             l.lightColor = scale({ 0.26f, 0.31f, 0.48f }, moonI);
         }
 
@@ -89,6 +90,10 @@ class DayCycle {
     static float smooth(float e0, float e1, float x) {
         const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
         return t * t * (3.0f - 2.0f * t);
+    }
+    static DirectX::XMFLOAT3 raised(DirectX::XMFLOAT3 v) {
+        v.y = (std::max)(v.y, MIN_LIGHT_ELEVATION);
+        return normalize(v);
     }
     static DirectX::XMFLOAT3 normalize(DirectX::XMFLOAT3 v) {
         const float n = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);

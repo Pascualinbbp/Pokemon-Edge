@@ -29,7 +29,7 @@ class Renderer3D {
     struct ObjectConstants {
         DirectX::XMFLOAT4X4 worldViewProj;
         DirectX::XMFLOAT4X4 world;
-        DirectX::XMFLOAT4 tint; // multiplica el color de los vértices
+        DirectX::XMFLOAT4 tint; // rgb = color, a = brillo propio
     };
 
     // Datos de todo el frame: luz, sombras, ambiente y cielo (registro b1).
@@ -60,7 +60,8 @@ class Renderer3D {
     struct Draw {
         const Mesh* mesh;
         DirectX::XMFLOAT4X4 world;
-        DirectX::XMFLOAT4 tint;
+        DirectX::XMFLOAT4 tint; // rgb = color que se multiplica a los vértices, a = brillo propio (0 = iluminado, 1 = sin sombreado)
+        bool castsShadow;
     };
 
     static Mesh createMesh(ID3D11Device* device, const void* vertices, UINT vertexCount, UINT stride,
@@ -69,14 +70,16 @@ class Renderer3D {
     static Mesh createPlayer(ID3D11Device* device);
     static Mesh createCube(ID3D11Device* device);
     static Mesh createSphere(ID3D11Device* device);
+    static Mesh createStar(ID3D11Device* device);
     static DirectX::XMMATRIX lightViewProj(const DirectX::XMFLOAT3& lightDir);
 
     void collect(const Scene& scene);
-    void add(const Mesh& mesh, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint);
+    void add(const Mesh& mesh, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint, bool castsShadow = true);
+    void addBall(const Pokeball& ball, float tilt, float scale, float glow);
     void setObject(ID3D11DeviceContext* context, DirectX::CXMMATRIX world, DirectX::CXMMATRIX worldViewProj,
         const DirectX::XMFLOAT4& tint) const;
     void drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) const;
-    void drawAll(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj) const;
+    void drawAll(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj, bool shadowPass) const;
     void renderShadowMap(ID3D11DeviceContext* context, DirectX::CXMMATRIX lightViewProj) const;
     void updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, DirectX::CXMMATRIX view,
         DirectX::CXMMATRIX lightViewProj);
@@ -98,7 +101,8 @@ class Renderer3D {
     Mesh m_floor;
     Mesh m_player;
     Mesh m_cube;   // cubo unitario blanco centrado en el origen: paredes, pokémon y su morro (se tiñe al dibujar)
-    Mesh m_sphere; // pokéball (esfera unitaria blanca que se tiñe con el color del tipo)
+    Mesh m_sphere; // pokéball: mitad tintada con el color del tipo, banda oscura y mitad blanca
+    Mesh m_star;   // estrella de la animación de captura
 
     std::vector<Draw> m_draws; // se reutiliza entre frames
 

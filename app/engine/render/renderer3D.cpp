@@ -37,10 +37,10 @@ namespace {
                XMMatrixTranslation(wall.center.x, wall.center.y, wall.center.z);
     }
 
-    const XMFLOAT4 kWhite = { 1.0f, 1.0f, 1.0f, 1.0f };
-    const XMFLOAT4 kWallTint = { 0.62f, 0.58f, 0.52f, 1.0f };
-    const XMFLOAT4 kTargetTint = { 1.0f, 0.55f, 0.10f, 1.0f };
-    const XMFLOAT4 kNoseTint = { 1.0f, 0.90f, 0.15f, 1.0f };
+    const XMFLOAT4 kWhite = { 1.0f, 1.0f, 1.0f, 0.0f };
+    const XMFLOAT4 kWallTint = { 0.62f, 0.58f, 0.52f, 0.0f };
+    const XMFLOAT4 kTargetTint = { 1.0f, 0.55f, 0.10f, 0.0f };
+    const XMFLOAT4 kNoseTint = { 1.0f, 0.90f, 0.15f, 0.0f };
 
     // Mapa de sombras: una proyección ortográfica fija que cubre todo el mundo (así las sombras no "nadan"
     // al moverse el jugador) vista desde la dirección de la luz activa.
@@ -109,8 +109,10 @@ namespace {
             float lit = 0.0f;
             if (diffuse > 0.0f) lit = Shadow(input.wpos, n);
             float3 ambient = lerp(AmbientGround.rgb, AmbientSky.rgb, n.y * 0.5f + 0.5f);
-            float3 albedo = input.col.rgb * Tint.rgb;
-            return float4(saturate(albedo * (ambient + LightColor.rgb * diffuse * lit)), 1.0f);
+            // El alfa del vértice indica cuánto se tiñe (1 = todo, 0 = conserva su color); el alfa del tinte es el brillo propio.
+            float3 albedo = lerp(input.col.rgb, input.col.rgb * Tint.rgb, input.col.a);
+            float3 shaded = albedo * (ambient + LightColor.rgb * diffuse * lit);
+            return float4(saturate(lerp(shaded, albedo, Tint.a)), 1.0f);
         }
 
         // --- Mapa de sombras: solo profundidad ---
@@ -297,10 +299,12 @@ Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device) {
     return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
 }
 
-// Esfera unitaria blanca (la normal de cada vértice es su posición); el sombreado lo da la luz.
+// Pokéball unitaria: la mitad superior (alfa 1) se tiñe con el color del tipo, el ecuador es una banda oscura y la
+// mitad inferior es blanca. Así se nota cómo se inclina al tambalearse.
 Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
-    constexpr int rings = 8;
-    constexpr int segments = 12;
+    constexpr int rings = 16;
+    constexpr int segments = 16;
+    constexpr int bandFirst = 7, bandLast = 9;
 
     std::vector<Vertex> vertices;
     std::vector<uint16_t> indices;
@@ -311,10 +315,13 @@ Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
         const float phi = XM_PI * static_cast<float>(r) / rings; // 0 = polo superior
         const float y = std::cos(phi);
         const float ring = std::sin(phi);
+        const XMFLOAT4 color = r < bandFirst ? XMFLOAT4{ 1.0f, 1.0f, 1.0f, 1.0f }
+                             : r <= bandLast ? XMFLOAT4{ 0.07f, 0.07f, 0.08f, 0.0f }
+                                             : XMFLOAT4{ 0.95f, 0.95f, 0.95f, 0.0f };
         for (int s = 0; s < segments; ++s) {
             const float theta = static_cast<float>(s) / segments * XM_2PI;
             const XMFLOAT3 p = { std::cos(theta) * ring, y, std::sin(theta) * ring };
-            vertices.push_back({ p, p, { 1.0f, 1.0f, 1.0f, 1.0f } });
+            vertices.push_back({ p, p, color });
         }
     }
 
@@ -331,7 +338,49 @@ Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
     return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
 }
 
+// Estrella de cinco puntas extruida (radio 0.5, grosor 0.12), blanca: el color lo pone el tinte.
+Renderer3D::Mesh Renderer3D::createStar(ID3D11Device* device) {
+    constexpr int corners = 10; // 5 puntas y 5 huecos
+    constexpr float outer = 0.5f, inner = 0.21f, half = 0.06f;
+    const XMFLOAT4 white = { 1.0f, 1.0f, 1.0f, 1.0f };
+    const XMFLOAT3 center = { 0.0f, 0.0f, 0.0f };
 
+    XMFLOAT2 outline[corners];
+    for (int i = 0; i < corners; ++i) {
+        const float angle = XM_PIDIV2 + XM_2PI * static_cast<float>(i) / corners;
+        const float radius = (i & 1) ? inner : outer;
+        outline[i] = { std::cos(angle) * radius, std::sin(angle) * radius };
+    }
+
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+
+    // Caras delantera y trasera: abanico desde el centro.
+    for (const float z : { half, -half }) {
+        const XMFLOAT3 normal = { 0.0f, 0.0f, z > 0.0f ? 1.0f : -1.0f };
+        const int first = static_cast<int>(vertices.size());
+        vertices.push_back({ { 0.0f, 0.0f, z }, normal, white });
+        for (const XMFLOAT2& p : outline) vertices.push_back({ { p.x, p.y, z }, normal, white });
+        for (int i = 0; i < corners; ++i) addOutward(indices, vertices, first, first + 1 + i, first + 1 + (i + 1) % corners, center);
+    }
+
+    // Canto: un rectángulo por cada lado de la silueta.
+    for (int i = 0; i < corners; ++i) {
+        const XMFLOAT2& a = outline[i];
+        const XMFLOAT2& b = outline[(i + 1) % corners];
+        const float length = std::sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+        const XMFLOAT3 normal = { (b.y - a.y) / length, -(b.x - a.x) / length, 0.0f };
+
+        const int first = static_cast<int>(vertices.size());
+        vertices.push_back({ { a.x, a.y, half }, normal, white });
+        vertices.push_back({ { b.x, b.y, half }, normal, white });
+        vertices.push_back({ { a.x, a.y, -half }, normal, white });
+        vertices.push_back({ { b.x, b.y, -half }, normal, white });
+        addOutward(indices, vertices, first, first + 1, first + 2, center);
+        addOutward(indices, vertices, first + 2, first + 1, first + 3, center);
+    }
+    return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
+}
 
 void Renderer3D::init(ID3D11Device* device) {
     // 1. Shaders
@@ -412,6 +461,7 @@ void Renderer3D::init(ID3D11Device* device) {
     m_player = createPlayer(device);
     m_cube = createCube(device);
     m_sphere = createSphere(device);
+    m_star = createStar(device);
     m_draws.reserve(32);
 }
 
@@ -421,8 +471,8 @@ XMMATRIX Renderer3D::lightViewProj(const XMFLOAT3& lightDir) {
     return view * XMMatrixOrthographicLH(2.0f * kShadowHalfExtent, 2.0f * kShadowHalfExtent, kLightNear, kLightFar);
 }
 
-void Renderer3D::add(const Mesh& mesh, CXMMATRIX world, const XMFLOAT4& tint) {
-    Draw draw = { &mesh, {}, tint };
+void Renderer3D::add(const Mesh& mesh, CXMMATRIX world, const XMFLOAT4& tint, bool castsShadow) {
+    Draw draw = { &mesh, {}, tint, castsShadow };
     XMStoreFloat4x4(&draw.world, world);
     m_draws.push_back(draw);
 }
@@ -439,23 +489,44 @@ void Renderer3D::collect(const Scene& scene) {
     add(m_player, XMMatrixScaling(1.0f, scene.player.heightScale(), 1.0f) * XMMatrixTranslation(p.x, p.y, p.z), kWhite);
 
     for (const CaptureTarget& target : scene.targets) {
-        if (!target.visible()) continue;
-
         const float size = target.scale();
-        const XMFLOAT3 c = target.center();
-        add(m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), kTargetTint);
+        if (size > 0.001f) {
+            const XMFLOAT3 c = target.drawCenter();
+            add(m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), kTargetTint);
 
-        const float nose = size * 0.4f;
-        add(m_cube, XMMatrixScaling(nose, nose, nose) *
-            XMMatrixTranslation(c.x + std::sin(target.yaw()) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(target.yaw()) * size * 0.5f),
-            kNoseTint);
+            const float nose = size * 0.4f;
+            add(m_cube, XMMatrixScaling(nose, nose, nose) *
+                XMMatrixTranslation(c.x + std::sin(target.yaw()) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(target.yaw()) * size * 0.5f),
+                kNoseTint);
+        }
+
+        // Animación de captura: la bola (tambaleándose) y las estrellas, que brillan y no proyectan sombra.
+        if (const CaptureSequence* sequence = target.sequence()) {
+            addBall(sequence->ball(), sequence->ballTilt(), sequence->ballScale(), sequence->ballGlow());
+
+            const XMFLOAT3 color = sequence->starColor();
+            for (int i = 0; i < sequence->starCount(); ++i) {
+                XMFLOAT3 position;
+                float scale, spin;
+                sequence->star(i, position, scale, spin);
+                if (scale > 0.001f) {
+                    add(m_star, XMMatrixScaling(scale, scale, scale) * XMMatrixRotationY(spin) * XMMatrixTranslation(position.x, position.y, position.z),
+                        { color.x, color.y, color.z, 1.0f }, false);
+                }
+            }
+        }
     }
 
-    for (const Pokeball& ball : scene.balls) {
-        const XMFLOAT3& b = ball.body.position;
-        add(m_sphere, XMMatrixScaling(Pokeball::RADIUS, Pokeball::RADIUS, Pokeball::RADIUS) * XMMatrixTranslation(b.x, b.y, b.z),
-            { ball.color.x, ball.color.y, ball.color.z, 1.0f });
-    }
+    for (const Pokeball& ball : scene.balls) addBall(ball, 0.0f, 1.0f, 0.0f);
+}
+
+void Renderer3D::addBall(const Pokeball& ball, float tilt, float scale, float glow) {
+    if (scale <= 0.001f) return;
+
+    const XMFLOAT3& b = ball.body.position;
+    const float r = Pokeball::RADIUS * scale;
+    add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixRotationZ(tilt) * XMMatrixTranslation(b.x, b.y, b.z),
+        { ball.color.x, ball.color.y, ball.color.z, glow });
 }
 
 void Renderer3D::setObject(ID3D11DeviceContext* context, CXMMATRIX world, CXMMATRIX worldViewProj, const XMFLOAT4& tint) const {
@@ -475,8 +546,9 @@ void Renderer3D::drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) con
 }
 
 // Dibuja todos los objetos del mundo con la cámara dada (la de la luz o la del jugador).
-void Renderer3D::drawAll(ID3D11DeviceContext* context, CXMMATRIX viewProj) const {
+void Renderer3D::drawAll(ID3D11DeviceContext* context, CXMMATRIX viewProj, bool shadowPass) const {
     for (const Draw& draw : m_draws) {
+        if (shadowPass && !draw.castsShadow) continue;
         const XMMATRIX world = XMLoadFloat4x4(&draw.world);
         setObject(context, world, world * viewProj, draw.tint);
         drawIndexed(context, *draw.mesh);
@@ -505,7 +577,7 @@ void Renderer3D::renderShadowMap(ID3D11DeviceContext* context, CXMMATRIX lightVi
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context->VSSetShader(m_shadowVertexShader.Get(), nullptr, 0);
     context->PSSetShader(nullptr, nullptr, 0);
-    drawAll(context, lightViewProj);
+    drawAll(context, lightViewProj, true);
 
     context->RSSetState(nullptr);
     context->RSSetViewports(1, &viewport);
@@ -578,7 +650,7 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
 
     setObject(context, XMMatrixIdentity(), viewProj, kWhite);
     drawIndexed(context, m_floor);
-    drawAll(context, viewProj);
+    drawAll(context, viewProj, false);
 }
 
 void Renderer3D::cleanup() {
@@ -597,6 +669,7 @@ void Renderer3D::cleanup() {
     m_pixelShader.Reset();
     m_vertexShader.Reset();
     m_sphere = {};
+    m_star = {};
     m_cube = {};
     m_player = {};
     m_floor = {};
