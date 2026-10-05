@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "../../models/chestType.hpp"
+#include "../../models/gameData.hpp"
 #include "../world/inventory.hpp"
 
 // Avisos grandes en pantalla.
@@ -13,7 +13,11 @@ struct GameStatus {
     Notice notice = Notice::NONE;
     bool locked = false;        // cámara fijada a un objetivo
     const Inventory* inventory = nullptr; // inventario (válido durante el frame)
-    const ChestType* nearbyChest = nullptr;      // cofre cerrado al alcance del jugador (para el aviso de interacción)
+    const GameData* data = nullptr;              // datos de juego (nombres de objetos...)
+    bool aiming = false;                         // modo captura activo
+    bool canLock = false;                        // hay un pokémon al que fijar la cámara
+    const char* interactVerb = nullptr;          // acción disponible junto a un cofre o recurso ("Abrir", "Talar"...)
+    const std::string* interactTarget = nullptr; // sobre qué ("Cofre común", "Árbol"...)
     const std::string* rewardText = nullptr;     // texto de la última recompensa (con Notice::REWARD)
 
     // Pokémon al que se apunta dentro del rango de lanzamiento.

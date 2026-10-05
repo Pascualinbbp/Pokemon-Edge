@@ -77,6 +77,7 @@ class Renderer3D {
     void add(const Mesh& mesh, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint, bool castsShadow = true);
     void addBall(const Pokeball& ball, float tilt, float scale, float glow);
     void addChest(const Chest& chest);
+    void addNode(const ResourceNode& node);
     void setObject(ID3D11DeviceContext* context, DirectX::CXMMATRIX world, DirectX::CXMMATRIX worldViewProj,
         const DirectX::XMFLOAT4& tint) const;
     void drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) const;

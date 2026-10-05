@@ -517,9 +517,42 @@ void Renderer3D::collect(const Scene& scene) {
         }
     }
 
-    for (const Chest& chest : scene.chests.chests) addChest(chest);
+    for (const Chest& chest : scene.chests.entities) addChest(chest);
+    for (const ResourceNode& node : scene.nodes.entities) addNode(node);
 
     for (const Pokeball& ball : scene.balls) addBall(ball, 0.0f, 1.0f, 0.0f);
+}
+
+// Nodo de recolección: árbol (tronco y copa) o roca (bloques irregulares, con vetas si es mena). Se sacude al golpearlo.
+void Renderer3D::addNode(const ResourceNode& node) {
+    const ResourceStyle::Look look = ResourceStyle::look(node.typeId());
+    const XMFLOAT3& p = node.body.position;
+    const float s = node.scale();
+    const XMMATRIX place = XMMatrixTranslation(node.shakeOffset(), 0.0f, 0.0f) * XMMatrixScaling(s, s, s) *
+                           XMMatrixRotationY(node.yaw()) * XMMatrixTranslation(p.x, p.y, p.z);
+
+    // Bloque (tamaño, giro, posición local, color, brillo).
+    const auto part = [&](const XMFLOAT3& size, float yaw, const XMFLOAT3& at, const XMFLOAT3& color, float glow) {
+        add(m_cube, XMMatrixScaling(size.x, size.y, size.z) * XMMatrixRotationY(yaw) * XMMatrixTranslation(at.x, at.y, at.z) * place,
+            { color.x, color.y, color.z, glow });
+    };
+
+    if (look.shape == ResourceStyle::Shape::TREE) {
+        part({ 0.5f, 1.9f, 0.5f }, 0.0f, { 0.0f, 0.95f, 0.0f }, look.body, 0.0f);
+        part({ 2.3f, 1.5f, 2.3f }, 0.0f, { 0.0f, 2.65f, 0.0f }, look.accent, 0.0f);
+        part({ 1.5f, 1.2f, 1.5f }, 0.785f, { 0.0f, 3.65f, 0.0f }, look.accent, 0.0f);
+        return;
+    }
+
+    part({ 1.6f, 0.95f, 1.4f }, 0.4f, { 0.0f, 0.475f, 0.0f }, look.body, 0.0f);
+    part({ 0.9f, 0.75f, 0.9f }, 1.1f, { 0.5f, 0.375f, -0.3f }, look.body, 0.0f);
+    part({ 0.7f, 0.6f, 0.7f }, 0.3f, { -0.55f, 0.3f, 0.4f }, look.body, 0.0f);
+    if (look.specks) {
+        part({ 0.3f, 0.3f, 0.3f }, 0.6f, { 0.2f, 0.95f, 0.1f }, look.accent, 0.35f);
+        part({ 0.28f, 0.28f, 0.28f }, 0.2f, { 0.85f, 0.45f, 0.1f }, look.accent, 0.35f);
+        part({ 0.3f, 0.3f, 0.3f }, 0.9f, { -0.15f, 0.5f, 0.7f }, look.accent, 0.35f);
+        part({ 0.26f, 0.26f, 0.26f }, 0.4f, { 0.5f, 0.75f, -0.3f }, look.accent, 0.35f);
+    }
 }
 
 // Cofre: cuerpo, cerradura y tapa con bisagra atrás; al abrirse suelta chispas del color de su rareza.

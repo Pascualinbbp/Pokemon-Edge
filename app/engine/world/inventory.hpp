@@ -40,6 +40,10 @@ class Inventory {
         return false;
     }
 
+    // Recorre todos los objetos con sus unidades: f(const Item&, int count).
+    template <typename F>
+    void forEach(F f) const { for (const Slot& slot : m_slots) f(*slot.item, slot.count); }
+
     // --- Pokéballs ---
     bool hasBalls() const { return !m_balls.empty(); }
     int ballCount() const { return static_cast<int>(m_balls.size()); }

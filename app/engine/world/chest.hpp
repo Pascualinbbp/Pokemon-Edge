@@ -47,6 +47,7 @@ class Chest {
     }
 
     int spot() const { return m_spot; } // punto de aparición del que salió
+    float reach() const { return INTERACT_RANGE; } // distancia máxima (desde el centro) a la que el jugador puede abrirlo
     int typeIndex() const { return m_type; }
     int rarity() const { return m_rarity; }
     float yaw() const { return m_yaw; }

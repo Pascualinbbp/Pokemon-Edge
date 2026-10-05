@@ -23,27 +23,6 @@ namespace ControlsComponent {
         inline constexpr PadLayout PLAYSTATION_LAYOUT = { 322.0f, 150.0f, 262.0f, 438.0f, 150.0f, 262.0f, 292.0f, 102.0f, 468.0f, 102.0f };
         inline constexpr PadLayout XBOX_LAYOUT        = { 292.0f, 102.0f, 102.0f, 420.0f, 150.0f, 262.0f, 338.0f, 150.0f, 468.0f, 102.0f };
 
-        inline constexpr const char* NOTES_KEYBOARD[] = {
-            "Agacharse: pulsa SHIFT (otra vez para levantarte). Corriendo, SHIFT inicia un deslizamiento corto sin mantener la tecla.",
-            "Durante el deslizamiento, A y D cambian la dirección. Saltar desde un deslizamiento conserva el impulso.",
-            "Apuntar: clic derecho (otra vez o ESC para salir). Lanzar Pokéball: clic izquierdo mientras apuntas.",
-            "Q / E o la rueda del ratón (apuntando): cambian de Pokéball. Cada tipo tiene un ratio de captura distinto.",
-            "TAB: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
-            "Más captura: x1.15 por la espalda del pokémon y x1.25 si vas agachado sin que te detecte.",
-            "F: abre el cofre que tengas cerca. Cada cofre da una recompensa al azar; los raros y épicos son más difíciles de ver.",
-            "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
-        };
-        inline constexpr const char* NOTES_GAMEPAD[] = {
-            "Agacharse: pulsa el botón derecho (otra vez para levantarte). Corriendo (L3), inicia un deslizamiento corto.",
-            "Durante el deslizamiento, inclina el stick izquierdo a un lado para girar. Saltar desde él conserva el impulso.",
-            "Apuntar: mantén L2. Lanzar Pokéball: R2 mientras apuntas. L1 / R1 (apuntando): cambian de Pokéball.",
-            "R3: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
-            "Más captura: x1.15 por la espalda del pokémon y x1.25 si vas agachado sin que te detecte.",
-            "Botón izquierdo (cuadrado en PlayStation, X en Xbox): abre el cofre que tengas cerca.",
-            "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
-            "Menús: stick izquierdo o cruceta para moverte, botón inferior para aceptar y botón derecho para volver.",
-        };
-
         inline const char* title(InputDevice device) {
             switch (device) {
                 case InputDevice::XBOX:        return "CONTROLES: MANDO DE XBOX";
@@ -71,7 +50,7 @@ namespace ControlsComponent {
             keyRow(dl, offset(o, 420.0f, 30.0f), { "ESPACIO" }, "Saltar", 150.0f);
             keyRow(dl, offset(o, 420.0f, 90.0f), { "ESC" }, "Pausa / Salir de apuntar", 60.0f);
             keyRow(dl, offset(o, 420.0f, 150.0f), { "TAB" }, "Fijar objetivo (mantener: soltar)", 60.0f);
-            keyRow(dl, offset(o, 420.0f, 264.0f), { "F" }, "Abrir cofre cercano");
+            keyRow(dl, offset(o, 420.0f, 264.0f), { "F" }, "Interactuar");
             mouse(dl, offset(o, 440.0f, 204.0f));
             label(dl, o.x + 504.0f, o.y + 206.0f, "Mover la cámara");
             label(dl, o.x + 504.0f, o.y + 228.0f, "Der.: apuntar · Izq.: lanzar");
@@ -157,6 +136,7 @@ namespace ControlsComponent {
             callout(475.0f, 64.0f, 64.0f, 550.0f, "Pokéball siguiente (R1)");
             callout(fx + 27.0f, fy, fy, 550.0f, "Agacharse / Deslizarse");
             callout(fx, fy + 27.0f, fy + 58.0f, 550.0f, "Saltar");
+            callout(fx - 17.0f, fy, fy + 103.0f, 550.0f, "Interactuar");
             callout(pauseX, pauseY, 14.0f, 550.0f, "Pausa");
         }
     }
@@ -176,9 +156,6 @@ namespace ControlsComponent {
         dl->AddRectFilled(origin, GuiDraw::offset(origin, detail::PANEL_WIDTH, detail::PANEL_HEIGHT), GuiStyle::PANEL, 12.0f);
         if (isGamepad(device)) detail::drawGamepad(dl, origin, device);
         else detail::drawKeyboard(dl, origin);
-
-        if (isGamepad(device)) for (const char* line : detail::NOTES_GAMEPAD) GuiLayout::centeredText(line, GuiStyle::MUTED);
-        else for (const char* line : detail::NOTES_KEYBOARD) GuiLayout::centeredText(line, GuiStyle::MUTED);
 
         GuiLayout::gap(GuiLayout::GAP_SMALL);
         if (GuiInput::backButton()) state = GameState::PAUSED;

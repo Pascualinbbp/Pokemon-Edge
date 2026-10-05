@@ -6,32 +6,45 @@
 // Ayudas de "qué botón pulsar" dentro del juego. El icono depende del dispositivo en uso, así que
 // cambian solas al pasar de teclado a mando (y de un mando a otro).
 namespace GuiPrompts {
-    enum class Action { JUMP, CROUCH, SPRINT, PAUSE, AIM, THROW, LOCK };
+    enum class Action { JUMP, CROUCH, SPRINT, PAUSE, AIM, THROW, LOCK, BALL_SWITCH, INTERACT };
 
     namespace detail {
         inline constexpr float HEIGHT = 24.0f;
         inline constexpr float RADIUS = 12.0f;
 
+        // Acciones que en el mando son un botón frontal (se dibujan como tal).
+        inline bool faceButtonOf(Action action, GuiDraw::Face& face) {
+            switch (action) {
+                case Action::JUMP:     face = GuiDraw::Face::SOUTH; return true;
+                case Action::CROUCH:   face = GuiDraw::Face::EAST;  return true;
+                case Action::INTERACT: face = GuiDraw::Face::WEST;  return true;
+                default:               return false;
+            }
+        }
+
         // Texto de la tecla o botón cuando no se dibuja como botón frontal.
         inline const char* keyText(Action action, InputDevice device) {
             if (!isGamepad(device)) {
                 switch (action) {
-                    case Action::JUMP:   return "ESPACIO";
-                    case Action::CROUCH: return "SHIFT";
-                    case Action::SPRINT: return "W W";
-                    case Action::PAUSE:  return "ESC";
-                    case Action::AIM:    return "CLIC DER.";
-                    case Action::THROW:  return "CLIC IZQ.";
-                    case Action::LOCK:   return "TAB";
+                    case Action::JUMP:        return "ESPACIO";
+                    case Action::CROUCH:      return "SHIFT";
+                    case Action::SPRINT:      return "W W";
+                    case Action::PAUSE:       return "ESC";
+                    case Action::AIM:         return "CLIC DER.";
+                    case Action::THROW:       return "CLIC IZQ.";
+                    case Action::LOCK:        return "TAB";
+                    case Action::BALL_SWITCH: return "Q / E";
+                    case Action::INTERACT:    return "F";
                 }
             }
             switch (action) {
-                case Action::SPRINT: return "L3";
-                case Action::PAUSE:  return device == InputDevice::XBOX ? "MENU" : "OPTIONS";
-                case Action::AIM:    return "L2";
-                case Action::THROW:  return "R2";
-                case Action::LOCK:   return "R3";
-                default:             return "";
+                case Action::SPRINT:      return "L3";
+                case Action::PAUSE:       return device == InputDevice::XBOX ? "MENU" : "OPTIONS";
+                case Action::AIM:         return "L2";
+                case Action::THROW:       return "R2";
+                case Action::LOCK:        return "R3";
+                case Action::BALL_SWITCH: return "L1 / R1";
+                default:                  return "";
             }
         }
     }
@@ -41,10 +54,9 @@ namespace GuiPrompts {
         using namespace GuiDraw;
 
         float iconWidth;
-        const bool faceAction = action == Action::JUMP || action == Action::CROUCH;
-        if (isGamepad(device) && faceAction) {
-            faceButton(dl, ImVec2(pos.x + detail::RADIUS, pos.y + detail::HEIGHT * 0.5f),
-                action == Action::JUMP ? Face::SOUTH : Face::EAST, device == InputDevice::XBOX, true, detail::RADIUS);
+        Face face;
+        if (isGamepad(device) && detail::faceButtonOf(action, face)) {
+            faceButton(dl, ImVec2(pos.x + detail::RADIUS, pos.y + detail::HEIGHT * 0.5f), face, device == InputDevice::XBOX, true, detail::RADIUS);
             iconWidth = detail::RADIUS * 2.0f;
         } else {
             iconWidth = keycap(dl, pos, detail::keyText(action, device), detail::HEIGHT, detail::HEIGHT);

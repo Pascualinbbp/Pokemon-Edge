@@ -10,7 +10,7 @@
 #include "../physics/physicsWorld.hpp"
 #include "../../models/gameData.hpp"
 #include "camera.hpp"
-#include "chestField.hpp"
+#include "chestSpawn.hpp"
 #include "captureRules.hpp"
 #include "captureTarget.hpp"
 #include "chestRules.hpp"
@@ -18,6 +18,8 @@
 #include "inventory.hpp"
 #include "player.hpp"
 #include "pokeball.hpp"
+#include "resourceSpawn.hpp"
+#include "spawnField.hpp"
 
 struct Scene {
     static constexpr float HALF_SIZE = Physics::World::HALF_SIZE;
@@ -43,7 +45,8 @@ struct Scene {
     std::vector<Pokeball> balls;
     DayCycle dayCycle;
     Inventory inventory;
-    ChestField chests;
+    SpawnField<Chest> chests;
+    SpawnField<ResourceNode> nodes;
     std::string rewardText; // recompensa del último cofre abierto
 
     int captures = 0;
@@ -56,7 +59,8 @@ struct Scene {
     // Dos paredes sencillas, más altas que el personaje: bloquean el paso, las pokéballs y la luz.
     explicit Scene(const GameData& gameData = GameData::empty()) : m_data(&gameData) {
         inventory.setData(gameData);
-        chests.setup(gameData);
+        chests.setup(ChestSpawn::COUNT);
+        nodes.setup(ResourceSpawn::COUNT);
         world.obstacles = {
             { {  6.0f, 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
             { { -7.0f, 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
@@ -86,7 +90,8 @@ struct Scene {
         world.creatures.clear();
         for (const CaptureTarget& target : targets) if (target.hittable()) world.creatures.push_back(target.solid());
         world.props.clear();
-        for (const Chest& chest : chests.chests) if (chest.closed()) world.props.push_back(chest.solid());
+        for (const Chest& chest : chests.entities) if (chest.closed()) world.props.push_back(chest.solid());
+        for (const ResourceNode& node : nodes.entities) if (!node.depleted()) world.props.push_back(node.solid());
 
         player.aiming = m_aiming;
         player.update(dt, input, camera.yaw(), world);
@@ -97,9 +102,14 @@ struct Scene {
 
         for (CaptureTarget& target : targets) handleCaptureEvent(target, target.update(dt, world));
         updateBalls(dt);
-        chests.update(dt, world);
-        updateNearbyChest();
-        if (input.interact && m_nearChest >= 0) openChest(m_nearChest);
+        chests.update(dt, ChestSpawn::DELAY,
+            [&](Chest& chest) { world.step(chest.body, dt); chest.update(dt); },
+            [&](int spot) { return ChestSpawn::make(*m_data, spot); });
+        nodes.update(dt, ResourceSpawn::DELAY,
+            [&](ResourceNode& node) { world.step(node.body, dt); node.update(dt); },
+            [&](int spot) { return ResourceSpawn::make(*m_data, spot); });
+        updateInteraction();
+        if (input.interact) interact();
         updateAimInfo();
         return pause;
     }
@@ -115,7 +125,17 @@ struct Scene {
         s.notice = noticeTime > 0.0f ? notice : Notice::NONE;
         s.locked = lockedIndex >= 0;
         s.inventory = &inventory;
-        if (m_nearChest >= 0) s.nearbyChest = &m_data->chests[chests.chests[m_nearChest].typeIndex()];
+        s.data = m_data;
+        s.aiming = m_aiming;
+        s.canLock = anyLockable();
+        if (m_interaction.kind == Interaction::CHEST) {
+            s.interactVerb = CHEST_VERB;
+            s.interactTarget = &m_data->chests[chests.entities[m_interaction.index].typeIndex()].name;
+        } else if (m_interaction.kind == Interaction::NODE) {
+            const ResourceNodeType& type = m_data->nodes[nodes.entities[m_interaction.index].typeIndex()];
+            s.interactVerb = type.action.c_str();
+            s.interactTarget = &type.name;
+        }
         if (notice == Notice::REWARD) s.rewardText = &rewardText;
         if (m_aimTarget >= 0) {
             const CaptureTarget& t = targets[m_aimTarget];
@@ -158,34 +178,57 @@ struct Scene {
         }
     }
 
-    // --- Cofres ---
-    // Cofre cerrado más cercano dentro del alcance del jugador (-1 si ninguno).
-    void updateNearbyChest() {
-        m_nearChest = -1;
-        float best = Chest::INTERACT_RANGE * Chest::INTERACT_RANGE;
-        for (size_t i = 0; i < chests.chests.size(); ++i) {
-            const Chest& chest = chests.chests[i];
-            if (!chest.closed()) continue;
-            const float dx = chest.body.position.x - player.body.position.x;
-            const float dz = chest.body.position.z - player.body.position.z;
+    // --- Interacción (cofres y recursos) ---
+    // Lo interactuable más cercano de la lista que esté al alcance del jugador: devuelve su índice y deja la distancia² en best.
+    template <typename Entity, typename Usable>
+    int nearestIn(const std::vector<Entity>& list, Usable usable, float& best) const {
+        int index = -1;
+        for (size_t i = 0; i < list.size(); ++i) {
+            if (!usable(list[i])) continue;
+            const float dx = list[i].body.position.x - player.body.position.x;
+            const float dz = list[i].body.position.z - player.body.position.z;
             const float d2 = dx * dx + dz * dz;
-            if (d2 <= best) {
+            if (d2 <= list[i].reach() * list[i].reach() && d2 < best) {
                 best = d2;
-                m_nearChest = static_cast<int>(i);
+                index = static_cast<int>(i);
             }
         }
+        return index;
+    }
+
+    void updateInteraction() {
+        float best = 1.0e9f;
+        m_interaction = {};
+        if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
+        if (const int i = nearestIn(nodes.entities, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) m_interaction = { Interaction::NODE, i };
+    }
+
+    void interact() {
+        if (m_interaction.kind == Interaction::CHEST) openChest(chests.entities[m_interaction.index]);
+        else if (m_interaction.kind == Interaction::NODE) hitNode(nodes.entities[m_interaction.index]);
+    }
+
+    // Suma 'quantity' unidades de un objeto al inventario y lo anuncia.
+    void giveReward(int itemId, int quantity) {
+        if (!inventory.add(itemId, quantity)) return;
+        const Item* item = m_data->item(itemId);
+        rewardText = std::to_string(quantity) + "x " + (item ? m_data->itemName(*item) : std::string("?"));
+        showNotice(Notice::REWARD);
     }
 
     // Abre el cofre: una recompensa al azar de las de su tipo, directa al inventario.
-    void openChest(int index) {
-        Chest& chest = chests.chests[index];
+    void openChest(Chest& chest) {
         const ChestReward* reward = ChestRules::pickReward(m_data->chests[chest.typeIndex()]);
         chest.open();
-        if (!reward || !inventory.add(reward->itemId, reward->quantity)) return;
+        if (reward) giveReward(reward->itemId, reward->quantity);
+    }
 
-        const Item* item = m_data->item(reward->itemId);
-        rewardText = std::to_string(reward->quantity) + "x " + (item ? m_data->itemName(*item) : std::string("?"));
-        showNotice(Notice::REWARD);
+    // Un golpe al recurso; al agotarlo da su material.
+    void hitNode(ResourceNode& node) {
+        if (!node.hit() || !node.depleted()) return;
+        const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
+        const Item* item = m_data->materialItem(type.materialId);
+        if (item) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
     }
 
     // --- Fijado de cámara ---
@@ -349,8 +392,22 @@ struct Scene {
         balls.erase(std::remove_if(balls.begin(), balls.end(), [](const Pokeball& b) { return b.expired(); }), balls.end());
     }
 
+    struct Interaction {
+        enum Kind { NONE, CHEST, NODE } kind = NONE;
+        int index = -1;
+    };
+
+    // Hay algún pokémon al alcance al que fijar la cámara (o ya hay uno fijado).
+    bool anyLockable() const {
+        if (lockedIndex >= 0) return true;
+        for (int i = 0; i < TARGET_COUNT; ++i) if (targets[i].hittable() && distanceXZ(targets[i]) <= RANGE) return true;
+        return false;
+    }
+
+    static constexpr const char* CHEST_VERB = "Abrir";
+
     const GameData* m_data;
-    int m_nearChest = -1;  // cofre al alcance del jugador (índice en chests.chests)
+    Interaction m_interaction; // lo que el jugador puede usar ahora mismo (cofre o recurso cercano)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
     int m_aimTarget = -1;  // pokémon al que apunta la cruceta dentro del alcance
 };

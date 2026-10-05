@@ -17,7 +17,7 @@ class ChestDao {
             const int chestId = DaoRow::integer(row, "chest_id");
             for (ChestType& chest : chests) {
                 if (chest.id == chestId) {
-                    chest.rewards.push_back({ DaoRow::integer(row, "item_id"), DaoRow::integer(row, "quantity") });
+                    chest.rewards.push_back({ DaoRow::integer(row, "item_id"), DaoRow::integer(row, "quantity"), DaoRow::real(row, "probability") });
                     break;
                 }
             }
@@ -28,5 +28,5 @@ class ChestDao {
 
     private:
     static constexpr const char* SELECT_CHESTS = "SELECT id, name, rarity_id, spawn_weight FROM chest ORDER BY id;";
-    static constexpr const char* SELECT_REWARDS = "SELECT chest_id, item_id, quantity FROM chest_reward ORDER BY id;";
+    static constexpr const char* SELECT_REWARDS = "SELECT chest_id, item_id, quantity, probability FROM chest_reward ORDER BY id;";
 };

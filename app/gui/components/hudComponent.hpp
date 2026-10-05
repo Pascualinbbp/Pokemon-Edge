@@ -142,18 +142,55 @@ namespace HudComponent {
             }
         }
 
-        // Aviso de interacción con un cofre cercano: tecla (o botón) + "Abrir <cofre>".
-        inline void drawChestPrompt(ImDrawList* dl, const ChestType& chest, InputDevice device) {
-            const ImVec2 screen = ImGui::GetIO().DisplaySize;
-            char buffer[96];
-            std::snprintf(buffer, sizeof(buffer), "Abrir %s", chest.name.c_str());
+        // Ayudas de controles contextuales (a la izquierda): las básicas siempre y, según lo que se haga, las del modo
+        // captura o la de interactuar con lo que hay cerca. El icono cambia solo según el dispositivo en uso.
+        inline void drawHints(ImDrawList* dl, const GameStatus& status, InputDevice device) {
+            using GuiPrompts::Action;
+            struct Hint {
+                Action action;
+                char text[64];
+            };
+            Hint hints[8];
+            int count = 0;
+            const auto add = [&](Action action, const char* text) {
+                hints[count].action = action;
+                std::snprintf(hints[count].text, sizeof(hints[count].text), "%s", text);
+                ++count;
+            };
 
-            constexpr float SCALE = 1.1f;
-            const float textWidth = ImGui::CalcTextSize(buffer).x * SCALE;
-            const ImVec2 center(screen.x * 0.5f + 18.0f, screen.y * 0.62f);
-            const char* key = !isGamepad(device) ? "F" : device == InputDevice::XBOX ? "X" : "SQ";
-            GuiDraw::keycap(dl, ImVec2(center.x - textWidth * 0.5f - 36.0f, center.y - 6.0f), key, 28.0f, 28.0f);
-            centered(dl, center, buffer, SCALE, IM_COL32(255, 255, 255, 255));
+            if (status.interactVerb && status.interactTarget) {
+                char text[64];
+                std::snprintf(text, sizeof(text), "%s %s", status.interactVerb, status.interactTarget->c_str());
+                add(Action::INTERACT, text);
+            }
+            if (status.aiming) {
+                add(Action::THROW, "Lanzar Pokéball");
+                if (status.inventory && status.inventory->ballCount() > 1) add(Action::BALL_SWITCH, "Cambiar de Pokéball");
+                if (status.canLock) add(Action::LOCK, status.locked ? "Cambiar objetivo" : "Fijar objetivo");
+                add(Action::AIM, "Salir del modo captura");
+            } else {
+                add(Action::JUMP, "Saltar");
+                add(Action::CROUCH, "Agacharse");
+                add(Action::SPRINT, "Correr");
+                add(Action::AIM, "Modo captura");
+                add(Action::PAUSE, "Pausa");
+            }
+
+            constexpr float ROW = 32.0f;
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            ImVec2 pos(24.0f, screen.y * 0.5f - ROW * static_cast<float>(count) * 0.5f);
+            for (int i = 0; i < count; ++i) {
+                GuiPrompts::draw(dl, pos, hints[i].action, hints[i].text, device);
+                pos.y += ROW;
+            }
+        }
+
+        // Materiales y demás objetos que no son pokéballs (solo los que se tienen), bajo el contador de capturas.
+        inline void drawMaterials(const GameStatus& status) {
+            if (!status.inventory || !status.data) return;
+            status.inventory->forEach([&](const Item& item, int count) {
+                if (item.category != ItemCategory::POKEBALL && count > 0) ImGui::Text("%s: %d", status.data->itemName(item).c_str(), count);
+            });
         }
 
         // Mira redonda (anillo con punto central); cambia de color al apuntar a un pokémon en rango.
@@ -197,19 +234,9 @@ namespace HudComponent {
         ImGui::SetCursorPos(ImVec2(10.0f, 10.0f));
         ImGui::Text("FPS: %.0f", ImGui::GetIO().Framerate);
 
-        // Ayudas de controles: el icono cambia solo según el dispositivo en uso.
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        ImVec2 pos = ImGui::GetCursorScreenPos();
-        pos.y += 6.0f;
-        pos.x += GuiPrompts::draw(dl, pos, GuiPrompts::Action::JUMP, "Saltar", device) + 24.0f;
-        pos.x += GuiPrompts::draw(dl, pos, GuiPrompts::Action::CROUCH, "Agacharse", device) + 24.0f;
-        pos.x += GuiPrompts::draw(dl, pos, GuiPrompts::Action::AIM, "Apuntar", device) + 24.0f;
-        pos.x += GuiPrompts::draw(dl, pos, GuiPrompts::Action::THROW, "Lanzar", device) + 24.0f;
-        pos.x += GuiPrompts::draw(dl, pos, GuiPrompts::Action::LOCK, "Fijar", device) + 24.0f;
-        GuiPrompts::draw(dl, pos, GuiPrompts::Action::PAUSE, "Pausa", device);
-
-        ImGui::Dummy(ImVec2(0.0f, 36.0f));
         ImGui::Text("Capturas: %d", status.captures);
+        detail::drawMaterials(status);
 
         if (saving > 0.0f) detail::drawSaving(dl, saving);
 
@@ -218,7 +245,7 @@ namespace HudComponent {
             if (status.inventory && status.inventory->hasBalls()) detail::drawBallSelector(dl, status, device);
         }
 
-        if (status.nearbyChest) detail::drawChestPrompt(dl, *status.nearbyChest, device);
+        detail::drawHints(dl, status, device);
 
         if (status.notice != Notice::NONE) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
