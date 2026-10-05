@@ -16,6 +16,7 @@ class Inventory {
     };
 
     void setData(const GameData& data) {
+        m_data = &data;
         m_slots.clear();
         m_balls.clear();
         m_slots.reserve(data.items.size());
@@ -59,16 +60,16 @@ class Inventory {
     // --- Guardado (por nombre de objeto) ---
     void store(std::map<std::string, int>& counts, std::string& selectedName) const {
         counts.clear();
-        for (const Slot& slot : m_slots) counts[slot.item->name] = slot.count;
-        selectedName = hasBalls() ? m_slots[m_balls[m_selected].slot].item->name : std::string();
+        for (const Slot& slot : m_slots) counts[m_data->itemName(*slot.item)] = slot.count;
+        selectedName = hasBalls() ? m_data->itemName(*m_slots[m_balls[m_selected].slot].item) : std::string();
     }
 
     // Los objetos que no aparecen en el guardado conservan sus unidades iniciales.
     void restore(const std::map<std::string, int>& counts, const std::string& selectedName) {
         for (Slot& slot : m_slots) {
-            if (const auto it = counts.find(slot.item->name); it != counts.end()) slot.count = it->second < 0 ? 0 : it->second;
+            if (const auto it = counts.find(m_data->itemName(*slot.item)); it != counts.end()) slot.count = it->second < 0 ? 0 : it->second;
         }
-        for (int i = 0; i < ballCount(); ++i) if (m_slots[m_balls[i].slot].item->name == selectedName) m_selected = i;
+        for (int i = 0; i < ballCount(); ++i) if (m_data->itemName(*m_slots[m_balls[i].slot].item) == selectedName) m_selected = i;
     }
 
     private:
@@ -81,6 +82,7 @@ class Inventory {
         const PokeballType* type;
     };
 
+    const GameData* m_data = &GameData::empty();
     std::vector<Slot> m_slots;
     std::vector<BallRef> m_balls;
     int m_selected = 0;

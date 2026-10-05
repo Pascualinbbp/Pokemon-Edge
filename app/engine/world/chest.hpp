@@ -41,12 +41,12 @@ class Chest {
 
     Physics::Body body;
 
-    Chest(int zone, int typeIndex, int rarity, const DirectX::XMFLOAT3& position, float yaw)
-        : m_zone(zone), m_type(typeIndex), m_rarity(rarity), m_yaw(yaw) {
+    Chest(int spot, int typeIndex, int rarity, const DirectX::XMFLOAT3& position, float yaw)
+        : m_spot(spot), m_type(typeIndex), m_rarity(rarity), m_yaw(yaw) {
         body.position = position; // sin radio de colisión: es el mundo quien lo ve a él (props), no al revés
     }
 
-    int zone() const { return m_zone; }
+    int spot() const { return m_spot; } // punto de aparición del que salió
     int typeIndex() const { return m_type; }
     int rarity() const { return m_rarity; }
     float yaw() const { return m_yaw; }
@@ -98,7 +98,7 @@ class Chest {
         return x * x * (3.0f - 2.0f * x);
     }
 
-    int m_zone;
+    int m_spot;
     int m_type;
     int m_rarity;
     float m_yaw;

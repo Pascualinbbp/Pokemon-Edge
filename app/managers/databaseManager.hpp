@@ -42,7 +42,6 @@ class DatabaseManager {
         data.balls = pokeballDaoInstance.findAll();
         data.items = itemDaoInstance.findAll();
         data.chests = chestDaoInstance.findAll();
-        data.zones = chestDaoInstance.findZones();
         return data;
     }
 };

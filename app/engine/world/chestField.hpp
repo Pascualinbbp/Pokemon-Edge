@@ -7,70 +7,63 @@
 #include "chest.hpp"
 #include "chestRules.hpp"
 
-// Aparición de cofres en las zonas de la base de datos: un cofre a la vez por zona y un máximo de apariciones
-// por día del juego. Al abrirse un cofre, el siguiente tarda un tiempo aleatorio en aparecer.
+// Aparición de cofres para las pruebas, igual que los pokémon: puntos fijos del mundo. En cada punto hay un cofre
+// (de un tipo elegido al azar según spawn_weight); al abrirlo, el punto tarda un rato en generar otro.
 class ChestField {
     public:
-    static constexpr float RESPAWN_MIN = 20.0f; // segundos tras abrir un cofre hasta que la zona puede generar otro
-    static constexpr float RESPAWN_MAX = 45.0f;
+    static constexpr float RESPAWN_DELAY = 20.0f; // segundos desde que se abre un cofre hasta que aparece otro en su punto
 
     std::vector<Chest> chests;
 
     void setup(const GameData& data) {
         m_data = &data;
         chests.clear();
-        m_zones.assign(data.zones.size(), {});
+        m_timers.assign(SPOT_COUNT, 0.0f); // 0 = aparece en cuanto empieza la partida
     }
 
-    void update(float dt, int day, const Physics::World& world) {
+    void update(float dt, const Physics::World& world) {
         if (!m_data) return;
 
         for (Chest& chest : chests) {
             world.step(chest.body, dt);
             chest.update(dt);
+            if (chest.finished()) m_timers[chest.spot()] = RESPAWN_DELAY;
         }
-        for (const Chest& chest : chests) if (chest.finished()) m_zones[chest.zone()].timer = RandomUtil::range(RESPAWN_MIN, RESPAWN_MAX);
         chests.erase(std::remove_if(chests.begin(), chests.end(), [](const Chest& chest) { return chest.finished(); }), chests.end());
 
-        for (size_t i = 0; i < m_zones.size(); ++i) {
-            ZoneState& state = m_zones[i];
-            if (state.day != day) {
-                state.day = day;
-                state.spawned = 0;
-            }
-            if (occupied(static_cast<int>(i)) || state.spawned >= m_data->zones[i].maxPerDay) continue;
-
-            state.timer -= dt;
-            if (state.timer <= 0.0f) spawn(static_cast<int>(i));
+        for (int spot = 0; spot < SPOT_COUNT; ++spot) {
+            if (occupied(spot)) continue;
+            m_timers[spot] -= dt;
+            if (m_timers[spot] <= 0.0f) spawn(spot);
         }
     }
 
     private:
-    struct ZoneState {
-        int day = -1;
-        int spawned = 0;   // cofres que ha generado hoy
-        float timer = 0.0f; // segundos hasta el próximo (0 = en cuanto se pueda)
+    // Posición (x, z) de cada punto de aparición. El jugador empieza en el origen mirando a +Z.
+    static constexpr float SPOTS[][2] = {
+        {   5.0f,  -6.0f },
+        {  -3.0f,   8.0f },
+        {  11.0f,   1.0f },
+        { -12.0f,  -9.0f },
     };
+    static constexpr int SPOT_COUNT = static_cast<int>(sizeof(SPOTS) / sizeof(SPOTS[0]));
 
-    bool occupied(int zone) const {
-        for (const Chest& chest : chests) if (chest.zone() == zone) return true;
+    bool occupied(int spot) const {
+        for (const Chest& chest : chests) if (chest.spot() == spot) return true;
         return false;
     }
 
-    void spawn(int zone) {
+    void spawn(int spot) {
         const int type = ChestRules::pickType(m_data->chests);
-        ZoneState& state = m_zones[zone];
         if (type < 0) {
-            state.spawned = m_data->zones[zone].maxPerDay; // sin tipos de cofre no hay nada que generar hoy
+            m_timers[spot] = RESPAWN_DELAY; // sin tipos de cofre no hay nada que generar: se reintenta más tarde
             return;
         }
 
-        const ChestZone& place = m_data->zones[zone];
-        const float yaw = std::atan2(-place.x, -place.z); // de cara al centro del mundo
-        chests.emplace_back(zone, type, m_data->chests[type].rarity, DirectX::XMFLOAT3{ place.x, 0.0f, place.z }, yaw);
-        ++state.spawned;
+        const float x = SPOTS[spot][0], z = SPOTS[spot][1];
+        chests.emplace_back(spot, type, m_data->chests[type].rarity, DirectX::XMFLOAT3{ x, 0.0f, z }, std::atan2(-x, -z)); // de cara al centro
     }
 
     const GameData* m_data = nullptr;
-    std::vector<ZoneState> m_zones;
+    std::vector<float> m_timers;
 };

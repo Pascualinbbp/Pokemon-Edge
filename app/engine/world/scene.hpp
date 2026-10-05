@@ -97,7 +97,7 @@ struct Scene {
 
         for (CaptureTarget& target : targets) handleCaptureEvent(target, target.update(dt, world));
         updateBalls(dt);
-        chests.update(dt, dayCycle.day(), world);
+        chests.update(dt, world);
         updateNearbyChest();
         if (input.interact && m_nearChest >= 0) openChest(m_nearChest);
         updateAimInfo();
@@ -184,7 +184,7 @@ struct Scene {
         if (!reward || !inventory.add(reward->itemId, reward->quantity)) return;
 
         const Item* item = m_data->item(reward->itemId);
-        rewardText = std::to_string(reward->quantity) + "x " + (item ? item->name : std::string("?"));
+        rewardText = std::to_string(reward->quantity) + "x " + (item ? m_data->itemName(*item) : std::string("?"));
         showNotice(Notice::REWARD);
     }
 

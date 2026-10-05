@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 #include <vector>
 #include "chestType.hpp"
 #include "item.hpp"
@@ -9,7 +10,6 @@ struct GameData {
     std::vector<Item> items;
     std::vector<PokeballType> balls;
     std::vector<ChestType> chests;
-    std::vector<ChestZone> zones;
 
     static const GameData& empty() {
         static const GameData data;
@@ -24,5 +24,12 @@ struct GameData {
     const Item* item(int id) const {
         for (const Item& entry : items) if (entry.id == id) return &entry;
         return nullptr;
+    }
+
+    // Nombre del objeto, que vive en la tabla de su categoría.
+    const std::string& itemName(const Item& item) const {
+        static const std::string unknown = "?";
+        if (item.category == ItemCategory::POKEBALL) if (const PokeballType* type = ball(item.refId)) return type->name;
+        return unknown;
     }
 };

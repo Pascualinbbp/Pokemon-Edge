@@ -10,9 +10,9 @@ namespace ChestRules {
         return RandomUtil::weightedIndex(chests, [](const ChestType& chest) { return chest.spawnWeight; });
     }
 
-    // La recompensa de un cofre: una sola, al azar según su peso. nullptr si no tiene.
+    // La recompensa de un cofre: una sola, al azar entre las suyas. nullptr si no tiene.
     inline const ChestReward* pickReward(const ChestType& chest) {
-        const int index = RandomUtil::weightedIndex(chest.rewards, [](const ChestReward& reward) { return reward.weight; });
-        return index < 0 ? nullptr : &chest.rewards[index];
+        if (chest.rewards.empty()) return nullptr;
+        return &chest.rewards[RandomUtil::integer(0, static_cast<int>(chest.rewards.size()) - 1)];
     }
 }
