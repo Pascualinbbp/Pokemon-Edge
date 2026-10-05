@@ -517,7 +517,39 @@ void Renderer3D::collect(const Scene& scene) {
         }
     }
 
+    for (const Chest& chest : scene.chests.chests) addChest(chest);
+
     for (const Pokeball& ball : scene.balls) addBall(ball, 0.0f, 1.0f, 0.0f);
+}
+
+// Cofre: cuerpo, cerradura y tapa con bisagra atrás; al abrirse suelta chispas del color de su rareza.
+void Renderer3D::addChest(const Chest& chest) {
+    const ChestStyle::Look look = ChestStyle::look(chest.rarity());
+    const float baseH = Chest::HEIGHT * Chest::BASE_RATIO;
+    const float lidH = Chest::HEIGHT - baseH;
+    const XMFLOAT3& p = chest.body.position;
+    const float s = chest.scale();
+    const XMMATRIX place = XMMatrixScaling(s, s, s) * XMMatrixRotationY(chest.yaw()) * XMMatrixTranslation(p.x, p.y, p.z);
+
+    add(m_cube, XMMatrixScaling(Chest::WIDTH, baseH, Chest::DEPTH) * XMMatrixTranslation(0.0f, baseH * 0.5f, 0.0f) * place,
+        { ChestStyle::BODY.x, ChestStyle::BODY.y, ChestStyle::BODY.z, 0.0f });
+    add(m_cube, XMMatrixScaling(0.16f, 0.2f, 0.06f) * XMMatrixTranslation(0.0f, baseH, Chest::DEPTH * 0.5f) * place,
+        { ChestStyle::LOCK.x, ChestStyle::LOCK.y, ChestStyle::LOCK.z, 0.0f });
+
+    // La tapa gira alrededor de su borde trasero superior (bisagra).
+    add(m_cube, XMMatrixScaling(Chest::WIDTH, lidH, Chest::DEPTH) * XMMatrixTranslation(0.0f, lidH * 0.5f, Chest::DEPTH * 0.5f) *
+        XMMatrixRotationX(-chest.lidAngle()) * XMMatrixTranslation(0.0f, baseH, -Chest::DEPTH * 0.5f) * place,
+        { look.lid.x, look.lid.y, look.lid.z, look.glow });
+
+    for (int i = 0; i < look.sparkles; ++i) {
+        XMFLOAT3 position;
+        float size, spin;
+        chest.sparkle(i, look.sparkles, position, size, spin);
+        if (size > 0.001f) {
+            add(m_star, XMMatrixScaling(size, size, size) * XMMatrixRotationY(spin) * XMMatrixTranslation(position.x, position.y, position.z),
+                { look.lid.x * 0.5f + 0.5f, look.lid.y * 0.5f + 0.5f, look.lid.z * 0.5f + 0.5f, 1.0f }, false);
+        }
+    }
 }
 
 void Renderer3D::addBall(const Pokeball& ball, float tilt, float scale, float glow) {

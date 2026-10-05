@@ -18,6 +18,7 @@ namespace Physics {
         };
         std::vector<Box> obstacles; // fijos (paredes)
         std::vector<Box> creatures; // hitbox de los pokémon: la escena los rehace cada frame
+        std::vector<Box> props;     // objetos sólidos del mundo (cofres...): sólidos para todos los cuerpos; la escena los rehace cada frame
 
         // Altura del terreno en (x, z). De momento el suelo es plano; aquí irá el terreno generado.
         float groundHeight(float, float) const { return 0.0f; }
@@ -70,6 +71,7 @@ namespace Physics {
             const float high = low + body.collisionHeight;
 
             for (const Box& box : obstacles) pushOut(body, box, low, high);
+            for (const Box& box : props) pushOut(body, box, low, high);
             if (body.hitsCreatures) for (const Box& box : creatures) pushOut(body, box, low, high);
         }
 

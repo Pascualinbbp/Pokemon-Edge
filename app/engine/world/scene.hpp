@@ -2,15 +2,18 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <string>
 #include <vector>
 #include <DirectXMath.h>
 #include "../core/gameStatus.hpp"
 #include "../core/input.hpp"
 #include "../physics/physicsWorld.hpp"
-#include "../../models/pokeballType.hpp"
+#include "../../models/gameData.hpp"
 #include "camera.hpp"
+#include "chestField.hpp"
 #include "captureRules.hpp"
 #include "captureTarget.hpp"
+#include "chestRules.hpp"
 #include "dayCycle.hpp"
 #include "inventory.hpp"
 #include "player.hpp"
@@ -40,6 +43,8 @@ struct Scene {
     std::vector<Pokeball> balls;
     DayCycle dayCycle;
     Inventory inventory;
+    ChestField chests;
+    std::string rewardText; // recompensa del último cofre abierto
 
     int captures = 0;
     Notice notice = Notice::NONE;
@@ -49,8 +54,9 @@ struct Scene {
     int lockedIndex = -1;     // objetivo al que está fijada la cámara (-1 = ninguno)
 
     // Dos paredes sencillas, más altas que el personaje: bloquean el paso, las pokéballs y la luz.
-    explicit Scene(const std::vector<PokeballType>& ballTypes = {}) {
-        inventory.setTypes(ballTypes);
+    explicit Scene(const GameData& gameData = GameData::empty()) : m_data(&gameData) {
+        inventory.setData(gameData);
+        chests.setup(gameData);
         world.obstacles = {
             { {  6.0f, 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
             { { -7.0f, 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
@@ -79,6 +85,8 @@ struct Scene {
         // Los pokémon son sólidos para quien los pisa: el jugador los rodea igual que a las paredes.
         world.creatures.clear();
         for (const CaptureTarget& target : targets) if (target.hittable()) world.creatures.push_back(target.solid());
+        world.props.clear();
+        for (const Chest& chest : chests.chests) if (chest.closed()) world.props.push_back(chest.solid());
 
         player.aiming = m_aiming;
         player.update(dt, input, camera.yaw(), world);
@@ -89,6 +97,9 @@ struct Scene {
 
         for (CaptureTarget& target : targets) handleCaptureEvent(target, target.update(dt, world));
         updateBalls(dt);
+        chests.update(dt, dayCycle.day(), world);
+        updateNearbyChest();
+        if (input.interact && m_nearChest >= 0) openChest(m_nearChest);
         updateAimInfo();
         return pause;
     }
@@ -104,6 +115,8 @@ struct Scene {
         s.notice = noticeTime > 0.0f ? notice : Notice::NONE;
         s.locked = lockedIndex >= 0;
         s.inventory = &inventory;
+        if (m_nearChest >= 0) s.nearbyChest = &m_data->chests[chests.chests[m_nearChest].typeIndex()];
+        if (notice == Notice::REWARD) s.rewardText = &rewardText;
         if (m_aimTarget >= 0) {
             const CaptureTarget& t = targets[m_aimTarget];
             s.hasAimTarget = true;
@@ -143,6 +156,36 @@ struct Scene {
             case CaptureRules::Throw::SUPER_LUCKY: showNotice(Notice::SUPER_LUCKY); break;
             default:                               showNotice(Notice::CAPTURED); break;
         }
+    }
+
+    // --- Cofres ---
+    // Cofre cerrado más cercano dentro del alcance del jugador (-1 si ninguno).
+    void updateNearbyChest() {
+        m_nearChest = -1;
+        float best = Chest::INTERACT_RANGE * Chest::INTERACT_RANGE;
+        for (size_t i = 0; i < chests.chests.size(); ++i) {
+            const Chest& chest = chests.chests[i];
+            if (!chest.closed()) continue;
+            const float dx = chest.body.position.x - player.body.position.x;
+            const float dz = chest.body.position.z - player.body.position.z;
+            const float d2 = dx * dx + dz * dz;
+            if (d2 <= best) {
+                best = d2;
+                m_nearChest = static_cast<int>(i);
+            }
+        }
+    }
+
+    // Abre el cofre: una recompensa al azar de las de su tipo, directa al inventario.
+    void openChest(int index) {
+        Chest& chest = chests.chests[index];
+        const ChestReward* reward = ChestRules::pickReward(m_data->chests[chest.typeIndex()]);
+        chest.open();
+        if (!reward || !inventory.add(reward->itemId, reward->quantity)) return;
+
+        const Item* item = m_data->item(reward->itemId);
+        rewardText = std::to_string(reward->quantity) + "x " + (item ? item->name : std::string("?"));
+        showNotice(Notice::REWARD);
     }
 
     // --- Fijado de cámara ---
@@ -248,7 +291,7 @@ struct Scene {
         XMScalarSinCos(&sinYaw, &cosYaw, camera.yaw());
         const XMFLOAT3& p = player.body.position;
 
-        const PokeballType& type = inventory.selected().type;
+        const PokeballType& type = inventory.selectedBall().type;
         Pokeball ball;
         ball.captureMultiplier = type.captureMultiplier;
         ball.color = PokeballStyle::color(type.id);
@@ -306,6 +349,8 @@ struct Scene {
         balls.erase(std::remove_if(balls.begin(), balls.end(), [](const Pokeball& b) { return b.expired(); }), balls.end());
     }
 
+    const GameData* m_data;
+    int m_nearChest = -1;  // cofre al alcance del jugador (índice en chests.chests)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
     int m_aimTarget = -1;  // pokémon al que apunta la cruceta dentro del alcance
 };

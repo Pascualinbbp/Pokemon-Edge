@@ -184,7 +184,7 @@ void MainWindow::init() {
     ImGui_ImplDX11_Init(GraphicsDevice::device(), GraphicsDevice::context());
 
     SessionManager::engine().init(GraphicsDevice::device());
-    SessionManager::engine().setBallTypes(DatabaseManager::getPokeballDao().findAll());
+    SessionManager::engine().setData(DatabaseManager::loadGameData());
 }
 
 void MainWindow::cleanup() {

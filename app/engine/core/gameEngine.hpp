@@ -3,7 +3,7 @@
 #include <vector>
 #include "../world/scene.hpp"
 #include "../render/renderer3D.hpp"
-#include "../../models/pokeballType.hpp"
+#include "../../models/gameData.hpp"
 #include "../../models/saveData.hpp"
 #include "gameStatus.hpp"
 #include "input.hpp"
@@ -17,20 +17,21 @@ class GameEngine {
         m_renderer.init(device);
     }
 
-    // Tipos de pokéball de la base de datos: con ellos se crea el inventario de cada partida.
-    void setBallTypes(std::vector<PokeballType> types) {
-        m_ballTypes = std::move(types);
+    // Datos de juego de la base de datos (pokéballs, objetos, cofres...): con ellos se crea cada partida.
+    void setData(GameData data) {
+        m_data = std::move(data);
+        m_scene = Scene(m_data);
     }
 
     void newGame() {
-        m_scene = Scene(m_ballTypes);
+        m_scene = Scene(m_data);
     }
 
     void applySave(const SaveData& save) {
-        m_scene = Scene(m_ballTypes);
+        m_scene = Scene(m_data);
         m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
         m_scene.dayCycle.setTime(save.worldTime);
-        m_scene.inventory.restore(save.balls, save.selectedBall);
+        m_scene.inventory.restore(save.items, save.selectedBall);
     }
 
     SaveData captureSave() const {
@@ -38,7 +39,7 @@ class GameEngine {
         SaveData save;
         save.playerPosition = { p.x, p.y, p.z };
         save.worldTime = m_scene.dayCycle.time();
-        m_scene.inventory.store(save.balls, save.selectedBall);
+        m_scene.inventory.store(save.items, save.selectedBall);
         return save;
     }
 
@@ -61,7 +62,7 @@ class GameEngine {
     }
 
     private:
-    std::vector<PokeballType> m_ballTypes;
+    GameData m_data;
     Scene m_scene;
     Renderer3D m_renderer;
 };

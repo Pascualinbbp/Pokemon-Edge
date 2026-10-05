@@ -30,6 +30,7 @@ namespace ControlsComponent {
             "Q / E o la rueda del ratón (apuntando): cambian de Pokéball. Cada tipo tiene un ratio de captura distinto.",
             "TAB: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
             "Más captura: x1.15 por la espalda del pokémon y x1.25 si vas agachado sin que te detecte.",
+            "F: abre el cofre que tengas cerca. Cada cofre da una recompensa al azar; los raros y épicos son más difíciles de ver.",
             "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
         };
         inline constexpr const char* NOTES_GAMEPAD[] = {
@@ -38,6 +39,7 @@ namespace ControlsComponent {
             "Apuntar: mantén L2. Lanzar Pokéball: R2 mientras apuntas. L1 / R1 (apuntando): cambian de Pokéball.",
             "R3: fija la cámara al pokémon en rango (púlsalo otra vez para cambiar; mantenlo para soltar).",
             "Más captura: x1.15 por la espalda del pokémon y x1.25 si vas agachado sin que te detecte.",
+            "Botón izquierdo (cuadrado en PlayStation, X en Xbox): abre el cofre que tengas cerca.",
             "La cámara orbita libremente alrededor del personaje; este solo la sigue al apuntar.",
             "Menús: stick izquierdo o cruceta para moverte, botón inferior para aceptar y botón derecho para volver.",
         };
@@ -69,6 +71,7 @@ namespace ControlsComponent {
             keyRow(dl, offset(o, 420.0f, 30.0f), { "ESPACIO" }, "Saltar", 150.0f);
             keyRow(dl, offset(o, 420.0f, 90.0f), { "ESC" }, "Pausa / Salir de apuntar", 60.0f);
             keyRow(dl, offset(o, 420.0f, 150.0f), { "TAB" }, "Fijar objetivo (mantener: soltar)", 60.0f);
+            keyRow(dl, offset(o, 420.0f, 264.0f), { "F" }, "Abrir cofre cercano");
             mouse(dl, offset(o, 440.0f, 204.0f));
             label(dl, o.x + 504.0f, o.y + 206.0f, "Mover la cámara");
             label(dl, o.x + 504.0f, o.y + 228.0f, "Der.: apuntar · Izq.: lanzar");
@@ -136,7 +139,7 @@ namespace ControlsComponent {
             faceButton(dl, P(fx, fy - 17.0f), Face::NORTH, xbox, false);
             faceButton(dl, P(fx + 17.0f, fy), Face::EAST,  xbox, true);
             faceButton(dl, P(fx, fy + 17.0f), Face::SOUTH, xbox, true);
-            faceButton(dl, P(fx - 17.0f, fy), Face::WEST,  xbox, false);
+            faceButton(dl, P(fx - 17.0f, fy), Face::WEST,  xbox, true);
 
             // Líneas hacia cada acción (se dibujan al final para quedar encima).
             const auto callout = [&](float x, float y, float elbowY, float endX, const char* text) {

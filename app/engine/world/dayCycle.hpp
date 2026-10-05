@@ -31,10 +31,14 @@ class DayCycle {
 
     void update(float dt) {
         m_time += dt;
-        if (m_time >= CYCLE_SECONDS) m_time = std::fmod(m_time, CYCLE_SECONDS);
+        if (m_time >= CYCLE_SECONDS) {
+            m_time = std::fmod(m_time, CYCLE_SECONDS);
+            ++m_day;
+        }
     }
 
     float time() const { return m_time; }
+    int day() const { return m_day; } // días completos transcurridos desde que se creó la partida (no se guarda)
 
     // Restaura la hora de una partida guardada (un valor no válido deja la hora de inicio).
     void setTime(float seconds) {
@@ -105,4 +109,5 @@ class DayCycle {
     static DirectX::XMFLOAT3 scale(const DirectX::XMFLOAT3& v, float s) { return { v.x * s, v.y * s, v.z * s }; }
 
     float m_time = START_TIME;
+    int m_day = 0;
 };

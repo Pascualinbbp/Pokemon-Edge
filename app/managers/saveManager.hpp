@@ -43,7 +43,7 @@ class SaveManager {
         j["savedAt"] = static_cast<long long>(now);
         j["player"]["position"] = data.playerPosition;
         j["world"]["time"] = data.worldTime;
-        j["inventory"]["balls"] = data.balls;
+        j["inventory"]["items"] = data.items;
         j["inventory"]["selected"] = data.selectedBall;
 
         if (!JsonUtil::saveToFile(PathsUtil::saveSlotPath(slot), j)) return false;
@@ -64,7 +64,7 @@ class SaveManager {
         SaveData data;
         data.playerPosition = *position;
         data.worldTime = JsonUtil::find<float>(j, { "world", "time" }).value_or(-1.0f); // partidas antiguas: sin dato
-        data.balls = JsonUtil::find<std::map<std::string, int>>(j, { "inventory", "balls" }).value_or(std::map<std::string, int>{});
+        data.items = JsonUtil::find<std::map<std::string, int>>(j, { "inventory", "items" }).value_or(std::map<std::string, int>{});
         data.selectedBall = JsonUtil::find<std::string>(j, { "inventory", "selected" }).value_or(std::string{});
         return data;
     }

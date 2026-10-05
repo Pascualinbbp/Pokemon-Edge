@@ -19,6 +19,7 @@ namespace HudComponent {
             { "¡LANZAMIENTO CON SUERTE!",   IM_COL32(255, 215, 70, 255) },
             { "¡SUPER SUERTE!",             IM_COL32(150, 235, 255, 255) },
             { "¡SIN UNIDADES!",             IM_COL32(255, 150, 40, 255) },
+            { "¡HAS OBTENIDO!",             IM_COL32(255, 215, 70, 255) },
         };
 
         // Color según la probabilidad de captura: verde muy alta, amarillo buena, naranja dudosa, rojo muy baja.
@@ -104,7 +105,7 @@ namespace HudComponent {
         // y el multiplicador de captura. Q / E o la rueda en teclado; L1 / R1 en mando.
         inline void drawBallSelector(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             const Inventory& inventory = *status.inventory;
-            const int count = inventory.size();
+            const int count = inventory.ballCount();
             const float alpha = status.aimBlend;
             const int a = static_cast<int>(255.0f * alpha);
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
@@ -118,14 +119,14 @@ namespace HudComponent {
                 const bool selected = i == inventory.selectedIndex();
                 const ImVec2 c(startX + SPACING * static_cast<float>(i), centerY);
                 if (selected) dl->AddCircle(c, SELECTED_RADIUS + 6.0f, IM_COL32(255, 255, 255, a), 32, 2.5f);
-                drawBallIcon(dl, c, selected ? SELECTED_RADIUS : OTHER_RADIUS, inventory.at(i).type, selected ? alpha : alpha * 0.55f);
+                drawBallIcon(dl, c, selected ? SELECTED_RADIUS : OTHER_RADIUS, inventory.ball(i).type, selected ? alpha : alpha * 0.55f);
                 if (!selected) {
-                    std::snprintf(buffer, sizeof(buffer), "x%d", inventory.at(i).count);
+                    std::snprintf(buffer, sizeof(buffer), "x%d", inventory.ball(i).count);
                     centered(dl, ImVec2(c.x, c.y + OTHER_RADIUS + 6.0f), buffer, 0.8f, IM_COL32(220, 220, 220, static_cast<int>(a * 0.7f)));
                 }
             }
 
-            const auto& slot = inventory.at(inventory.selectedIndex());
+            const Inventory::BallSlot slot = inventory.selectedBall();
             std::snprintf(buffer, sizeof(buffer), "%s   x%d   Captura x%.1f", slot.type.name.c_str(), slot.count, slot.type.captureMultiplier);
             const ImU32 textColor = slot.count > 0 ? IM_COL32(255, 255, 255, a) : IM_COL32(235, 70, 60, a);
             const float nameY = centerY + SELECTED_RADIUS + 26.0f;
@@ -139,6 +140,20 @@ namespace HudComponent {
                 GuiDraw::keycap(dl, ImVec2(startX - SELECTED_RADIUS - 52.0f, keyY), pad ? "L1" : "Q", 28.0f, 28.0f);
                 GuiDraw::keycap(dl, ImVec2(startX + SPACING * static_cast<float>(count - 1) + SELECTED_RADIUS + 24.0f, keyY), pad ? "R1" : "E", 28.0f, 28.0f);
             }
+        }
+
+        // Aviso de interacción con un cofre cercano: tecla (o botón) + "Abrir <cofre>".
+        inline void drawChestPrompt(ImDrawList* dl, const ChestType& chest, InputDevice device) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            char buffer[96];
+            std::snprintf(buffer, sizeof(buffer), "Abrir %s", chest.name.c_str());
+
+            constexpr float SCALE = 1.1f;
+            const float textWidth = ImGui::CalcTextSize(buffer).x * SCALE;
+            const ImVec2 center(screen.x * 0.5f + 18.0f, screen.y * 0.62f);
+            const char* key = !isGamepad(device) ? "F" : device == InputDevice::XBOX ? "X" : "SQ";
+            GuiDraw::keycap(dl, ImVec2(center.x - textWidth * 0.5f - 36.0f, center.y - 6.0f), key, 28.0f, 28.0f);
+            centered(dl, center, buffer, SCALE, IM_COL32(255, 255, 255, 255));
         }
 
         // Mira redonda (anillo con punto central); cambia de color al apuntar a un pokémon en rango.
@@ -200,13 +215,19 @@ namespace HudComponent {
 
         if (status.aimBlend > 0.05f) {
             detail::drawCrosshair(dl, status);
-            if (status.inventory && !status.inventory->empty()) detail::drawBallSelector(dl, status, device);
+            if (status.inventory && status.inventory->hasBalls()) detail::drawBallSelector(dl, status, device);
         }
+
+        if (status.nearbyChest) detail::drawChestPrompt(dl, *status.nearbyChest, device);
 
         if (status.notice != Notice::NONE) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
             const detail::NoticeStyle& style = detail::NOTICES[static_cast<int>(status.notice)];
             detail::centered(dl, ImVec2(size.x * 0.5f, size.y * 0.2f), style.text, 1.8f, style.color);
+            if (status.rewardText) {
+                detail::centered(dl, ImVec2(size.x * 0.5f, size.y * 0.2f + ImGui::GetFontSize() * 1.8f + 8.0f),
+                    status.rewardText->c_str(), 1.5f, IM_COL32(255, 255, 255, 255));
+            }
         }
     }
 }
