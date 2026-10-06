@@ -16,6 +16,8 @@ class Companion {
     static constexpr float JUMP_SPEED = 8.0f;
     static constexpr float WORK_RANGE = 3.0f;     // distancia al borde de un recurso para trabajarlo
     static constexpr float WORK_INTERVAL = 1.4f;  // segundos por golpe con power 1
+    static constexpr float LEVEL_SPEEDUP = 0.25f; // cada nivel de recolección por encima del 1 trabaja un 25 % más rápido
+    static constexpr float HOVER_HEIGHT = 1.3f;   // altura sobre el jugador al levitar
 
     Physics::Body body;
 
@@ -28,11 +30,16 @@ class Companion {
     int speciesId() const { return m_speciesId; }
     float yaw() const { return m_yaw; }
     bool working() const { return m_working; }
+
+    // Velocidad de trabajo de un pokémon según su nivel de recolección y la ayuda del jugador.
+    static float workPower(int level, float teamBonus) { return (1.0f + LEVEL_SPEEDUP * static_cast<float>(level - 1)) * teamBonus; }
     float bob() const { return m_working ? std::sin(m_time * 14.0f) * 0.07f : 0.0f; }
 
     // Cambia de pokémon (-1 = ninguno): aparece junto al jugador.
-    void set(int speciesId, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
+    void set(int speciesId, bool floats, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
         m_speciesId = speciesId;
+        m_floats = floats;
+        body.gravityScale = floats ? 0.0f : 1.0f;
         m_workTimer = 0.0f;
         m_working = false;
         const DirectX::XMFLOAT2 spot = followSpot(playerPosition, cameraYaw);
@@ -60,10 +67,11 @@ class Companion {
             body.velocity.z = dz / distance * speed;
             m_yaw = std::atan2(dx, dz);
             // Si el jugador está más alto (sobre una roca...), salta tras él.
-            if (body.onGround && playerPosition.y - body.position.y > 0.3f && distance < 3.0f) world.jump(body, JUMP_SPEED);
+            if (!m_floats && body.onGround && playerPosition.y - body.position.y > 0.3f && distance < 3.0f) world.jump(body, JUMP_SPEED);
         } else {
             body.velocity.x = body.velocity.z = 0.0f;
         }
+        if (m_floats) body.velocity.y = (playerPosition.y + HOVER_HEIGHT - body.position.y) * 6.0f;
         world.step(body, dt);
 
         m_working = power > 0.0f;
@@ -85,6 +93,7 @@ class Companion {
     }
 
     int m_speciesId = -1;
+    bool m_floats = false;
     float m_yaw = 0.0f;
     float m_time = 0.0f;
     float m_workTimer = 0.0f;

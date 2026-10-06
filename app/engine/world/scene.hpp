@@ -138,7 +138,11 @@ struct Scene {
         s.data = m_data;
         s.aiming = m_aiming;
         s.canLock = anyLockable();
-        if (m_missingSkill >= 0) if (const Skill* skill = m_data->skill(m_missingSkill)) s.missingSkill = &skill->name;
+        if (m_missingSkill >= 0) if (const Skill* skill = m_data->skill(m_missingSkill)) {
+            s.missingSkill = &skill->name;
+            s.missingLevel = m_missingLevel;
+        }
+        addNameTags(s);
         if (!noticeText.empty()) s.noticeText = &noticeText;
         if (m_interaction.kind == Interaction::CHEST) {
             s.interactVerb = CHEST_VERB;
@@ -159,6 +163,21 @@ struct Scene {
     }
 
     private:
+    // Nombre sobre cada pokémon visible (los salvajes y el acompañante).
+    void addNameTags(GameStatus& s) const {
+        constexpr float TAG_RANGE = 30.0f;
+        constexpr float TAG_LIFT = 0.35f;
+        const auto add = [&](int speciesId, const DirectX::XMFLOAT3& head) {
+            const PokemonSpecies* species = m_data->speciesById(speciesId);
+            const float dx = head.x - player.body.position.x, dz = head.z - player.body.position.z;
+            if (species && dx * dx + dz * dz <= TAG_RANGE * TAG_RANGE) s.nameTags.push_back({ { head.x, head.y + TAG_LIFT, head.z }, &species->name });
+        };
+        for (const CaptureTarget& target : targets) {
+            if (target.hittable()) add(target.speciesId(), { target.body.position.x, target.body.position.y + CaptureTarget::SIZE, target.body.position.z });
+        }
+        if (companion.active()) add(companion.speciesId(), { companion.body.position.x, companion.body.position.y + Companion::SIZE, companion.body.position.z });
+    }
+
     // --- Porcentaje de captura ---
     bool isBehind(const CaptureTarget& t) const {
         return CaptureRules::isBehind(t.body.position, t.yaw(), player.body.position);
@@ -204,16 +223,18 @@ struct Scene {
     // El líder del equipo acompaña al jugador y trabaja solo los recursos cercanos cuya habilidad conoce.
     void updateCompanion(float dt) {
         const int lead = storage.leadSpeciesId();
-        if (lead != companion.speciesId()) companion.set(lead, player.body.position, camera.yaw());
+        const PokemonSpecies* species = m_data->speciesById(lead);
+        if (lead != companion.speciesId()) companion.set(lead, species && m_data->levitates(*species), player.body.position, camera.yaw());
 
         ResourceNode* target = nullptr;
-        float power = 0.0f;
-        if (const PokemonSpecies* species = m_data->speciesById(lead)) {
+        int level = 0;
+        if (species) {
             float best = 1.0e9f;
             for (ResourceNode& node : nodes.entities) {
                 if (node.depleted()) continue;
-                const SpeciesSkill* skill = species->skill(m_data->nodes[node.typeIndex()].skillId);
-                if (!skill) continue;
+                const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
+                const int skillLevel = species->skillLevel(type.skillId);
+                if (skillLevel < type.level) continue; // no la tiene o no llega al nivel que exige
                 const float dx = node.body.position.x - companion.body.position.x;
                 const float dz = node.body.position.z - companion.body.position.z;
                 const float d2 = dx * dx + dz * dz;
@@ -221,11 +242,13 @@ struct Scene {
                 if (d2 <= range * range && d2 < best) {
                     best = d2;
                     target = &node;
-                    power = skill->power;
+                    level = skillLevel;
                 }
             }
         }
-        if (companion.update(dt, world, player.body.position, camera.yaw(), target ? power : 0.0f) && target) hitNode(*target);
+        if (target) target->companionWorking();
+        const float power = target ? Companion::workPower(level, target->teamBonus(false)) : 0.0f;
+        if (companion.update(dt, world, player.body.position, camera.yaw(), power) && target) hitNode(*target, false);
     }
 
     // --- Interacción (cofres y recursos) ---
@@ -252,15 +275,21 @@ struct Scene {
         if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
         m_missingSkill = -1;
         if (const int i = nearestIn(nodes.entities, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) {
-            const int skill = m_data->nodes[nodes.entities[i].typeIndex()].skillId;
-            if (inventory.hasSkillTool(skill)) m_interaction = { Interaction::NODE, i };
-            else m_missingSkill = skill; // sin herramienta: solo un pokémon con la habilidad puede trabajarlo
+            const ResourceNodeType& type = m_data->nodes[nodes.entities[i].typeIndex()];
+            if (inventory.skillLevel(type.skillId) >= type.level) m_interaction = { Interaction::NODE, i };
+            else {
+                m_missingSkill = type.skillId; // sin herramienta de ese nivel: solo un pokémon que llegue al nivel puede trabajarlo
+                m_missingLevel = type.level;
+            }
         }
     }
 
     void interact() {
         if (m_interaction.kind == Interaction::CHEST) openChest(chests.entities[m_interaction.index]);
-        else if (m_interaction.kind == Interaction::NODE) hitNode(nodes.entities[m_interaction.index]);
+        else if (m_interaction.kind == Interaction::NODE) {
+            ResourceNode& node = nodes.entities[m_interaction.index];
+            hitNode(node, true, inventory.skillSpeed(m_data->nodes[node.typeIndex()].skillId));
+        }
     }
 
     // Suma 'quantity' unidades de un objeto al inventario y lo anuncia.
@@ -279,8 +308,8 @@ struct Scene {
     }
 
     // Un golpe al recurso; al agotarlo da su material.
-    void hitNode(ResourceNode& node) {
-        if (!node.hit() || !node.depleted()) return;
+    void hitNode(ResourceNode& node, bool byPlayer, float speed = 1.0f) {
+        if (!node.hit(byPlayer, speed) || !node.depleted()) return;
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
         const Item* item = m_data->materialItem(type.materialId);
         if (item) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
@@ -463,6 +492,7 @@ struct Scene {
 
     const GameData* m_data;
     int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)
+    int m_missingLevel = 0;    // nivel que exige ese recurso
     Interaction m_interaction; // lo que el jugador puede usar ahora mismo (cofre o recurso cercano)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
     int m_aimTarget = -1;  // pokémon al que apunta la cruceta dentro del alcance

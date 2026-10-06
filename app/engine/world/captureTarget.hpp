@@ -8,7 +8,7 @@
 #include "captureRules.hpp"
 #include "captureSequence.hpp"
 
-// Objetivo de pruebas: un cubo inmóvil que hace de pokémon (el cubito amarillo marca hacia dónde mira).
+// Pokémon salvaje (un cubo): vaga libremente cerca de su punto de aparición; el cubito amarillo marca hacia dónde mira.
 // Una pokéball que lo toca lo captura: el resultado se decide al instante y CaptureSequence lo anima.
 // Si se captura desaparece unos segundos y reaparece en su sitio con un porcentaje nuevo; si escapa, sale de la bola.
 class CaptureTarget {
@@ -16,10 +16,13 @@ class CaptureTarget {
     static constexpr float SIZE          = 1.2f;  // arista del cubo
     static constexpr float HALF          = SIZE * 0.5f;
     static constexpr float RESPAWN_DELAY = 2.5f;  // segundos oculto antes de reaparecer
+    static constexpr float WALK_SPEED    = 1.8f;  // m/s al vagar
+    static constexpr float TURN_SPEED    = 6.0f;  // rad/s al girar hacia donde camina
+    static constexpr float LEASH         = 9.0f;  // distancia máxima a su punto de aparición
 
     enum class Event { NONE, CAPTURED, ESCAPED }; // se emite en el instante en que la animación revela el resultado
 
-    Physics::Body body; // inmóvil, pero pasa por la misma física que el resto (suelo, paredes)
+    Physics::Body body; // pasa por la misma física que el resto (suelo, paredes)
 
     explicit CaptureTarget(int slot = 0) : m_slot(slot % SLOT_COUNT) {
         body.collisionRadius = HALF;
@@ -28,7 +31,7 @@ class CaptureTarget {
     }
 
     bool hittable() const { return m_state == State::IDLE; }
-    float yaw() const { return SPAWNS[m_slot][2]; }
+    float yaw() const { return m_yaw; }
     float baseChance() const { return m_baseChance; }
 
     // Especie de este pokémon salvaje (índice en GameData::species y su id). -1 = aún sin asignar: la escena la
@@ -113,13 +116,13 @@ class CaptureTarget {
     }
 
     Event update(float dt, const Physics::World& world) {
-        world.step(body, dt);
-
         Event event = Event::NONE;
         switch (m_state) {
             case State::IDLE:
+                wander(dt);
                 break;
             case State::CAPTURING:
+                body.velocity.x = body.velocity.z = 0.0f;
                 if (m_sequence.update(dt, world)) event = m_sequence.captured() ? Event::CAPTURED : Event::ESCAPED;
                 if (m_sequence.finished()) {
                     if (m_sequence.captured()) {
@@ -136,6 +139,7 @@ class CaptureTarget {
                 if (m_timer >= RESPAWN_DELAY) spawn();
                 break;
         }
+        world.step(body, dt);
         return event;
     }
 
@@ -151,8 +155,30 @@ class CaptureTarget {
     };
     static constexpr int SLOT_COUNT = static_cast<int>(sizeof(SPAWNS) / sizeof(SPAWNS[0]));
 
+    // Alterna paradas y paseos en una dirección al azar; si se aleja demasiado de su punto, vuelve hacia él.
+    void wander(float dt) {
+        m_wanderTimer -= dt;
+        if (m_wanderTimer <= 0.0f) {
+            const float homeDx = SPAWNS[m_slot][0] - body.position.x, homeDz = SPAWNS[m_slot][1] - body.position.z;
+            const bool tooFar = homeDx * homeDx + homeDz * homeDz > LEASH * LEASH;
+            m_walking = tooFar || RandomUtil::roll(65.0f);
+            m_wanderTimer = m_walking ? RandomUtil::range(1.5f, 3.5f) : RandomUtil::range(1.5f, 4.0f);
+            if (m_walking) m_heading = tooFar ? std::atan2(homeDx, homeDz) : RandomUtil::range(-3.14159265f, 3.14159265f);
+        }
+
+        const float delta = DirectX::XMScalarModAngle(m_heading - m_yaw);
+        if (m_walking) m_yaw += (std::clamp)(delta, -TURN_SPEED * dt, TURN_SPEED * dt);
+        const bool go = m_walking && std::fabs(delta) < 0.5f;
+        body.velocity.x = go ? std::sin(m_yaw) * WALK_SPEED : 0.0f;
+        body.velocity.z = go ? std::cos(m_yaw) * WALK_SPEED : 0.0f;
+    }
+
     void spawn() {
         body.position = { SPAWNS[m_slot][0], 0.0f, SPAWNS[m_slot][1] };
+        body.velocity = { 0.0f, 0.0f, 0.0f };
+        m_yaw = m_heading = SPAWNS[m_slot][2];
+        m_walking = false;
+        m_wanderTimer = RandomUtil::range(0.5f, 3.0f);
         m_state = State::IDLE;
         m_timer = 0.0f;
         m_speciesIndex = m_speciesId = -1;
@@ -164,6 +190,10 @@ class CaptureTarget {
     float m_timer = 0.0f;
     float m_baseChance = 50.0f;
     int m_slot = 0;
+    float m_yaw = 0.0f;
+    float m_heading = 0.0f;   // hacia dónde quiere caminar
+    float m_wanderTimer = 0.0f;
+    bool m_walking = false;
     int m_speciesIndex = -1;
     int m_speciesId = -1;
 };

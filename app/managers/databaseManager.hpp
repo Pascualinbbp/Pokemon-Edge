@@ -72,10 +72,12 @@ class DatabaseManager {
         data.skills = skillDaoInstance.findAll();
         data.tools = skillDaoInstance.findTools();
         data.species = speciesDaoInstance.findAll();
+        data.abilities = speciesDaoInstance.findAbilities();
+        data.elements = speciesDaoInstance.findElements();
         Logger::logInfo("DB_MANAGER", "Datos de juego: " + std::to_string(data.items.size()) + " objetos, " +
             std::to_string(data.balls.size()) + " pokéballs, " + std::to_string(data.materials.size()) + " materiales, " +
             std::to_string(data.chests.size()) + " cofres, " + std::to_string(data.nodes.size()) + " nodos de recolección, " + std::to_string(data.skills.size()) + " habilidades, " +
-            std::to_string(data.tools.size()) + " herramientas, " + std::to_string(data.species.size()) + " especies.");
+            std::to_string(data.tools.size()) + " herramientas, " + std::to_string(data.species.size()) + " pokémon, " + std::to_string(data.abilities.size()) + " habilidades de combate.");
         return data;
     }
 };

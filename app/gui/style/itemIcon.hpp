@@ -19,6 +19,9 @@ namespace ItemIcon {
                 case 2:  return { 0.60f, 0.60f, 0.63f }; // Piedra
                 case 3:  return { 0.85f, 0.55f, 0.35f }; // Hierro
                 case 4:  return { 0.16f, 0.16f, 0.18f }; // Carbón
+                case 5:  return { 0.45f, 0.90f, 0.98f }; // Diamante
+                case 6:  return { 0.85f, 0.20f, 0.28f }; // Baya
+                case 7:  return { 0.98f, 0.80f, 0.20f }; // Baya dorada
                 default: return { 0.70f, 0.70f, 0.70f };
             }
         }
@@ -57,7 +60,13 @@ namespace ItemIcon {
         const ImU32 metal = IM_COL32(190, 195, 205, static_cast<int>(255.0f * alpha));
         const float t = (std::max)(2.0f, r * 0.14f);
         dl->AddLine(ImVec2(c.x - r * 0.7f, c.y + r * 0.8f), ImVec2(c.x + r * 0.5f, c.y - r * 0.7f), wood, t * 1.4f);
-        if (toolId == 1) { // hacha
+        if (toolId == 3) { // regadera: cuerpo, pico y gotas
+            const ImU32 body = IM_COL32(90, 150, 210, static_cast<int>(255.0f * alpha));
+            dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y - r * 0.2f), ImVec2(c.x + r * 0.3f, c.y + r * 0.7f), body, r * 0.12f);
+            dl->AddLine(ImVec2(c.x + r * 0.3f, c.y + r * 0.45f), ImVec2(c.x + r * 0.85f, c.y - r * 0.2f), body, t * 1.6f);
+            dl->AddCircleFilled(ImVec2(c.x + r * 0.9f, c.y + r * 0.1f), r * 0.07f, body);
+            dl->AddCircleFilled(ImVec2(c.x + r * 0.95f, c.y + r * 0.4f), r * 0.07f, body);
+        } else if (toolId == 1) { // hacha
             const ImVec2 head[4] = { { c.x + r * 0.1f, c.y - r * 0.95f }, { c.x + r * 0.85f, c.y - r * 0.55f }, { c.x + r * 0.7f, c.y + r * 0.05f }, { c.x + r * 0.15f, c.y - r * 0.35f } };
             dl->AddConvexPolyFilled(head, 4, metal);
         } else {           // pico
@@ -80,6 +89,26 @@ namespace ItemIcon {
             case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::color(type->id), alpha); break;
             case ItemCategory::MATERIAL: material(dl, c, r, item.refId, alpha); break;
             case ItemCategory::TOOL:     tool(dl, c, r, item.refId, alpha); break;
+            default: break;
+        }
+    }
+
+    // Color de fondo de las casillas de cada categoría de objeto.
+    inline ImU32 categoryTone(ItemCategory category) {
+        switch (category) {
+            case ItemCategory::POKEBALL: return IM_COL32(52, 96, 190, 255);
+            case ItemCategory::MATERIAL: return IM_COL32(196, 128, 48, 255);
+            case ItemCategory::TOOL:     return IM_COL32(120, 76, 190, 255);
+            default:                     return IM_COL32(90, 90, 100, 255);
+        }
+    }
+
+    // Icono representativo de una categoría (pestañas del inventario).
+    inline void category(ImDrawList* dl, const ImVec2& c, float r, ItemCategory category) {
+        switch (category) {
+            case ItemCategory::POKEBALL: ball(dl, c, r, { 0.90f, 0.20f, 0.20f }); break;
+            case ItemCategory::MATERIAL: material(dl, c, r, 2); break;
+            case ItemCategory::TOOL:     tool(dl, c, r, 1); break;
             default: break;
         }
     }

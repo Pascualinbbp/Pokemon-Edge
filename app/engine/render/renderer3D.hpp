@@ -16,6 +16,9 @@ class Renderer3D {
     void render(ID3D11DeviceContext* context, const Scene& scene, int width, int height);
     void cleanup();
 
+    // Proyección de la última imagen dibujada (la interfaz la usa para colocar los nombres sobre los pokémon).
+    const DirectX::XMFLOAT4X4& projection() const { return m_proj; }
+
     private:
     template <typename T> using ComPtr = Microsoft::WRL::ComPtr<T>;
 

@@ -551,6 +551,16 @@ void Renderer3D::addNode(const ResourceNode& node) {
         return;
     }
 
+    if (look.shape == ResourceStyle::Shape::BUSH) {
+        part({ 1.0f, 0.6f, 1.0f }, 0.3f, { 0.0f, 0.3f, 0.0f }, look.body, 0.0f);
+        part({ 0.7f, 0.5f, 0.7f }, 0.9f, { 0.15f, 0.65f, -0.1f }, look.body, 0.0f);
+        part({ 0.2f, 0.2f, 0.2f }, 0.4f, { 0.45f, 0.45f, 0.2f }, look.accent, 0.3f);
+        part({ 0.2f, 0.2f, 0.2f }, 0.2f, { -0.3f, 0.5f, 0.4f }, look.accent, 0.3f);
+        part({ 0.2f, 0.2f, 0.2f }, 0.7f, { 0.2f, 0.85f, 0.3f }, look.accent, 0.3f);
+        part({ 0.2f, 0.2f, 0.2f }, 0.1f, { -0.4f, 0.35f, -0.3f }, look.accent, 0.3f);
+        return;
+    }
+
     part({ 1.6f, 0.95f, 1.4f }, 0.4f, { 0.0f, 0.475f, 0.0f }, look.body, 0.0f);
     part({ 0.9f, 0.75f, 0.9f }, 1.1f, { 0.5f, 0.375f, -0.3f }, look.body, 0.0f);
     part({ 0.7f, 0.6f, 0.7f }, 0.3f, { -0.55f, 0.3f, 0.4f }, look.body, 0.0f);

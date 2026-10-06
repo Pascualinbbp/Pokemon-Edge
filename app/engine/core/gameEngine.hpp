@@ -57,11 +57,13 @@ class GameEngine {
 
     // Lo que necesita la pantalla de inventario (el equipo se modifica desde ella).
     const GameData& data() const { return m_data; }
-    const Inventory& inventory() const { return m_scene.inventory; }
+    Inventory& inventory() { return m_scene.inventory; }
     PokemonStorage& storage() { return m_scene.storage; }
 
     GameStatus status() const {
-        return m_scene.status();
+        GameStatus s = m_scene.status();
+        DirectX::XMStoreFloat4x4(&s.viewProj, m_scene.getViewMatrix() * DirectX::XMLoadFloat4x4(&m_renderer.projection()));
+        return s;
     }
 
     void cleanup() {

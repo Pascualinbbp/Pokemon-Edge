@@ -6,7 +6,7 @@
 
 // Aspecto de cada tipo de nodo (por id de la base de datos). Es el único sitio donde se define su forma y color.
 namespace ResourceStyle {
-    enum class Shape { TREE, ROCK };
+    enum class Shape { TREE, ROCK, BUSH };
 
     struct Look {
         Shape shape;
@@ -21,6 +21,9 @@ namespace ResourceStyle {
         switch (typeId) {
             case 1:  return { Shape::TREE, { 0.40f, 0.26f, 0.13f }, { 0.18f, 0.55f, 0.20f }, false, 0.35f, 3.8f }; // árbol
             case 3:  return { Shape::ROCK, { 0.50f, 0.48f, 0.47f }, { 0.88f, 0.55f, 0.35f }, true,  0.85f, 1.1f }; // mena de hierro
+            case 5:  return { Shape::ROCK, { 0.45f, 0.47f, 0.52f }, { 0.45f, 0.90f, 0.98f }, true,  0.85f, 1.1f }; // veta de diamante
+            case 6:  return { Shape::BUSH, { 0.20f, 0.50f, 0.22f }, { 0.85f, 0.18f, 0.25f }, true,  0.55f, 0.9f }; // arbusto de bayas
+            case 7:  return { Shape::BUSH, { 0.22f, 0.48f, 0.20f }, { 0.98f, 0.80f, 0.18f }, true,  0.55f, 0.9f }; // arbusto dorado
             case 4:  return { Shape::ROCK, { 0.42f, 0.42f, 0.45f }, { 0.07f, 0.07f, 0.08f }, true,  0.85f, 1.1f }; // filón de carbón
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca
         }
@@ -35,6 +38,8 @@ class ResourceNode {
     static constexpr float SHAKE_TIME   = 0.3f;
     static constexpr float SHAKE_AMOUNT = 0.07f;
     static constexpr float FADE_TIME    = 0.6f;
+    static constexpr float TEAM_WINDOW  = 1.5f;   // segundos durante los que cuenta que el otro siga trabajándolo
+    static constexpr float TEAM_BONUS   = 2.0f;   // velocidad al trabajarlo jugador y pokémon a la vez
 
     Physics::Body body;
 
@@ -53,18 +58,28 @@ class ResourceNode {
     // Distancia máxima (desde el centro) a la que el jugador puede golpearlo.
     float reach() const { return INTERACT_RANGE + ResourceStyle::look(m_typeId).half; }
 
-    // Golpe del jugador. Devuelve true si cuenta (no está agotado ni en enfriamiento).
-    bool hit() {
+    // Jugador y pokémon lo están trabajando a la vez: ambos van más rápido.
+    float teamBonus(bool byPlayer) const { return (byPlayer ? m_companionTimer : m_playerTimer) > 0.0f ? TEAM_BONUS : 1.0f; }
+
+    // Golpe del jugador o de su pokémon. Devuelve true si cuenta (no está agotado ni en enfriamiento).
+    // 'speed': velocidad de trabajo de quien golpea (herramienta o pokémon); mayor = menos espera hasta el siguiente golpe.
+    bool hit(bool byPlayer, float speed = 1.0f) {
         if (depleted() || m_cooldown > 0.0f) return false;
+        (byPlayer ? m_playerTimer : m_companionTimer) = TEAM_WINDOW;
         ++m_hits;
-        m_cooldown = HIT_COOLDOWN;
+        m_cooldown = HIT_COOLDOWN / (teamBonus(byPlayer) * speed);
         m_shake = SHAKE_TIME;
         return true;
     }
 
+    // El pokémon está trabajándolo ahora mismo (aunque aún no haya completado un golpe).
+    void companionWorking() { m_companionTimer = TEAM_WINDOW; }
+
     void update(float dt) {
         m_cooldown = (std::max)(0.0f, m_cooldown - dt);
         m_shake = (std::max)(0.0f, m_shake - dt);
+        m_playerTimer = (std::max)(0.0f, m_playerTimer - dt);
+        m_companionTimer = (std::max)(0.0f, m_companionTimer - dt);
         if (depleted()) m_fade += dt;
     }
 
@@ -93,4 +108,6 @@ class ResourceNode {
     float m_cooldown = 0.0f;
     float m_shake = 0.0f;
     float m_fade = 0.0f;
+    float m_playerTimer = 0.0f;    // segundos que faltan para dar por parado al jugador
+    float m_companionTimer = 0.0f; // ídem para el pokémon
 };

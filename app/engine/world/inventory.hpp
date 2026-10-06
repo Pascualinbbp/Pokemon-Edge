@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
@@ -9,6 +10,7 @@
 class Inventory {
     public:
     static constexpr int STARTING_STOCK = 0; // unidades de cada objeto al empezar una partida (llegan en los cofres)
+    // De las herramientas, 'count' es su nivel: todas empiezan en 1 (ver tool.sql).
 
     struct BallSlot {
         const PokeballType& type;
@@ -24,7 +26,7 @@ class Inventory {
             if (item.category == ItemCategory::POKEBALL) {
                 if (const PokeballType* type = data.ball(item.refId)) m_balls.push_back({ static_cast<int>(m_slots.size()), type });
             }
-            m_slots.push_back({ &item, STARTING_STOCK });
+            m_slots.push_back({ &item, item.category == ItemCategory::TOOL ? 1 : STARTING_STOCK }); // herramientas: nivel 1
         }
         m_selected = 0;
     }
@@ -45,18 +47,60 @@ class Inventory {
         return 0;
     }
 
-    // ¿Tiene alguna herramienta que dé esta habilidad?
-    bool hasSkillTool(int skillId) const {
-        for (const Slot& slot : m_slots) {
-            if (slot.count <= 0 || slot.item->category != ItemCategory::TOOL) continue;
-            if (const Tool* tool = m_data->tool(slot.item->refId); tool && tool->skillId == skillId) return true;
-        }
-        return false;
-    }
-
     // Recorre todos los objetos con sus unidades: f(const Item&, int count).
     template <typename F>
     void forEach(F f) const { for (const Slot& slot : m_slots) f(*slot.item, slot.count); }
+
+    // --- Herramientas (su nivel es el número de unidades de su ranura) ---
+    // Mejor nivel de recolección que dan las herramientas en esta habilidad (0 = ninguna).
+    int skillLevel(int skillId) const {
+        int level = 0;
+        for (const Slot& slot : m_slots) {
+            if (const Tool* tool = m_data->toolOf(*slot.item); tool && tool->skillId == skillId) level = (std::max)(level, slot.count);
+        }
+        return level;
+    }
+
+    // Velocidad de trabajo del jugador con la mejor herramienta de esta habilidad (1 si no tiene).
+    float skillSpeed(int skillId) const {
+        float speed = 1.0f;
+        int best = 0;
+        for (const Slot& slot : m_slots) {
+            const Tool* tool = m_data->toolOf(*slot.item);
+            if (!tool || tool->skillId != skillId || slot.count <= best) continue;
+            best = slot.count;
+            if (const ToolTier* tier = tool->tier(slot.count)) speed = tier->speed;
+        }
+        return speed;
+    }
+
+    int toolLevel(const Tool& tool) const {
+        const Item* item = m_data->toolItem(tool.id);
+        return item ? count(item->id) : 0;
+    }
+
+    // Nivel siguiente de la herramienta (nullptr si ya está al máximo).
+    const ToolTier* nextTier(const Tool& tool) const {
+        const int level = toolLevel(tool);
+        return level >= 1 && level < tool.maxLevel() ? &tool.tiers[level] : nullptr;
+    }
+
+    bool canUpgrade(const Tool& tool) const {
+        const ToolTier* next = nextTier(tool);
+        if (!next) return false;
+        for (const RecipeIngredient& ingredient : next->cost) {
+            const Item* item = m_data->materialItem(ingredient.materialId);
+            if (!item || count(item->id) < ingredient.quantity) return false;
+        }
+        return true;
+    }
+
+    // Gasta los materiales y sube la herramienta un nivel. Devuelve false si no se puede.
+    bool upgrade(const Tool& tool) {
+        if (!canUpgrade(tool)) return false;
+        for (const RecipeIngredient& ingredient : nextTier(tool)->cost) add(m_data->materialItem(ingredient.materialId)->id, -ingredient.quantity);
+        return add(m_data->toolItem(tool.id)->id, 1);
+    }
 
     // --- Pokéballs ---
     bool hasBalls() const { return !m_balls.empty(); }
@@ -85,7 +129,7 @@ class Inventory {
     // Los objetos que no aparecen en el guardado conservan sus unidades iniciales.
     void restore(const std::map<std::string, int>& counts, const std::string& selectedName) {
         for (Slot& slot : m_slots) {
-            if (const auto it = counts.find(m_data->itemName(*slot.item)); it != counts.end()) slot.count = it->second < 0 ? 0 : it->second;
+            if (const auto it = counts.find(m_data->itemName(*slot.item)); it != counts.end()) slot.count = (std::max)(it->second, slot.item->category == ItemCategory::TOOL ? 1 : 0);
         }
         for (int i = 0; i < ballCount(); ++i) if (m_data->itemName(*m_slots[m_balls[i].slot].item) == selectedName) m_selected = i;
     }

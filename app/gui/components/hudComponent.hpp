@@ -40,6 +40,19 @@ namespace HudComponent {
             dl->AddText(font, size, pos, color, text);
         }
 
+        // Nombre de cada pokémon visible, proyectado sobre su cabeza.
+        inline void drawNameTags(ImDrawList* dl, const GameStatus& status) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            const DirectX::XMMATRIX viewProj = DirectX::XMLoadFloat4x4(&status.viewProj);
+            for (const NameTag& tag : status.nameTags) {
+                DirectX::XMFLOAT4 clip;
+                DirectX::XMStoreFloat4(&clip, DirectX::XMVector4Transform(DirectX::XMVectorSet(tag.position.x, tag.position.y, tag.position.z, 1.0f), viewProj));
+                if (clip.w <= 0.1f) continue; // detrás de la cámara
+                const ImVec2 at((clip.x / clip.w * 0.5f + 0.5f) * screen.x, (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * screen.y);
+                centered(dl, ImVec2(at.x, at.y - ImGui::GetFontSize()), tag.name->c_str(), 1.0f, IM_COL32(255, 255, 255, 235));
+            }
+        }
+
         // Aviso de autoguardado (esquina inferior derecha): panel translúcido con el contorno de una pokéball
         // que gira y el texto "Guardando...". alpha (0..1) controla el fundido de entrada y salida.
         inline void drawSaving(ImDrawList* dl, float alpha) {
@@ -155,7 +168,7 @@ namespace HudComponent {
                 add(Action::CROUCH, "Agacharse");
                 add(Action::SPRINT, "Correr");
                 add(Action::AIM, "Modo captura");
-                add(Action::INVENTORY, "Inventario");
+                add(Action::INVENTORY, "Mochila");
                 add(Action::PAUSE, "Pausa");
             }
 
@@ -228,11 +241,12 @@ namespace HudComponent {
             if (status.inventory && status.inventory->hasBalls()) detail::drawBallSelector(dl, status, device);
         }
 
+        detail::drawNameTags(dl, status);
         detail::drawHints(dl, status, device);
 
         if (status.missingSkill) {
-            char text[96];
-            std::snprintf(text, sizeof(text), "Necesitas la habilidad %s (herramienta o pokémon)", status.missingSkill->c_str());
+            char text[112];
+            std::snprintf(text, sizeof(text), "Necesitas %s de nivel %d (herramienta o pokémon)", status.missingSkill->c_str(), status.missingLevel);
             detail::centered(dl, ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.62f), text, 1.1f, IM_COL32(255, 150, 40, 255));
         }
 

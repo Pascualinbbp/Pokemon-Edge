@@ -1,10 +1,18 @@
 #pragma once
 #include <string>
+#include <vector>
+#include <DirectXMath.h>
 #include "../../models/gameData.hpp"
 #include "../world/inventory.hpp"
 
 // Avisos grandes en pantalla.
 enum class Notice { NONE, CAPTURED, ESCAPED, LUCKY, SUPER_LUCKY, OUT_OF_STOCK, REWARD };
+
+// Nombre que se dibuja sobre un pokémon (posición en el mundo, sobre su cabeza).
+struct NameTag {
+    DirectX::XMFLOAT3 position;
+    const std::string* name;
+};
 
 // Estado del juego que la interfaz necesita mostrar (el HUD no conoce la escena).
 struct GameStatus {
@@ -19,6 +27,9 @@ struct GameStatus {
     const char* interactVerb = nullptr;          // acción disponible junto a un cofre o recurso ("Abrir", "Talar"...)
     const std::string* interactTarget = nullptr; // sobre qué ("Cofre común", "Árbol"...)
     const std::string* missingSkill = nullptr;   // habilidad que falta para trabajar el recurso cercano ("Talar"...)
+    int missingLevel = 0;                        // nivel que exige ese recurso
+    std::vector<NameTag> nameTags;               // nombres sobre los pokémon visibles
+    DirectX::XMFLOAT4X4 viewProj = {};           // vista * proyección (para colocar los nombres en pantalla)
     const std::string* noticeText = nullptr;     // segunda línea del aviso (recompensa obtenida, pokémon capturado...)
 
     // Pokémon al que se apunta dentro del rango de lanzamiento.

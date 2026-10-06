@@ -12,6 +12,7 @@
 #include "../components/pauseComponent.hpp"
 #include "../components/controlsComponent.hpp"
 #include "../components/inventoryComponent.hpp"
+#include "../components/pokemonComponent.hpp"
 #include "../components/updateComponent.hpp"
 #include "../../managers/databaseManager.hpp"
 #include "../../managers/saveManager.hpp"
@@ -58,6 +59,7 @@ namespace {
     bool g_focused = false;
     float g_autosaveTimer = 0.0f;  // segundos de juego desde el último guardado
     float g_savedNotice = 0.0f;    // segundos restantes del aviso de guardado en el HUD
+    GameState g_backState = GameState::PLAYING; // a dónde vuelven la mochila y los pokémon al cerrarse (juego o menú de pausa)
 
     // Opacidad del aviso de guardado: aparece y se desvanece suavemente.
     float savingAlpha() {
@@ -265,6 +267,7 @@ void MainWindow::run() {
             const InputState input = InputHandler::poll(dt);
             if (input.pause || engine.update(dt, input) || input.inventory) {
                 g_state = input.inventory && !input.pause ? GameState::INVENTORY : GameState::PAUSED;
+                g_backState = GameState::PLAYING;
                 redrawFrames = 2;
                 justPaused = true;
             } else {
@@ -345,7 +348,10 @@ void MainWindow::run() {
                 UpdateComponent::render(g_state);
                 break;
             case GameState::INVENTORY:
-                InventoryComponent::render(g_state, engine.data(), engine.inventory(), engine.storage());
+                InventoryComponent::render(g_state, g_backState, engine.data(), engine.inventory());
+                break;
+            case GameState::POKEMON:
+                PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage());
                 break;
         }
         ImGui::End();
@@ -357,6 +363,7 @@ void MainWindow::run() {
 
         if (g_state != prevState) {
             redrawFrames = 2;
+            if (prevState == GameState::PAUSED && (g_state == GameState::INVENTORY || g_state == GameState::POKEMON)) g_backState = GameState::PAUSED;
             g_fullscreen.set(g_hwnd, isFullscreen(g_state));
             if (isInGame(prevState) && !isInGame(g_state)) SessionManager::saveCurrent(); // salir al menú guarda la partida
         } else if (redrawFrames > 0) {
