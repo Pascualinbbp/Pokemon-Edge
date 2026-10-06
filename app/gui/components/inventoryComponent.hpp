@@ -123,6 +123,20 @@ namespace InventoryComponent {
             if (GuiCards::button("##upgrade", "MEJORAR", ImVec2(180.0f, 38.0f), inventory.canUpgrade(tool))) inventory.upgrade(tool);
         }
 
+        // Precios (pokémonedas) y venta de las unidades que se tienen. Las herramientas no se venden.
+        inline void drawTrade(const GameData& data, Inventory& inventory, const Item& item, int count) {
+            if (item.category == ItemCategory::TOOL) return;
+            heading("Precio");
+            char text[96];
+            std::snprintf(text, sizeof(text), "Compra: %d     Venta: %d  (pokémonedas)", item.buyPrice, item.sellPrice);
+            ImGui::TextUnformatted(text);
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            const bool canSell = item.sellPrice > 0 && count > 0;
+            if (GuiCards::button("##sell1", "VENDER 1", ImVec2(150.0f, 34.0f), canSell, IM_COL32(190, 120, 30, 255))) inventory.sell(item.id, 1);
+            ImGui::SameLine();
+            if (GuiCards::button("##sellAll", "VENDER TODO", ImVec2(170.0f, 34.0f), canSell, IM_COL32(190, 120, 30, 255))) inventory.sell(item.id, count);
+        }
+
         inline void drawDetail(const GameData& data, Inventory& inventory, const Item* item, const std::string& category, const ImVec2& pos, const ImVec2& size) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             GuiCards::panel(dl, pos, ImVec2(pos.x + size.x, pos.y + size.y));
@@ -176,6 +190,8 @@ namespace InventoryComponent {
                 drawUpgrade(data, inventory, *tool);
             }
 
+            drawTrade(data, inventory, *item, count);
+
             if (const std::vector<std::string> sources = ItemInfo::sources(data, *item); !sources.empty()) {
                 heading("Cómo conseguirlo");
                 for (const std::string& line : sources) muted(line.c_str());
@@ -206,7 +222,11 @@ namespace InventoryComponent {
         const float top = detail::MARGIN + 54.0f;
         const float height = screen.y - top - detail::MARGIN - 28.0f;
 
-        GuiCards::text(dl, ImVec2(detail::MARGIN, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), "MOCHILA", 1.6f);
+        if (GuiCards::backButton(ImVec2(detail::MARGIN, detail::MARGIN - 8.0f))) state = back;
+        GuiCards::text(dl, ImVec2(detail::MARGIN + 140.0f, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), "MOCHILA", 1.6f);
+        char money[48];
+        std::snprintf(money, sizeof(money), "Pokémonedas: %d", inventory.money());
+        GuiCards::text(dl, ImVec2(screen.x - detail::MARGIN - GuiCards::textWidth(money, 1.2f), detail::MARGIN - 4.0f), IM_COL32(255, 215, 90, 255), money, 1.2f);
 
         detail::drawTabs(data, ImVec2(detail::MARGIN, top));
 

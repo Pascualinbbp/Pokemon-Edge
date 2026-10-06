@@ -19,15 +19,31 @@ namespace PokemonStyle {
         }
     }
 
-    // Color de la etiqueta de cada tipo elemental (RGB 0..255).
-    inline void elementRgb(int elementId, int& r, int& g, int& b) {
-        switch (elementId) {
-            case 1:  r = 120; g = 200; b = 80;  break; // Planta
-            case 2:  r = 160; g = 90;  b = 200; break; // Veneno
-            case 3:  r = 240; g = 128; b = 48;  break; // Fuego
-            case 4:  r = 104; g = 144; b = 240; break; // Agua
-            case 5:  r = 168; g = 144; b = 240; break; // Volador
-            default: r = 160; g = 160; b = 170; break;
-        }
+    // Color de la etiqueta de cada tipo (RGB 0..255); el orden de la tabla type fija los id.
+    inline void typeRgb(int typeId, int& r, int& g, int& b) {
+        static constexpr int RGB[][3] = {
+            { 168, 168, 120 }, // 1 normal
+            { 240, 128, 48 },  // 2 fuego
+            { 104, 144, 240 }, // 3 agua
+            { 120, 200, 80 },  // 4 planta
+            { 248, 208, 48 },  // 5 eléctrico
+            { 152, 216, 216 }, // 6 hielo
+            { 192, 48, 40 },   // 7 lucha
+            { 160, 90, 200 },  // 8 veneno
+            { 224, 192, 104 }, // 9 tierra
+            { 168, 144, 240 }, // 10 volador
+            { 248, 88, 136 },  // 11 psíquico
+            { 168, 184, 32 },  // 12 bicho
+            { 184, 160, 56 },  // 13 roca
+            { 112, 88, 152 },  // 14 fantasma
+            { 112, 56, 248 },  // 15 dragón
+            { 112, 88, 72 },   // 16 siniestro
+            { 184, 184, 208 }, // 17 acero
+            { 238, 153, 172 }, // 18 hada
+            { 80, 190, 170 },  // 19 sonido
+        };
+        constexpr int COUNT = static_cast<int>(sizeof(RGB) / sizeof(RGB[0]));
+        const int i = (typeId >= 1 && typeId <= COUNT) ? typeId - 1 : 0;
+        r = RGB[i][0]; g = RGB[i][1]; b = RGB[i][2];
     }
 }

@@ -2,6 +2,7 @@
 #include <cmath>
 #include "imgui.h"
 #include "../../engine/world/pokeball.hpp"
+#include "../../engine/world/itemStyle.hpp"
 #include "../../engine/world/pokemonStyle.hpp"
 #include "../../models/gameData.hpp"
 
@@ -11,19 +12,6 @@ namespace ItemIcon {
         inline ImU32 color(const DirectX::XMFLOAT3& tone, float alpha, float shade = 1.0f) {
             const auto channel = [&](float v) { return static_cast<int>((std::min)(v * shade, 1.0f) * 255.0f); };
             return IM_COL32(channel(tone.x), channel(tone.y), channel(tone.z), static_cast<int>(255.0f * alpha));
-        }
-
-        inline DirectX::XMFLOAT3 materialColor(int materialId) {
-            switch (materialId) {
-                case 1:  return { 0.55f, 0.36f, 0.18f }; // Madera
-                case 2:  return { 0.60f, 0.60f, 0.63f }; // Piedra
-                case 3:  return { 0.85f, 0.55f, 0.35f }; // Hierro
-                case 4:  return { 0.16f, 0.16f, 0.18f }; // Carbón
-                case 5:  return { 0.45f, 0.90f, 0.98f }; // Diamante
-                case 6:  return { 0.85f, 0.20f, 0.28f }; // Baya
-                case 7:  return { 0.98f, 0.80f, 0.20f }; // Baya dorada
-                default: return { 0.70f, 0.70f, 0.70f };
-            }
         }
     }
 
@@ -44,7 +32,7 @@ namespace ItemIcon {
 
     // Bloque del color del material (cubo en perspectiva).
     inline void material(ImDrawList* dl, const ImVec2& c, float r, int materialId, float alpha = 1.0f) {
-        const DirectX::XMFLOAT3 tone = detail::materialColor(materialId);
+        const DirectX::XMFLOAT3 tone = ItemStyle::materialColor(materialId);
         const float w = r * 0.9f, h = r * 0.52f;
         const ImVec2 top[4] = { { c.x, c.y - r * 0.9f }, { c.x + w, c.y - r * 0.9f + h }, { c.x, c.y - r * 0.9f + h * 2.0f }, { c.x - w, c.y - r * 0.9f + h } };
         const ImVec2 left[4] = { top[3], top[2], { c.x, c.y + r * 0.9f }, { c.x - w, c.y + r * 0.9f - h } };

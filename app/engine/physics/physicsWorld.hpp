@@ -30,6 +30,32 @@ namespace Physics {
         // Altura del terreno en (x, z). De momento el suelo es plano; aquí irá el terreno generado.
         float groundHeight(float, float) const { return 0.0f; }
 
+        // ¿Hay algún sólido fijo (paredes, rocas, árboles, cofres...) entre dos puntos? Los pokémon no cuentan.
+        bool blocked(const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to) const {
+            const auto crosses = [&](const Box& box) {
+                const float lo[3] = { box.center.x - box.half.x, box.center.y - box.half.y, box.center.z - box.half.z };
+                const float hi[3] = { box.center.x + box.half.x, box.center.y + box.half.y, box.center.z + box.half.z };
+                const float o[3] = { from.x, from.y, from.z };
+                const float d[3] = { to.x - from.x, to.y - from.y, to.z - from.z };
+                float tMin = 0.0f, tMax = 1.0f;
+                for (int i = 0; i < 3; ++i) {
+                    if (std::fabs(d[i]) < 1.0e-6f) {
+                        if (o[i] < lo[i] || o[i] > hi[i]) return false;
+                        continue;
+                    }
+                    float t0 = (lo[i] - o[i]) / d[i], t1 = (hi[i] - o[i]) / d[i];
+                    if (t0 > t1) std::swap(t0, t1);
+                    tMin = (std::max)(tMin, t0);
+                    tMax = (std::min)(tMax, t1);
+                    if (tMin > tMax) return false;
+                }
+                return true;
+            };
+            for (const Box& box : obstacles) if (crosses(box)) return true;
+            for (const Box& box : props) if (crosses(box)) return true;
+            return false;
+        }
+
         void jump(Body& body, float speed) const {
             body.velocity.y = speed;
             body.onGround = false;

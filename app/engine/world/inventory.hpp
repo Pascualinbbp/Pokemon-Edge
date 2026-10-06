@@ -19,6 +19,7 @@ class Inventory {
 
     void setData(const GameData& data) {
         m_data = &data;
+        m_money = 0;
         m_slots.clear();
         m_balls.clear();
         m_slots.reserve(data.items.size());
@@ -50,6 +51,20 @@ class Inventory {
     // Recorre todos los objetos con sus unidades: f(const Item&, int count).
     template <typename F>
     void forEach(F f) const { for (const Slot& slot : m_slots) f(*slot.item, slot.count); }
+
+    // --- Pokémonedas y venta ---
+    int money() const { return m_money; }
+
+    // Vende hasta 'quantity' unidades de un objeto a su precio de venta (0 = no se vende). Devuelve lo cobrado.
+    int sell(int itemId, int quantity) {
+        const Item* item = m_data->item(itemId);
+        if (!item || item->sellPrice <= 0) return 0;
+        const int units = (std::min)(quantity, count(itemId));
+        if (units <= 0) return 0;
+        add(itemId, -units);
+        m_money += units * item->sellPrice;
+        return units * item->sellPrice;
+    }
 
     // --- Herramientas (su nivel es el número de unidades de su ranura) ---
     // Mejor nivel de recolección que dan las herramientas en esta habilidad (0 = ninguna).
@@ -120,14 +135,16 @@ class Inventory {
     }
 
     // --- Guardado (por nombre de objeto) ---
-    void store(std::map<std::string, int>& counts, std::string& selectedName) const {
+    void store(std::map<std::string, int>& counts, std::string& selectedName, int& money) const {
+        money = m_money;
         counts.clear();
         for (const Slot& slot : m_slots) counts[m_data->itemName(*slot.item)] = slot.count;
         selectedName = hasBalls() ? m_data->itemName(*m_slots[m_balls[m_selected].slot].item) : std::string();
     }
 
     // Los objetos que no aparecen en el guardado conservan sus unidades iniciales.
-    void restore(const std::map<std::string, int>& counts, const std::string& selectedName) {
+    void restore(const std::map<std::string, int>& counts, const std::string& selectedName, int money) {
+        m_money = (std::max)(money, 0);
         for (Slot& slot : m_slots) {
             if (const auto it = counts.find(m_data->itemName(*slot.item)); it != counts.end()) slot.count = (std::max)(it->second, slot.item->category == ItemCategory::TOOL ? 1 : 0);
         }
@@ -148,4 +165,5 @@ class Inventory {
     std::vector<Slot> m_slots;
     std::vector<BallRef> m_balls;
     int m_selected = 0;
+    int m_money = 0; // pokémonedas
 };

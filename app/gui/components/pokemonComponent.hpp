@@ -9,6 +9,7 @@
 #include "../style/guiStyle.hpp"
 #include "../style/itemIcon.hpp"
 #include "../window/guiInput.hpp"
+#include "../../engine/world/evRules.hpp"
 #include "../../engine/world/pokemonStorage.hpp"
 #include "../../models/gameData.hpp"
 
@@ -30,6 +31,7 @@ namespace PokemonComponent {
             int index = 0;
         };
         inline Selection selection;
+        inline bool confirmRelease = false; // primer clic en LIBERAR: pide confirmación
 
         inline void muted(const char* value) {
             ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
@@ -45,22 +47,28 @@ namespace PokemonComponent {
         }
 
         // Color de fondo de un pokémon: el de su primer tipo.
-        inline ImU32 tone(const GameData& data, const PokemonSpecies& species) {
-            if (!species.elements.empty()) return GuiCards::withAlpha(GuiCards::elementColor(species.elements.front()), 190);
+        inline ImU32 tone(const PokemonSpecies& species) {
+            if (!species.types.empty()) return GuiCards::withAlpha(GuiCards::typeColor(species.types.front()), 190);
             return GuiStyle::SURFACE;
         }
 
-        // Fichas de tipo en fila desde 'pos'. Devuelve el ancho ocupado.
-        inline float elementChips(ImDrawList* dl, const GameData& data, const PokemonSpecies& species, ImVec2 pos) {
-            float used = 0.0f;
-            for (const int id : species.elements) {
-                if (const Element* element = data.element(id)) {
-                    const float w = GuiCards::elementChip(dl, pos, *element);
-                    pos.x += w + 6.0f;
-                    used += w + 6.0f;
-                }
+        // Fichas de tipo en fila desde 'pos' (los tipos salen de la tabla type).
+        inline void typeChips(ImDrawList* dl, const GameData& data, const PokemonSpecies& species, ImVec2 pos) {
+            for (const int id : species.types) {
+                if (const PokemonType* type = data.type(id)) pos.x += GuiCards::typeChip(dl, pos, *type) + 6.0f;
             }
-            return used;
+        }
+
+        inline ImU32 rankColor(EvRules::Rank rank) {
+            switch (rank) {
+                case EvRules::Rank::D:      return IM_COL32(120, 120, 130, 255);
+                case EvRules::Rank::C:      return IM_COL32(90, 150, 200, 255);
+                case EvRules::Rank::B:      return IM_COL32(80, 180, 110, 255);
+                case EvRules::Rank::A:      return IM_COL32(230, 170, 50, 255);
+                case EvRules::Rank::S:      return IM_COL32(230, 100, 60, 255);
+                case EvRules::Rank::S_PLUS: return IM_COL32(200, 70, 200, 255);
+            }
+            return IM_COL32(120, 120, 130, 255);
         }
 
         inline const PokemonSpecies* speciesOf(const GameData& data, const OwnedPokemon& owned) { return data.speciesById(owned.speciesId); }
@@ -81,10 +89,10 @@ namespace PokemonComponent {
                 GuiCards::centeredText(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), GuiStyle::MUTED, "Vacío", 0.9f);
                 return false;
             }
-            dl->AddRectFilled(a, b, hovered ? GuiCards::withAlpha(tone(data, *species), 240) : tone(data, *species), 12.0f);
+            dl->AddRectFilled(a, b, hovered ? GuiCards::withAlpha(tone(*species), 240) : tone(*species), 12.0f);
             ItemIcon::creature(dl, ImVec2(a.x + 44.0f, a.y + SLOT_HEIGHT * 0.5f), 26.0f, species->id);
             GuiCards::text(dl, ImVec2(a.x + 84.0f, a.y + 12.0f), IM_COL32(255, 255, 255, 255), species->name.c_str(), 1.15f);
-            elementChips(dl, data, *species, ImVec2(a.x + 84.0f, a.y + 46.0f));
+            typeChips(dl, data, *species, ImVec2(a.x + 84.0f, a.y + 46.0f));
             if (index == 0) GuiCards::chip(dl, ImVec2(b.x - 62.0f, a.y + 8.0f), "Líder", IM_COL32(0, 0, 0, 140), 0.8f);
             if (selected) dl->AddRect(a, b, GuiCards::SELECT, 12.0f, 0, 3.0f);
             return clicked;
@@ -101,7 +109,7 @@ namespace PokemonComponent {
             for (int i = 0; i < PokemonStorage::TEAM_SIZE; ++i) {
                 const bool filled = i < static_cast<int>(storage.team().size());
                 if (teamSlot(data, filled ? &storage.team()[i] : nullptr, i, selection.inTeam && selection.index == i, TEAM_WIDTH) && filled) {
-                    selection = { true, i };
+                    { selection = { true, i }; confirmRelease = false; }
                 }
                 ImGui::Dummy(ImVec2(0.0f, 4.0f));
             }
@@ -126,95 +134,81 @@ namespace PokemonComponent {
                 if (i % columns != 0) ImGui::SameLine();
                 ImGui::PushID(i);
                 const bool picked = GuiCards::tile("##pc", ImVec2(TILE_WIDTH, TILE_HEIGHT), !selection.inTeam && selection.index == i,
-                    tone(data, *species), [&](ImDrawList* d, const ImVec2& c, float r) { ItemIcon::creature(d, c, r, species->id); },
+                    tone(*species), [&](ImDrawList* d, const ImVec2& c, float r) { ItemIcon::creature(d, c, r, species->id); },
                     species->name.c_str());
                 ImGui::PopID();
-                if (picked) selection = { false, i };
+                if (picked) { selection = { false, i }; confirmRelease = false; }
             }
             ImGui::PopStyleVar();
             ImGui::EndChild();
         }
 
-        // Gráfico hexagonal de estadísticas base con sus valores.
-        inline void drawStats(const BaseStats& stats) {
-            struct Row { const char* label; int value; };
-            const Row rows[6] = { { "PS", stats.hp }, { "Ataque", stats.attack }, { "Defensa", stats.defense },
-                                  { "Velocidad", stats.speed }, { "Def. esp.", stats.spDefense }, { "At. esp.", stats.spAttack } };
-            float values[6];
-            for (int i = 0; i < 6; ++i) values[i] = static_cast<float>(rows[i].value) / MAX_STAT;
+        // Gráfico hexagonal: estadísticas base (azul) y, encima, su crecimiento por EVs (naranja). En cada vértice:
+        // "Nombre base" y "EV/31".
+        inline void drawStats(const BaseStats& stats, const EvRules::Evs& evs) {
+            constexpr int ORDER[6] = { 0, 1, 3, 5, 4, 2 }; // vértices de arriba en sentido horario (índices de BaseStats)
+            float base[6], grown[6];
+            for (int i = 0; i < 6; ++i) {
+                base[i] = static_cast<float>(stats.at(ORDER[i])) / MAX_STAT;
+                grown[i] = static_cast<float>(stats.at(ORDER[i]) + evs[ORDER[i]]) / MAX_STAT;
+            }
 
             ImDrawList* dl = ImGui::GetWindowDrawList();
             const ImVec2 origin = ImGui::GetCursorScreenPos();
             const float width = ImGui::GetContentRegionAvail().x;
             const float radius = 64.0f;
-            const ImVec2 center(origin.x + width * 0.5f, origin.y + radius + 30.0f);
-            GuiCards::radar(dl, center, radius, values, GuiStyle::ACCENT);
+            const ImVec2 center(origin.x + width * 0.5f, origin.y + radius + 34.0f);
+            GuiCards::radar(dl, center, radius, base, GuiStyle::ACCENT, &grown, IM_COL32(255, 160, 40, 255));
 
             constexpr float PI = 3.14159265f;
-            char text[32];
+            char line[32];
             for (int i = 0; i < 6; ++i) {
                 const float angle = -PI * 0.5f + static_cast<float>(i) * PI / 3.0f;
-                std::snprintf(text, sizeof(text), "%s %d", rows[i].label, rows[i].value);
-                const float w = GuiCards::textWidth(text, 0.85f);
                 const float cx = std::cos(angle), cy = std::sin(angle);
-                const ImVec2 at(center.x + cx * (radius + 14.0f) + (cx > 0.3f ? 0.0f : cx < -0.3f ? -w : -w * 0.5f),
-                                center.y + cy * (radius + 14.0f) - ImGui::GetFontSize() * 0.4f);
-                GuiCards::text(dl, at, IM_COL32(255, 255, 255, 230), text, 0.85f);
+                const int stat = ORDER[i];
+                std::snprintf(line, sizeof(line), "%s %d", BaseStats::name(stat), stats.at(stat));
+                char potential[16];
+                std::snprintf(potential, sizeof(potential), "%d/%d", evs[stat], EvRules::MAX_EV);
+                const float w = (std::max)(GuiCards::textWidth(line, 0.85f), GuiCards::textWidth(potential, 0.85f));
+                const float x = center.x + cx * (radius + 14.0f) + (cx > 0.3f ? 0.0f : cx < -0.3f ? -w : -w * 0.5f);
+                const float y = center.y + cy * (radius + 16.0f) - ImGui::GetFontSize() * (cy < -0.3f ? 1.3f : 0.6f);
+                GuiCards::text(dl, ImVec2(x, y), IM_COL32(255, 255, 255, 230), line, 0.85f);
+                GuiCards::text(dl, ImVec2(x, y + ImGui::GetFontSize() * 0.85f), IM_COL32(255, 170, 60, 255), potential, 0.85f);
             }
-            ImGui::Dummy(ImVec2(0.0f, radius * 2.0f + 60.0f));
+            ImGui::Dummy(ImVec2(0.0f, radius * 2.0f + 72.0f));
         }
 
-        inline void drawAbilities(const GameData& data, PokemonStorage& storage, const PokemonSpecies& species, const OwnedPokemon& owned) {
-            heading("Habilidades de combate");
-            for (const SpeciesAbility& entry : species.abilities) {
-                if (!entry.passive) continue;
-                if (const Ability* ability = data.ability(entry.abilityId)) {
-                    ImDrawList* dl = ImGui::GetWindowDrawList();
-                    const ImVec2 at = ImGui::GetCursorScreenPos();
-                    const float w = GuiCards::chip(dl, at, ability->name.c_str(), IM_COL32(130, 80, 190, 255));
-                    GuiCards::text(dl, ImVec2(at.x + w + 8.0f, at.y + 2.0f), GuiStyle::MUTED, "pasiva (siempre activa)", 0.85f);
-                    ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() + 10.0f));
-                    muted(ability->description.c_str());
-                }
-            }
-
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            ImGui::TextUnformatted("Activa:");
-            for (const SpeciesAbility& entry : species.abilities) {
-                if (entry.passive) continue;
-                if (const Ability* ability = data.ability(entry.abilityId)) {
-                    const bool equipped = entry.abilityId == owned.abilityId;
-                    ImGui::PushID(entry.abilityId);
-                    if (GuiCards::button("##ability", ability->name.c_str(), ImVec2(GuiCards::textWidth(ability->name.c_str(), 0.95f) + 28.0f, 30.0f), true,
-                                         equipped ? GuiStyle::ACCENT : IM_COL32(70, 70, 88, 255))) {
-                        storage.setAbility(selection.inTeam, selection.index, entry.abilityId);
-                    }
-                    ImGui::PopID();
-                    ImGui::SameLine();
-                }
-            }
-            ImGui::NewLine();
-            if (const Ability* ability = data.ability(owned.abilityId)) muted(ability->description.c_str());
+        // Habilidad activa y pasiva (si la tiene) con su descripción.
+        inline void abilityLine(ImDrawList* dl, const Ability* ability, const char* kind, ImU32 color) {
+            if (!ability) return;
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const float w = GuiCards::chip(dl, at, ability->name.c_str(), color);
+            GuiCards::text(dl, ImVec2(at.x + w + 8.0f, at.y + 2.0f), GuiStyle::MUTED, kind, 0.85f);
+            ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() + 10.0f));
+            muted(ability->description.c_str());
         }
 
-        // Habilidades de recolección con su nivel y los recursos que permiten trabajar.
+        inline void drawAbilities(const GameData& data, const PokemonSpecies& species) {
+            heading("Habilidades");
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            abilityLine(dl, data.ability(species.abilityId), "activa", IM_COL32(190, 80, 60, 255));
+            if (species.passiveId >= 0) abilityLine(dl, data.ability(species.passiveId), "pasiva", IM_COL32(130, 80, 190, 255));
+            else muted("Sin habilidad pasiva.");
+        }
+
+        // Habilidad del mundo con su nivel y los recursos que permite trabajar; cualquier pokémon puede recoger bayas y objetos.
         inline void drawGathering(const GameData& data, const PokemonSpecies& species) {
-            heading("Recolección");
-            if (species.skills.empty()) {
-                muted("Este pokémon no sabe recolectar.");
-                return;
+            heading("Habilidad en el mundo");
+            const Skill* skill = data.skill(species.skillId);
+            char text[96];
+            std::snprintf(text, sizeof(text), "%s nivel %d", skill ? skill->name.c_str() : "?", species.skillLevel);
+            ImGui::TextUnformatted(text);
+            std::string works;
+            for (const ResourceNodeType& node : data.nodes) {
+                if (node.skillId == species.skillId && node.level <= species.skillLevel) works += (works.empty() ? "" : ", ") + node.name;
             }
-            char text[160];
-            for (const SpeciesSkill& entry : species.skills) {
-                const Skill* skill = data.skill(entry.skillId);
-                std::string works;
-                for (const ResourceNodeType& node : data.nodes) {
-                    if (node.skillId == entry.skillId && node.level <= entry.level) works += (works.empty() ? "" : ", ") + node.name;
-                }
-                std::snprintf(text, sizeof(text), "%s nivel %d", skill ? skill->name.c_str() : "?", entry.level);
-                ImGui::TextUnformatted(text);
-                if (!works.empty()) muted(("Puede trabajar: " + works).c_str());
-            }
+            if (!works.empty()) muted(("Puede trabajar: " + works).c_str());
+            muted("Cualquier pokémon recoge bayas maduras y objetos sueltos.");
         }
 
         inline void drawDetail(const GameData& data, PokemonStorage& storage, const ImVec2& pos, const ImVec2& size) {
@@ -231,39 +225,57 @@ namespace PokemonComponent {
             if (!species) return;
 
             // Cabecera con el color de su tipo.
-            const float headerHeight = 150.0f;
-            dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + headerHeight), tone(data, *species), GuiCards::ROUNDING, ImDrawFlags_RoundCornersTop);
+            const float headerHeight = 156.0f;
+            dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + headerHeight), tone(*species), GuiCards::ROUNDING, ImDrawFlags_RoundCornersTop);
             ItemIcon::creature(dl, ImVec2(pos.x + 72.0f, pos.y + 66.0f), 44.0f, species->id);
             GuiCards::text(dl, ImVec2(pos.x + 142.0f, pos.y + 30.0f), IM_COL32(255, 255, 255, 255), species->name.c_str(), 1.5f);
-            elementChips(dl, data, *species, ImVec2(pos.x + 142.0f, pos.y + 72.0f));
+            typeChips(dl, data, *species, ImVec2(pos.x + 142.0f, pos.y + 72.0f));
             GuiCards::text(dl, ImVec2(pos.x + 142.0f, pos.y + 104.0f), IM_COL32(255, 255, 255, 200),
                            selection.inTeam ? (selection.index == 0 ? "Líder del equipo" : "En el equipo") : "En el PC", 0.85f);
+            const EvRules::Rank rank = EvRules::rank(species->stats, owned.evs);
+            char rankText[24];
+            std::snprintf(rankText, sizeof(rankText), "Potencial %s", EvRules::label(rank));
+            GuiCards::chip(dl, ImVec2(pos.x + 142.0f, pos.y + 122.0f), rankText, rankColor(rank), 0.85f);
 
             ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + headerHeight + 10.0f));
             ImGui::BeginChild("##detail", ImVec2(size.x - 32.0f, size.y - headerHeight - 74.0f), false);
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextUnformatted(species->description.c_str());
             ImGui::PopTextWrapPos();
-            drawStats(species->stats);
-            drawAbilities(data, storage, *species, owned);
+            drawStats(species->stats, owned.evs);
+            drawAbilities(data, *species);
             drawGathering(data, *species);
             ImGui::EndChild();
 
             // Acciones
             ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + size.y - 54.0f));
+            const auto fixIndex = [&]() {
+                const int count = static_cast<int>((selection.inTeam ? storage.team() : storage.pc()).size());
+                selection.index = (std::max)(0, (std::min)(selection.index, count - 1));
+                confirmRelease = false;
+            };
             if (selection.inTeam) {
-                if (GuiCards::button("##lead", "HACER LÍDER", ImVec2(180.0f, 38.0f), selection.index > 0)) {
+                if (GuiCards::button("##lead", "LÍDER", ImVec2(100.0f, 38.0f), selection.index > 0)) {
                     storage.makeLead(selection.index);
                     selection.index = 0;
+                    confirmRelease = false;
                 }
                 ImGui::SameLine();
-                if (GuiCards::button("##sendPc", "ENVIAR AL PC", ImVec2(180.0f, 38.0f), !storage.pcFull() && storage.team().size() > 1)) {
+                if (GuiCards::button("##sendPc", "AL PC", ImVec2(90.0f, 38.0f), !storage.pcFull() && storage.team().size() > 1)) {
                     storage.sendToPc(selection.index);
-                    selection.index = (std::max)(0, (std::min)(selection.index, static_cast<int>(storage.team().size()) - 1));
+                    fixIndex();
                 }
-            } else if (GuiCards::button("##sendTeam", "AÑADIR AL EQUIPO", ImVec2(220.0f, 38.0f), !storage.teamFull())) {
+            } else if (GuiCards::button("##sendTeam", "AL EQUIPO", ImVec2(130.0f, 38.0f), !storage.teamFull())) {
                 storage.sendToTeam(selection.index);
-                selection.index = (std::max)(0, (std::min)(selection.index, static_cast<int>(storage.pc().size()) - 1));
+                fixIndex();
+            }
+            ImGui::SameLine();
+            const bool canRelease = !(selection.inTeam && storage.team().size() <= 1); // siempre queda uno en el equipo
+            if (GuiCards::button("##release", confirmRelease ? "¿SEGURO? LIBERAR" : "LIBERAR", ImVec2(confirmRelease ? 190.0f : 110.0f, 38.0f), canRelease, IM_COL32(190, 50, 50, 255))) {
+                if (confirmRelease) {
+                    storage.release(selection.inTeam, selection.index);
+                    fixIndex();
+                } else confirmRelease = true;
             }
         }
     }
@@ -281,7 +293,8 @@ namespace PokemonComponent {
         const float top = detail::MARGIN + 54.0f;
         const float height = screen.y - top - detail::MARGIN - 28.0f;
 
-        GuiCards::text(dl, ImVec2(detail::MARGIN, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), "POKÉMON", 1.6f);
+        if (GuiCards::backButton(ImVec2(detail::MARGIN, detail::MARGIN - 8.0f))) state = back;
+        GuiCards::text(dl, ImVec2(detail::MARGIN + 140.0f, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), "POKÉMON", 1.6f);
 
         detail::drawTeam(data, storage, ImVec2(detail::MARGIN, top), height);
 

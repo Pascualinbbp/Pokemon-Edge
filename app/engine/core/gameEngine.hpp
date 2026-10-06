@@ -31,7 +31,7 @@ class GameEngine {
         m_scene = Scene(m_data);
         m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
         m_scene.dayCycle.setTime(save.worldTime);
-        m_scene.inventory.restore(save.items, save.selectedBall);
+        m_scene.inventory.restore(save.items, save.selectedBall, save.money);
         m_scene.storage.restore(save.team, save.pc);
     }
 
@@ -40,7 +40,7 @@ class GameEngine {
         SaveData save;
         save.playerPosition = { p.x, p.y, p.z };
         save.worldTime = m_scene.dayCycle.time();
-        m_scene.inventory.store(save.items, save.selectedBall);
+        m_scene.inventory.store(save.items, save.selectedBall, save.money);
         m_scene.storage.store(save.team, save.pc);
         return save;
     }

@@ -11,6 +11,8 @@ struct ResourceNodeType {
     int skillId = -1;   // habilidad necesaria para recolectarlo
     int level = 1;      // nivel mínimo de esa habilidad
     int hits = 1;
+    int growSeconds = 0; // 0 = se extrae con su habilidad; mayor = planta que crece sola en ese tiempo (regarla lo acelera)
+    bool plant() const { return growSeconds > 0; }
     int minYield = 1;
     int maxYield = 1;
     float spawnWeight = 1.0f;

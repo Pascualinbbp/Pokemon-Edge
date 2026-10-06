@@ -1,5 +1,6 @@
 #include "renderer3D.hpp"
 #include "../../utils/graphics/d3dUtil.hpp"
+#include "../world/itemStyle.hpp"
 #include "../world/pokemonStyle.hpp"
 #include <algorithm>
 #include <cmath>
@@ -517,6 +518,7 @@ void Renderer3D::collect(const Scene& scene) {
 
     for (const Chest& chest : scene.chests.entities) addChest(chest);
     for (const ResourceNode& node : scene.nodes.entities) addNode(node);
+    for (const GroundItem& item : scene.groundItems.entities) addGroundItem(item, scene.data());
 
     for (const Pokeball& ball : scene.balls) addBall(ball, 0.0f, 1.0f, 0.0f);
 }
@@ -554,10 +556,12 @@ void Renderer3D::addNode(const ResourceNode& node) {
     if (look.shape == ResourceStyle::Shape::BUSH) {
         part({ 1.0f, 0.6f, 1.0f }, 0.3f, { 0.0f, 0.3f, 0.0f }, look.body, 0.0f);
         part({ 0.7f, 0.5f, 0.7f }, 0.9f, { 0.15f, 0.65f, -0.1f }, look.body, 0.0f);
-        part({ 0.2f, 0.2f, 0.2f }, 0.4f, { 0.45f, 0.45f, 0.2f }, look.accent, 0.3f);
-        part({ 0.2f, 0.2f, 0.2f }, 0.2f, { -0.3f, 0.5f, 0.4f }, look.accent, 0.3f);
-        part({ 0.2f, 0.2f, 0.2f }, 0.7f, { 0.2f, 0.85f, 0.3f }, look.accent, 0.3f);
-        part({ 0.2f, 0.2f, 0.2f }, 0.1f, { -0.4f, 0.35f, -0.3f }, look.accent, 0.3f);
+        if (!node.growing()) { // los frutos solo salen cuando está crecido
+            part({ 0.2f, 0.2f, 0.2f }, 0.4f, { 0.45f, 0.45f, 0.2f }, look.accent, 0.3f);
+            part({ 0.2f, 0.2f, 0.2f }, 0.2f, { -0.3f, 0.5f, 0.4f }, look.accent, 0.3f);
+            part({ 0.2f, 0.2f, 0.2f }, 0.7f, { 0.2f, 0.85f, 0.3f }, look.accent, 0.3f);
+            part({ 0.2f, 0.2f, 0.2f }, 0.1f, { -0.4f, 0.35f, -0.3f }, look.accent, 0.3f);
+        }
         return;
     }
 
@@ -569,6 +573,26 @@ void Renderer3D::addNode(const ResourceNode& node) {
         part({ 0.28f, 0.28f, 0.28f }, 0.2f, { 0.85f, 0.45f, 0.1f }, look.accent, 0.35f);
         part({ 0.3f, 0.3f, 0.3f }, 0.9f, { -0.15f, 0.5f, 0.7f }, look.accent, 0.35f);
         part({ 0.26f, 0.26f, 0.26f }, 0.4f, { 0.5f, 0.75f, -0.3f }, look.accent, 0.35f);
+    }
+}
+
+// Objeto suelto: cubito del color de su material que gira y flota (varios cubitos si son varias unidades).
+void Renderer3D::addGroundItem(const GroundItem& item, const GameData& data) {
+    const Item* found = data.item(item.itemId());
+    XMFLOAT3 color = { 0.8f, 0.8f, 0.8f };
+    if (found && found->category == ItemCategory::MATERIAL) color = ItemStyle::materialColor(found->refId);
+    else if (found && found->category == ItemCategory::POKEBALL) color = PokeballStyle::color(found->refId);
+
+    const XMFLOAT3& p = item.body.position;
+    const float s = GroundItem::SIZE * item.scale();
+    const int cubes = (std::min)(item.quantity(), 3);
+    for (int i = 0; i < cubes; ++i) {
+        const float angle = item.spin() + static_cast<float>(i) * 2.1f;
+        const float offset = cubes > 1 ? 0.22f : 0.0f;
+        add(m_cube, XMMatrixScaling(s, s, s) * XMMatrixRotationY(angle) *
+            XMMatrixTranslation(p.x + std::cos(angle) * offset, p.y + s * 0.5f + 0.15f + item.bob() + static_cast<float>(i) * 0.04f,
+                                p.z + std::sin(angle) * offset),
+            { color.x, color.y, color.z, 0.35f });
     }
 }
 

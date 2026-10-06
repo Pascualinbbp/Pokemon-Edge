@@ -23,11 +23,15 @@ namespace ItemInfo {
         if (item.category == ItemCategory::MATERIAL) {
             for (const ResourceNodeType& node : data.nodes) {
                 if (node.materialId != item.refId) continue;
-                std::snprintf(text, sizeof(text), "%s: %s (nivel %d)", node.action.c_str(), node.name.c_str(), node.level);
+                if (node.plant()) std::snprintf(text, sizeof(text), "%s: %s", node.action.c_str(), node.name.c_str());
+                else std::snprintf(text, sizeof(text), "%s: %s (nivel %d)", node.action.c_str(), node.name.c_str(), node.level);
                 lines.emplace_back(text);
             }
         } else if (item.category == ItemCategory::TOOL) {
             lines.emplace_back("La tienes desde el inicio");
+        }
+        for (const GroundItemType& ground : data.groundItems) {
+            if (ground.itemId == item.id) lines.emplace_back("Suelto por el mundo");
         }
         for (const ChestType& chest : data.chests) {
             if (const float chance = chestChance(chest, item.id); chance > 0.0f) {

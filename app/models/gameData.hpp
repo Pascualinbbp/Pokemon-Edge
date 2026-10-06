@@ -3,11 +3,12 @@
 #include <vector>
 #include "ability.hpp"
 #include "chestType.hpp"
-#include "element.hpp"
+#include "groundItemType.hpp"
 #include "item.hpp"
 #include "itemCategoryInfo.hpp"
 #include "material.hpp"
 #include "pokeballType.hpp"
+#include "pokemonType.hpp"
 #include "pokemonSpecies.hpp"
 #include "resourceNodeType.hpp"
 #include "skill.hpp"
@@ -23,7 +24,8 @@ struct GameData {
     std::vector<Skill> skills;
     std::vector<PokemonSpecies> species;
     std::vector<Ability> abilities;
-    std::vector<Element> elements;
+    std::vector<PokemonType> types;
+    std::vector<GroundItemType> groundItems;
     std::vector<ChestType> chests;
     std::vector<ResourceNodeType> nodes;
 
@@ -38,7 +40,7 @@ struct GameData {
     const Skill* skill(int id) const { return find(skills, id); }
     const Item* item(int id) const { return find(items, id); }
     const Ability* ability(int id) const { return find(abilities, id); }
-    const Element* element(int id) const { return find(elements, id); }
+    const PokemonType* type(int id) const { return find(types, id); }
     const PokemonSpecies* speciesById(int id) const { return find(species, id); }
 
     int speciesIndex(int id) const {
@@ -60,13 +62,11 @@ struct GameData {
     const Item* materialItem(int materialId) const { return itemOf(ItemCategory::MATERIAL, materialId); }
     const Item* toolItem(int toolId) const { return itemOf(ItemCategory::TOOL, toolId); }
 
-    // ¿Alguna de sus habilidades pasivas lo hace levitar?
+    // ¿Alguna de sus habilidades lo hace levitar?
     bool levitates(const PokemonSpecies& species) const {
-        for (const SpeciesAbility& entry : species.abilities) {
-            if (!entry.passive) continue;
-            if (const Ability* found = ability(entry.abilityId); found && found->floats) return true;
-        }
-        return false;
+        const Ability* active = ability(species.abilityId);
+        const Ability* passive = ability(species.passiveId);
+        return (active && active->floats) || (passive && passive->floats);
     }
 
     // La herramienta que representa un objeto (nullptr si no es una herramienta).

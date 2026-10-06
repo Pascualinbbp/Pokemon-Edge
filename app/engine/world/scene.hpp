@@ -16,6 +16,8 @@
 #include "captureRules.hpp"
 #include "captureTarget.hpp"
 #include "chestRules.hpp"
+#include "evRules.hpp"
+#include "groundSpawn.hpp"
 #include "dayCycle.hpp"
 #include "inventory.hpp"
 #include "player.hpp"
@@ -34,6 +36,8 @@ struct Scene {
     static constexpr float MAX_AIM_DISTANCE = 25.0f;  // si el rayo de apuntado no choca con nada, se apunta a esta distancia
     static constexpr float RANGE = 24.0f;             // alcance del jugador: porcentaje visible y fijado de cámara
     static constexpr float LOCK_RELEASE_MARGIN = 3.0f; // el fijado se mantiene un poco más allá del alcance
+    static constexpr float LOCK_HIDDEN_GRACE = 0.8f;   // segundos que el fijado aguanta con el pokémon tapado
+    static constexpr float CHEST_HEIGHT = 1.2f;        // altura desde la que el jugador ve a los pokémon
     static constexpr float SPAWN_SIDE = 0.35f;        // la pokéball sale por el hombro derecho
     static constexpr float SPAWN_FORWARD = 0.5f;
     static constexpr float SPAWN_HEIGHT = 1.1f;
@@ -50,11 +54,11 @@ struct Scene {
     Inventory inventory;
     SpawnField<Chest> chests;
     SpawnField<ResourceNode> nodes;
+    SpawnField<GroundItem> groundItems;
     PokemonStorage storage;   // equipo (6) y PC
     Companion companion;      // el líder del equipo, que acompaña al jugador y trabaja recursos
     std::string noticeText;   // segunda línea del aviso: recompensa obtenida, pokémon capturado...
 
-    int captures = 0;
     Notice notice = Notice::NONE;
     float noticeTime = 0.0f;
     float throwCooldown = 0.0f;
@@ -67,6 +71,7 @@ struct Scene {
         storage.setData(gameData);
         chests.setup(ChestSpawn::COUNT);
         nodes.setup(ResourceSpawn::COUNT);
+        groundItems.setup(GroundSpawn::COUNT);
         world.obstacles = {
             { {  6.0f, 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
             { { -7.0f, 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
@@ -86,7 +91,7 @@ struct Scene {
 
         if (input.lockCancel) lockedIndex = -1;
         else if (input.lockTap) cycleLock();
-        validateLock();
+        validateLock(dt);
 
         camera.update(dt, m_aiming);
         if (lockedIndex >= 0) camera.trackToward(player.body.position, targets[lockedIndex].center(), dt);
@@ -117,12 +122,17 @@ struct Scene {
         nodes.update(dt, ResourceSpawn::DELAY,
             [&](ResourceNode& node) { world.step(node.body, dt); node.update(dt); },
             [&](int spot) { return ResourceSpawn::make(*m_data, spot); });
+        groundItems.update(dt, GroundSpawn::DELAY,
+            [&](GroundItem& item) { world.step(item.body, dt); item.update(dt); },
+            [&](int spot) { return GroundSpawn::make(*m_data, spot); });
         updateCompanion(dt);
         updateInteraction();
         if (input.interact) interact();
         updateAimInfo();
         return pause;
     }
+
+    const GameData& data() const { return *m_data; }
 
     DirectX::XMMATRIX getViewMatrix() const {
         return camera.viewMatrix(player.body.position);
@@ -131,7 +141,6 @@ struct Scene {
     GameStatus status() const {
         GameStatus s;
         s.aimBlend = camera.aimBlend();
-        s.captures = captures;
         s.notice = noticeTime > 0.0f ? notice : Notice::NONE;
         s.locked = lockedIndex >= 0;
         s.inventory = &inventory;
@@ -148,9 +157,18 @@ struct Scene {
             s.interactVerb = CHEST_VERB;
             s.interactTarget = &m_data->chests[chests.entities[m_interaction.index].typeIndex()].name;
         } else if (m_interaction.kind == Interaction::NODE) {
-            const ResourceNodeType& type = m_data->nodes[nodes.entities[m_interaction.index].typeIndex()];
-            s.interactVerb = type.action.c_str();
+            const ResourceNode& node = nodes.entities[m_interaction.index];
+            const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
+            const Skill* skill = node.growing() ? m_data->skill(type.skillId) : nullptr;
+            s.interactVerb = skill ? skill->name.c_str() : type.action.c_str();
             s.interactTarget = &type.name;
+        } else if (m_interaction.kind == Interaction::GROUND) {
+            const GroundItem& item = groundItems.entities[m_interaction.index];
+            s.interactVerb = PICK_VERB;
+            if (const Item* it = m_data->item(item.itemId())) {
+                m_targetName = m_data->itemName(*it);
+                s.interactTarget = &m_targetName;
+            }
         }
         if (m_aimTarget >= 0) {
             const CaptureTarget& t = targets[m_aimTarget];
@@ -201,11 +219,15 @@ struct Scene {
             return;
         }
 
-        ++captures;
         std::string text;
         if (const PokemonSpecies* species = m_data->speciesById(target.speciesId())) {
+            OwnedPokemon owned;
+            owned.speciesId = species->id;
+            owned.evs = EvRules::roll();
             bool sentToPc = false;
-            text = species->name + (!storage.add(species->id, sentToPc) ? " (sin espacio)" : sentToPc ? " (enviado al PC)" : "");
+            const bool stored = storage.add(owned, sentToPc);
+            text = species->name + "  [" + EvRules::label(EvRules::rank(species->stats, owned.evs)) + "]" +
+                   (!stored ? " (sin espacio)" : sentToPc ? " (enviado al PC)" : "");
         }
         switch (target.throwKind()) {
             case CaptureRules::Throw::LUCKY:       showNotice(Notice::LUCKY, text); break;
@@ -220,35 +242,56 @@ struct Scene {
         if (index >= 0) target.setSpecies(index, m_data->species[index].id);
     }
 
-    // El líder del equipo acompaña al jugador y trabaja solo los recursos cercanos cuya habilidad conoce.
+    // El líder del equipo acompaña al jugador y trabaja solo lo cercano: recoge plantas crecidas y objetos sueltos (cualquier
+    // pokémon) y trabaja los nodos y riega las plantas si su habilidad del mundo llega al nivel que piden.
     void updateCompanion(float dt) {
         const int lead = storage.leadSpeciesId();
         const PokemonSpecies* species = m_data->speciesById(lead);
         if (lead != companion.speciesId()) companion.set(lead, species && m_data->levitates(*species), player.body.position, camera.yaw());
 
-        ResourceNode* target = nullptr;
-        int level = 0;
+        ResourceNode* nodeTarget = nullptr;
+        GroundItem* groundTarget = nullptr;
+        int level = 1;
+        float best = 1.0e9f;
+        const auto distance2 = [&](const DirectX::XMFLOAT3& at) {
+            const float dx = at.x - companion.body.position.x, dz = at.z - companion.body.position.z;
+            return dx * dx + dz * dz;
+        };
         if (species) {
-            float best = 1.0e9f;
             for (ResourceNode& node : nodes.entities) {
                 if (node.depleted()) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
-                const int skillLevel = species->skillLevel(type.skillId);
-                if (skillLevel < type.level) continue; // no la tiene o no llega al nivel que exige
-                const float dx = node.body.position.x - companion.body.position.x;
-                const float dz = node.body.position.z - companion.body.position.z;
-                const float d2 = dx * dx + dz * dz;
+                const int skillLevel = species->levelIn(type.skillId);
+                if (node.growing() || !node.plant()) {
+                    if (skillLevel < type.level) continue; // no sabe regar / extraer esto, o no llega al nivel
+                }
                 const float range = Companion::WORK_RANGE + ResourceStyle::look(node.typeId()).half;
+                const float d2 = distance2(node.body.position);
                 if (d2 <= range * range && d2 < best) {
                     best = d2;
-                    target = &node;
-                    level = skillLevel;
+                    nodeTarget = &node;
+                    groundTarget = nullptr;
+                    level = (std::max)(1, skillLevel);
+                }
+            }
+            for (GroundItem& item : groundItems.entities) {
+                if (!item.available()) continue;
+                const float range = Companion::WORK_RANGE;
+                const float d2 = distance2(item.body.position);
+                if (d2 <= range * range && d2 < best) {
+                    best = d2;
+                    groundTarget = &item;
+                    nodeTarget = nullptr;
+                    level = 1;
                 }
             }
         }
-        if (target) target->companionWorking();
-        const float power = target ? Companion::workPower(level, target->teamBonus(false)) : 0.0f;
-        if (companion.update(dt, world, player.body.position, camera.yaw(), power) && target) hitNode(*target, false);
+        if (nodeTarget) nodeTarget->companionWorking();
+        const float teamBonus = nodeTarget ? nodeTarget->teamBonus(false) : 1.0f;
+        const float power = (nodeTarget || groundTarget) ? Companion::workPower(level, teamBonus) : 0.0f;
+        if (!companion.update(dt, world, player.body.position, camera.yaw(), power)) return;
+        if (nodeTarget) workNode(*nodeTarget, false);
+        else if (groundTarget) collect(*groundTarget);
     }
 
     // --- Interacción (cofres y recursos) ---
@@ -269,15 +312,24 @@ struct Scene {
         return index;
     }
 
+    // ¿Puede el jugador trabajar este nodo ahora? Regar una planta o extraer exigen su herramienta (nivel mínimo);
+    // recoger una planta crecida no exige nada.
+    bool playerCanWork(const ResourceNode& node) const {
+        const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
+        return (node.plant() && !node.growing()) || inventory.skillLevel(type.skillId) >= type.level;
+    }
+
     void updateInteraction() {
         float best = 1.0e9f;
         m_interaction = {};
-        if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
         m_missingSkill = -1;
+        if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
+        if (const int i = nearestIn(groundItems.entities, [](const GroundItem& g) { return g.available(); }, best); i >= 0) m_interaction = { Interaction::GROUND, i };
         if (const int i = nearestIn(nodes.entities, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) {
-            const ResourceNodeType& type = m_data->nodes[nodes.entities[i].typeIndex()];
-            if (inventory.skillLevel(type.skillId) >= type.level) m_interaction = { Interaction::NODE, i };
+            const ResourceNode& node = nodes.entities[i];
+            if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
             else {
+                const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
                 m_missingSkill = type.skillId; // sin herramienta de ese nivel: solo un pokémon que llegue al nivel puede trabajarlo
                 m_missingLevel = type.level;
             }
@@ -286,9 +338,11 @@ struct Scene {
 
     void interact() {
         if (m_interaction.kind == Interaction::CHEST) openChest(chests.entities[m_interaction.index]);
+        else if (m_interaction.kind == Interaction::GROUND) collect(groundItems.entities[m_interaction.index]);
         else if (m_interaction.kind == Interaction::NODE) {
             ResourceNode& node = nodes.entities[m_interaction.index];
-            hitNode(node, true, inventory.skillSpeed(m_data->nodes[node.typeIndex()].skillId));
+            const bool tool = node.growing() || !node.plant();
+            workNode(node, true, tool ? inventory.skillSpeed(m_data->nodes[node.typeIndex()].skillId) : 1.0f);
         }
     }
 
@@ -307,12 +361,18 @@ struct Scene {
         if (reward) giveReward(reward->itemId, reward->quantity);
     }
 
-    // Un golpe al recurso; al agotarlo da su material.
-    void hitNode(ResourceNode& node, bool byPlayer, float speed = 1.0f) {
-        if (!node.hit(byPlayer, speed) || !node.depleted()) return;
+    // Un paso de trabajo en el nodo (riego o golpe); al agotarlo da su material.
+    void workNode(ResourceNode& node, bool byPlayer, float speed = 1.0f) {
+        if (!node.work(byPlayer, speed) || !node.depleted()) return;
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
-        const Item* item = m_data->materialItem(type.materialId);
-        if (item) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
+        if (const Item* item = m_data->materialItem(type.materialId)) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
+    }
+
+    // Recoge un objeto suelto del mundo.
+    void collect(GroundItem& item) {
+        if (!item.available()) return;
+        giveReward(item.itemId(), item.quantity());
+        item.take();
     }
 
     // --- Fijado de cámara ---
@@ -327,11 +387,17 @@ struct Scene {
         return DirectX::XMScalarModAngle(std::atan2(dx, dz) - camera.yaw());
     }
 
-    // Objetivos disponibles para fijar (vivos y dentro del alcance).
+    // ¿Se ve el pokémon desde el jugador, sin paredes, rocas, árboles ni cofres de por medio?
+    bool visible(const CaptureTarget& t) const {
+        const DirectX::XMFLOAT3 chest = { player.body.position.x, player.body.position.y + CHEST_HEIGHT, player.body.position.z };
+        return !world.blocked(chest, t.center());
+    }
+
+    // Objetivos disponibles para fijar (vivos, dentro del alcance y a la vista).
     std::vector<int> lockCandidates(int exclude) const {
         std::vector<int> result;
         for (int i = 0; i < TARGET_COUNT; ++i) {
-            if (i != exclude && targets[i].hittable() && distanceXZ(targets[i]) <= RANGE) result.push_back(i);
+            if (i != exclude && targets[i].hittable() && distanceXZ(targets[i]) <= RANGE && visible(targets[i])) result.push_back(i);
         }
         return result;
     }
@@ -360,11 +426,15 @@ struct Scene {
         else lockedIndex = (it + 1 == candidates.end()) ? candidates.front() : *(it + 1);
     }
 
-    // Si el objetivo fijado se captura o queda fuera de alcance, salta a otro cercano; si no hay, se suelta.
-    void validateLock() {
+    // Si el objetivo fijado se captura, queda fuera de alcance o lleva un rato tapado, salta a otro visible; si no hay, se suelta.
+    void validateLock(float dt) {
         if (lockedIndex < 0) return;
         const CaptureTarget& t = targets[lockedIndex];
-        if (t.hittable() && distanceXZ(t) <= RANGE + LOCK_RELEASE_MARGIN) return;
+        if (t.hittable() && distanceXZ(t) <= RANGE + LOCK_RELEASE_MARGIN) {
+            m_lockHidden = visible(t) ? 0.0f : m_lockHidden + dt;
+            if (m_lockHidden < LOCK_HIDDEN_GRACE) return;
+        }
+        m_lockHidden = 0.0f;
 
         const std::vector<int> candidates = lockCandidates(lockedIndex);
         lockedIndex = candidates.empty() ? -1 : closestToCenter(candidates);
@@ -378,6 +448,7 @@ struct Scene {
         for (int i = 0; i < TARGET_COUNT; ++i) {
             float t = 0.0f;
             if (inRangeOnly && distanceXZ(targets[i]) > RANGE) continue;
+            if (world.blocked(eye, targets[i].center())) continue; // tapado por un obstáculo
             if (targets[i].raycast(eye, dir, t) && t < distance) {
                 distance = t;
                 best = i;
@@ -477,23 +548,24 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND } kind = NONE;
         int index = -1;
     };
 
     // Hay algún pokémon al alcance al que fijar la cámara (o ya hay uno fijado).
     bool anyLockable() const {
-        if (lockedIndex >= 0) return true;
-        for (int i = 0; i < TARGET_COUNT; ++i) if (targets[i].hittable() && distanceXZ(targets[i]) <= RANGE) return true;
-        return false;
+        return lockedIndex >= 0 || !lockCandidates(-1).empty();
     }
 
     static constexpr const char* CHEST_VERB = "Abrir";
+    static constexpr const char* PICK_VERB = "Recoger";
+    mutable std::string m_targetName; // nombre del objeto suelto señalado (para el aviso de interacción)
 
     const GameData* m_data;
     int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)
     int m_missingLevel = 0;    // nivel que exige ese recurso
     Interaction m_interaction; // lo que el jugador puede usar ahora mismo (cofre o recurso cercano)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
+    float m_lockHidden = 0.0f; // segundos que lleva tapado el pokémon fijado
     int m_aimTarget = -1;  // pokémon al que apunta la cruceta dentro del alcance
 };

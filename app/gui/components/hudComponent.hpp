@@ -181,14 +181,6 @@ namespace HudComponent {
             }
         }
 
-        // Materiales y demás objetos que no son pokéballs (solo los que se tienen), bajo el contador de capturas.
-        inline void drawMaterials(const GameStatus& status) {
-            if (!status.inventory || !status.data) return;
-            status.inventory->forEach([&](const Item& item, int count) {
-                if (item.category != ItemCategory::POKEBALL && count > 0) ImGui::Text("%s: %d", status.data->itemName(item).c_str(), count);
-            });
-        }
-
         // Mira redonda (anillo con punto central); cambia de color al apuntar a un pokémon en rango.
         inline void drawCrosshair(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
@@ -231,8 +223,6 @@ namespace HudComponent {
         ImGui::Text("FPS: %.0f", ImGui::GetIO().Framerate);
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        ImGui::Text("Capturas: %d", status.captures);
-        detail::drawMaterials(status);
 
         if (saving > 0.0f) detail::drawSaving(dl, saving);
 

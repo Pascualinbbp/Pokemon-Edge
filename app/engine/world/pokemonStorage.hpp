@@ -1,12 +1,14 @@
 #pragma once
+#include <cstdlib>
 #include <string>
 #include <vector>
 #include "../../models/gameData.hpp"
+#include "evRules.hpp"
 
-// Un pokémon del jugador: su especie y la habilidad activa que lleva equipada (entre las que puede aprender).
+// Un pokémon del jugador: su especie y los EVs con los que se capturó.
 struct OwnedPokemon {
     int speciesId = -1;
-    int abilityId = -1;
+    EvRules::Evs evs = {};
 };
 
 // Pokémon del jugador: el equipo (hasta 6; el primero es el que lo acompaña por el mundo) y el PC donde se guardan
@@ -29,10 +31,7 @@ class PokemonStorage {
     int leadSpeciesId() const { return m_team.empty() ? -1 : m_team.front().speciesId; }
 
     // Un pokémon recién capturado va al equipo y, si está lleno, al PC. Devuelve false si no hay sitio en ninguno.
-    bool add(int speciesId, bool& sentToPc) {
-        const PokemonSpecies* species = m_data->speciesById(speciesId);
-        if (!species) return false;
-        const OwnedPokemon owned = { speciesId, species->defaultActiveAbility() };
+    bool add(const OwnedPokemon& owned, bool& sentToPc) {
         sentToPc = teamFull();
         if (!sentToPc) m_team.push_back(owned);
         else if (!pcFull()) m_pc.push_back(owned);
@@ -56,15 +55,13 @@ class PokemonStorage {
         m_pc.erase(m_pc.begin() + pcIndex);
     }
 
-    // Cambia la habilidad activa de un pokémon (solo entre las que puede aprender).
-    void setAbility(bool inTeam, int index, int abilityId) {
+    // Libera (elimina) un pokémon del equipo o del PC.
+    void release(bool inTeam, int index) {
         std::vector<OwnedPokemon>& list = inTeam ? m_team : m_pc;
-        if (index < 0 || index >= static_cast<int>(list.size())) return;
-        const PokemonSpecies* species = m_data->speciesById(list[index].speciesId);
-        if (species && species->canLearn(abilityId)) list[index].abilityId = abilityId;
+        if (index >= 0 && index < static_cast<int>(list.size())) list.erase(list.begin() + index);
     }
 
-    // --- Guardado ("Especie|Habilidad", por nombre) ---
+    // --- Guardado ("Especie|ev,ev,ev,ev,ev,ev", por nombre de especie) ---
     void store(std::vector<std::string>& team, std::vector<std::string>& pc) const {
         team = encode(m_team);
         pc = encode(m_pc);
@@ -85,8 +82,9 @@ class PokemonStorage {
         for (const OwnedPokemon& owned : list) {
             const PokemonSpecies* species = m_data->speciesById(owned.speciesId);
             if (!species) continue;
-            const Ability* ability = m_data->ability(owned.abilityId);
-            result.push_back(species->name + SEPARATOR + (ability ? ability->name : std::string()));
+            std::string text = species->name + SEPARATOR;
+            for (int i = 0; i < BaseStats::COUNT; ++i) text += (i ? "," : "") + std::to_string(owned.evs[i]);
+            result.push_back(std::move(text));
         }
         return result;
     }
@@ -96,13 +94,17 @@ class PokemonStorage {
         const int index = m_data->speciesIndexByName(text.substr(0, cut));
         if (index < 0) return;
 
-        const PokemonSpecies& species = m_data->species[index];
-        OwnedPokemon owned = { species.id, species.defaultActiveAbility() };
+        OwnedPokemon owned;
+        owned.speciesId = m_data->species[index].id;
         if (cut != std::string::npos) {
-            const std::string abilityName = text.substr(cut + 1);
-            for (const Ability& ability : m_data->abilities) {
-                if (ability.name == abilityName && species.canLearn(ability.id)) owned.abilityId = ability.id;
+            size_t from = cut + 1;
+            for (int i = 0; i < BaseStats::COUNT && from <= text.size(); ++i) {
+                owned.evs[i] = std::atoi(text.c_str() + from);
+                const size_t comma = text.find(',', from);
+                if (comma == std::string::npos) break;
+                from = comma + 1;
             }
+            owned.evs = EvRules::clamped(owned.evs);
         }
         list.push_back(owned);
     }

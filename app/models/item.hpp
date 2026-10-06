@@ -19,4 +19,6 @@ struct Item {
     ItemCategory category = ItemCategory::UNKNOWN;
     int categoryId = -1; // id en item_category (para agrupar en el inventario)
     int refId = -1; // id en la tabla de su categoría
+    int buyPrice = 0;  // coste de compra en pokémonedas (0 = no se compra)
+    int sellPrice = 0; // coste de venta (0 = no se vende)
 };

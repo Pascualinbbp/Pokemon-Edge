@@ -11,7 +11,8 @@ class ItemDao {
         std::vector<Item> items;
         for (const auto& row : SqliteUtil::executeSelect(SELECT_ALL)) {
             items.push_back({ DaoRow::integer(row, "id"), ItemCategoryText::parse(DaoRow::text(row, "category")),
-                              DaoRow::integer(row, "category_id"), DaoRow::integer(row, "ref_id") });
+                              DaoRow::integer(row, "category_id"), DaoRow::integer(row, "ref_id"),
+                              DaoRow::integer(row, "buy_price"), DaoRow::integer(row, "sell_price") });
         }
         if (items.empty()) Logger::logError("ITEM_DAO", "Las tablas de objetos no existen o están vacías (falta aplicar testing/sql/item.sql).");
         return items;
@@ -27,6 +28,6 @@ class ItemDao {
 
     private:
     static constexpr const char* SELECT_ALL =
-        "SELECT i.id, c.name AS category, i.category_id, i.ref_id FROM item i JOIN item_category c ON c.id = i.category_id ORDER BY i.id;";
+        "SELECT i.id, c.name AS category, i.category_id, i.ref_id, i.buy_price, i.sell_price FROM item i JOIN item_category c ON c.id = i.category_id ORDER BY i.id;";
     static constexpr const char* SELECT_CATEGORIES = "SELECT id, name, label FROM item_category ORDER BY id;";
 };
