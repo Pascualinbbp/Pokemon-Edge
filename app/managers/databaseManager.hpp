@@ -8,6 +8,8 @@
 #include "../daos/chestDao.hpp"
 #include "../daos/materialDao.hpp"
 #include "../daos/resourceNodeDao.hpp"
+#include "../daos/skillDao.hpp"
+#include "../daos/pokemonSpeciesDao.hpp"
 
 class DatabaseManager {
     private:
@@ -17,6 +19,8 @@ class DatabaseManager {
     inline static ChestDao chestDaoInstance;
     inline static MaterialDao materialDaoInstance;
     inline static ResourceNodeDao resourceNodeDaoInstance;
+    inline static SkillDao skillDaoInstance;
+    inline static PokemonSpeciesDao speciesDaoInstance;
 
     public:
     static void init() {
@@ -48,17 +52,30 @@ class DatabaseManager {
         return resourceNodeDaoInstance;
     }
 
+    static SkillDao& getSkillDao() {
+        return skillDaoInstance;
+    }
+
+    static PokemonSpeciesDao& getSpeciesDao() {
+        return speciesDaoInstance;
+    }
+
     // Único punto de carga de los datos de juego: el motor recibe esto y nada más.
     static GameData loadGameData() {
         GameData data;
         data.balls = pokeballDaoInstance.findAll();
         data.items = itemDaoInstance.findAll();
+        data.categories = itemDaoInstance.findCategories();
         data.materials = materialDaoInstance.findAll();
         data.chests = chestDaoInstance.findAll();
         data.nodes = resourceNodeDaoInstance.findAll();
+        data.skills = skillDaoInstance.findAll();
+        data.tools = skillDaoInstance.findTools();
+        data.species = speciesDaoInstance.findAll();
         Logger::logInfo("DB_MANAGER", "Datos de juego: " + std::to_string(data.items.size()) + " objetos, " +
             std::to_string(data.balls.size()) + " pokéballs, " + std::to_string(data.materials.size()) + " materiales, " +
-            std::to_string(data.chests.size()) + " cofres, " + std::to_string(data.nodes.size()) + " nodos de recolección.");
+            std::to_string(data.chests.size()) + " cofres, " + std::to_string(data.nodes.size()) + " nodos de recolección, " + std::to_string(data.skills.size()) + " habilidades, " +
+            std::to_string(data.tools.size()) + " herramientas, " + std::to_string(data.species.size()) + " especies.");
         return data;
     }
 };

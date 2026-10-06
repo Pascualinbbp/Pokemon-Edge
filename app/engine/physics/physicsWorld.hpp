@@ -10,15 +10,22 @@ namespace Physics {
         public:
         static constexpr float GRAVITY = 20.0f;
         static constexpr float HALF_SIZE = 40.0f; // el mundo va de -HALF_SIZE a +HALF_SIZE en X y Z
+        static constexpr float STEP_HEIGHT = 0.3f; // desnivel que se sube andando; por debajo de la cara superior menos esto, el sólido bloquea
+        static constexpr float SLIDE_SPEED = 5.0f; // velocidad con la que se resbala de lo que no admite quedarse encima
 
-        // Sólido: caja alineada con los ejes (paredes, hitbox de un pokémon...).
+        // Sólido: caja alineada con los ejes (paredes, cofres, rocas, hitbox de un pokémon...).
+        // walkable = se puede quedar encima; si no (pokémon, personajes), se puede saltar por encima pero se resbala al lado.
         struct Box {
             DirectX::XMFLOAT3 center;
             DirectX::XMFLOAT3 half; // semidimensiones
+            bool walkable = true;
+
+            float top() const { return center.y + half.y; }
+            float bottom() const { return center.y - half.y; }
         };
         std::vector<Box> obstacles; // fijos (paredes)
         std::vector<Box> creatures; // hitbox de los pokémon: la escena los rehace cada frame
-        std::vector<Box> props;     // objetos sólidos del mundo (cofres...): sólidos para todos los cuerpos; la escena los rehace cada frame
+        std::vector<Box> props;     // objetos sólidos del mundo (cofres, rocas, árboles...): la escena los rehace cada frame
 
         // Altura del terreno en (x, z). De momento el suelo es plano; aquí irá el terreno generado.
         float groundHeight(float, float) const { return 0.0f; }
@@ -28,18 +35,20 @@ namespace Physics {
             body.onGround = false;
         }
 
-        // Integra un cuerpo: gravedad, desplazamiento por su velocidad, límites del mundo y colisión con el suelo.
+        // Integra un cuerpo: gravedad, desplazamiento por su velocidad, límites del mundo, choque lateral con los
+        // sólidos y suelo (el terreno o la cara superior de un sólido sobre el que está o cae).
         // Quien controla la entidad (jugador, IA...) solo asigna body.velocity.x/z antes de llamar.
         // Los cuerpos con restitution > 0 (proyectiles) botan y ruedan; el resto se quedan en el suelo.
         void step(Body& body, float dt) const {
+            const float previousLow = body.position.y - body.groundOffset; // altura de los pies al empezar el paso
             if (!body.onGround) body.velocity.y -= GRAVITY * body.gravityScale * dt;
 
             body.position.x = (std::clamp)(body.position.x + body.velocity.x * dt, -HALF_SIZE, HALF_SIZE);
             body.position.z = (std::clamp)(body.position.z + body.velocity.z * dt, -HALF_SIZE, HALF_SIZE);
             body.position.y += body.velocity.y * dt;
-            collide(body);
+            if (body.collisionRadius > 0.0f) pushOutAll(body, previousLow);
 
-            const float floorY = groundHeight(body.position.x, body.position.z) + body.groundOffset;
+            const float floorY = supportHeight(body, previousLow, dt) + body.groundOffset;
             const bool touching = body.position.y <= floorY && body.velocity.y <= 0.0f;
             body.onGround = touching;
             if (!touching) return;
@@ -64,19 +73,57 @@ namespace Physics {
         }
 
         private:
-        // Saca el cuerpo de los sólidos (en horizontal). Los proyectiles rebotan; el resto desliza.
-        void collide(Body& body) const {
-            if (body.collisionRadius <= 0.0f) return;
-            const float low = body.position.y - body.groundOffset;
-            const float high = low + body.collisionHeight;
-
-            for (const Box& box : obstacles) pushOut(body, box, low, high);
-            for (const Box& box : props) pushOut(body, box, low, high);
-            if (body.hitsCreatures) for (const Box& box : creatures) pushOut(body, box, low, high);
+        // Recorre los sólidos que afectan a este cuerpo.
+        template <typename F>
+        void forEachSolid(const Body& body, F f) const {
+            for (const Box& box : obstacles) f(box);
+            for (const Box& box : props) f(box);
+            if (body.hitsCreatures) for (const Box& box : creatures) f(box);
         }
 
-        static void pushOut(Body& body, const Box& box, float low, float high) {
-            if (high <= box.center.y - box.half.y || low >= box.center.y + box.half.y) return;
+        // ¿Está el cuerpo (que empezó el paso con los pies en previousLow) por encima de la cara superior del sólido?
+        static bool startedAbove(float previousLow, const Box& box) {
+            return previousLow >= box.top() - STEP_HEIGHT;
+        }
+
+        // ¿Se solapa la huella circular del cuerpo con la caja en el plano horizontal?
+        static bool overlapsFootprint(const Body& body, const Box& box) {
+            const float dx = body.position.x - std::clamp(body.position.x, box.center.x - box.half.x, box.center.x + box.half.x);
+            const float dz = body.position.z - std::clamp(body.position.z, box.center.z - box.half.z, box.center.z + box.half.z);
+            return dx * dx + dz * dz <= body.collisionRadius * body.collisionRadius;
+        }
+
+        // Altura del suelo bajo el cuerpo: el terreno o la cara superior más alta de los sólidos que tiene debajo.
+        // En los que no admiten quedarse encima (pokémon, personajes) el cuerpo se posa un instante y resbala.
+        float supportHeight(Body& body, float previousLow, float dt) const {
+            float height = groundHeight(body.position.x, body.position.z);
+            if (body.collisionRadius <= 0.0f) return height;
+
+            forEachSolid(body, [&](const Box& box) {
+                if (!startedAbove(previousLow, box) || !overlapsFootprint(body, box)) return;
+                height = (std::max)(height, box.top());
+                if (!box.walkable) slideOff(body, box, dt);
+            });
+            return height;
+        }
+
+        static void slideOff(Body& body, const Box& box, float dt) {
+            float nx = body.position.x - box.center.x;
+            float nz = body.position.z - box.center.z;
+            const float length = std::sqrt(nx * nx + nz * nz);
+            if (length < 1.0e-4f) { nx = 1.0f; nz = 0.0f; } else { nx /= length; nz /= length; }
+            body.position.x += nx * SLIDE_SPEED * dt;
+            body.position.z += nz * SLIDE_SPEED * dt;
+        }
+
+        // Saca el cuerpo de los sólidos (en horizontal). Los proyectiles rebotan; el resto desliza.
+        void pushOutAll(Body& body, float previousLow) const {
+            const float high = body.position.y - body.groundOffset + body.collisionHeight;
+            forEachSolid(body, [&](const Box& box) { pushOut(body, box, previousLow, high); });
+        }
+
+        static void pushOut(Body& body, const Box& box, float previousLow, float high) {
+            if (startedAbove(previousLow, box) || high <= box.bottom()) return; // por encima o por debajo: no choca de lado
 
             const float r = body.collisionRadius;
             const float minX = box.center.x - box.half.x, maxX = box.center.x + box.half.x;

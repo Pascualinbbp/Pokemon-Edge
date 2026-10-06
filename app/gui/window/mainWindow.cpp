@@ -11,9 +11,12 @@
 #include "../components/hudComponent.hpp"
 #include "../components/pauseComponent.hpp"
 #include "../components/controlsComponent.hpp"
+#include "../components/inventoryComponent.hpp"
+#include "../components/updateComponent.hpp"
 #include "../../managers/databaseManager.hpp"
 #include "../../managers/saveManager.hpp"
 #include "../../managers/sessionManager.hpp"
+#include "../../managers/updateManager.hpp"
 #include "../../utils/core/pathsUtil.hpp"
 #include "../../utils/core/resourceUtil.hpp"
 #include "../../utils/core/timeUtil.hpp"
@@ -222,6 +225,12 @@ void MainWindow::run() {
 
         InputHandler::refreshDevices();
 
+        // Una actualización en curso (fuera de la partida) toma la pantalla hasta que termine.
+        if ((g_state == GameState::TITLE_SCREEN || g_state == GameState::MAIN_MENU) && UpdateManager::active()) {
+            g_state = GameState::UPDATING;
+            redrawFrames = 2;
+        }
+
         // Al entrar/salir del juego cambia quién lee el mando: el juego (InputHandler) o la interfaz (GuiInput).
         const bool playing = g_state == GameState::PLAYING;
         if (playing != wasPlaying) {
@@ -254,8 +263,8 @@ void MainWindow::run() {
         bool justPaused = false;
         if (g_state == GameState::PLAYING) {
             const InputState input = InputHandler::poll(dt);
-            if (input.pause || engine.update(dt, input)) {
-                g_state = GameState::PAUSED;
+            if (input.pause || engine.update(dt, input) || input.inventory) {
+                g_state = input.inventory && !input.pause ? GameState::INVENTORY : GameState::PAUSED;
                 redrawFrames = 2;
                 justPaused = true;
             } else {
@@ -331,6 +340,12 @@ void MainWindow::run() {
                 break;
             case GameState::CONTROLS:
                 ControlsComponent::render(g_state, InputHandler::activeDevice());
+                break;
+            case GameState::UPDATING:
+                UpdateComponent::render(g_state);
+                break;
+            case GameState::INVENTORY:
+                InventoryComponent::render(g_state, engine.data(), engine.inventory(), engine.storage());
                 break;
         }
         ImGui::End();

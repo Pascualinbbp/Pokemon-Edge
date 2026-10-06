@@ -1,0 +1,86 @@
+#pragma once
+#include <cmath>
+#include "imgui.h"
+#include "../../engine/world/pokeball.hpp"
+#include "../../engine/world/pokemonStyle.hpp"
+#include "../../models/gameData.hpp"
+
+// Iconos de objetos y pokémon dibujados con ImDrawList. Es el único sitio donde se define su aspecto en la interfaz.
+namespace ItemIcon {
+    namespace detail {
+        inline ImU32 color(const DirectX::XMFLOAT3& tone, float alpha, float shade = 1.0f) {
+            const auto channel = [&](float v) { return static_cast<int>((std::min)(v * shade, 1.0f) * 255.0f); };
+            return IM_COL32(channel(tone.x), channel(tone.y), channel(tone.z), static_cast<int>(255.0f * alpha));
+        }
+
+        inline DirectX::XMFLOAT3 materialColor(int materialId) {
+            switch (materialId) {
+                case 1:  return { 0.55f, 0.36f, 0.18f }; // Madera
+                case 2:  return { 0.60f, 0.60f, 0.63f }; // Piedra
+                case 3:  return { 0.85f, 0.55f, 0.35f }; // Hierro
+                case 4:  return { 0.16f, 0.16f, 0.18f }; // Carbón
+                default: return { 0.70f, 0.70f, 0.70f };
+            }
+        }
+    }
+
+    // Pokéball: mitad de color, mitad blanca, con banda y botón central.
+    inline void ball(ImDrawList* dl, const ImVec2& c, float r, const DirectX::XMFLOAT3& tone, float alpha = 1.0f) {
+        const int a = static_cast<int>(255.0f * alpha);
+        const ImU32 white = IM_COL32(240, 240, 240, a);
+        const ImU32 dark = IM_COL32(20, 20, 25, a);
+
+        dl->AddCircleFilled(c, r, white, 28);
+        dl->PathArcTo(c, r, 3.1415927f, 6.2831853f, 20);
+        dl->PathFillConvex(detail::color(tone, alpha));
+        dl->AddCircle(c, r, dark, 28, 2.0f);
+        dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), dark, 2.0f);
+        dl->AddCircleFilled(c, r * 0.32f, white, 16);
+        dl->AddCircle(c, r * 0.32f, dark, 16, 2.0f);
+    }
+
+    // Bloque del color del material (cubo en perspectiva).
+    inline void material(ImDrawList* dl, const ImVec2& c, float r, int materialId, float alpha = 1.0f) {
+        const DirectX::XMFLOAT3 tone = detail::materialColor(materialId);
+        const float w = r * 0.9f, h = r * 0.52f;
+        const ImVec2 top[4] = { { c.x, c.y - r * 0.9f }, { c.x + w, c.y - r * 0.9f + h }, { c.x, c.y - r * 0.9f + h * 2.0f }, { c.x - w, c.y - r * 0.9f + h } };
+        const ImVec2 left[4] = { top[3], top[2], { c.x, c.y + r * 0.9f }, { c.x - w, c.y + r * 0.9f - h } };
+        const ImVec2 right[4] = { top[2], top[1], { c.x + w, c.y + r * 0.9f - h }, { c.x, c.y + r * 0.9f } };
+        dl->AddConvexPolyFilled(top, 4, detail::color(tone, alpha, 1.25f));
+        dl->AddConvexPolyFilled(left, 4, detail::color(tone, alpha, 0.85f));
+        dl->AddConvexPolyFilled(right, 4, detail::color(tone, alpha, 0.65f));
+    }
+
+    // Herramienta: mango y cabeza (hacha o pico).
+    inline void tool(ImDrawList* dl, const ImVec2& c, float r, int toolId, float alpha = 1.0f) {
+        const ImU32 wood = IM_COL32(140, 92, 46, static_cast<int>(255.0f * alpha));
+        const ImU32 metal = IM_COL32(190, 195, 205, static_cast<int>(255.0f * alpha));
+        const float t = (std::max)(2.0f, r * 0.14f);
+        dl->AddLine(ImVec2(c.x - r * 0.7f, c.y + r * 0.8f), ImVec2(c.x + r * 0.5f, c.y - r * 0.7f), wood, t * 1.4f);
+        if (toolId == 1) { // hacha
+            const ImVec2 head[4] = { { c.x + r * 0.1f, c.y - r * 0.95f }, { c.x + r * 0.85f, c.y - r * 0.55f }, { c.x + r * 0.7f, c.y + r * 0.05f }, { c.x + r * 0.15f, c.y - r * 0.35f } };
+            dl->AddConvexPolyFilled(head, 4, metal);
+        } else {           // pico
+            dl->PathArcTo(ImVec2(c.x + r * 0.5f, c.y - r * 0.2f), r * 0.85f, 3.9f, 5.5f, 12);
+            dl->PathStroke(metal, 0, t * 1.8f);
+        }
+    }
+
+    // Pokémon: cubo del color de su especie con morro (igual que en el mundo).
+    inline void creature(ImDrawList* dl, const ImVec2& c, float r, int speciesId, float alpha = 1.0f) {
+        const DirectX::XMFLOAT3 tone = PokemonStyle::color(speciesId);
+        dl->AddRectFilled(ImVec2(c.x - r * 0.8f, c.y - r * 0.8f), ImVec2(c.x + r * 0.8f, c.y + r * 0.8f), detail::color(tone, alpha), r * 0.15f);
+        dl->AddRectFilled(ImVec2(c.x + r * 0.35f, c.y - r * 0.1f), ImVec2(c.x + r * 0.95f, c.y + r * 0.35f), IM_COL32(255, 230, 40, static_cast<int>(255.0f * alpha)), r * 0.08f);
+        dl->AddCircleFilled(ImVec2(c.x - r * 0.2f, c.y - r * 0.25f), r * 0.1f, IM_COL32(20, 20, 25, static_cast<int>(255.0f * alpha)));
+    }
+
+    // Icono de cualquier objeto del inventario, según su categoría.
+    inline void item(ImDrawList* dl, const ImVec2& c, float r, const Item& item, const GameData& data, float alpha = 1.0f) {
+        switch (item.category) {
+            case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::color(type->id), alpha); break;
+            case ItemCategory::MATERIAL: material(dl, c, r, item.refId, alpha); break;
+            case ItemCategory::TOOL:     tool(dl, c, r, item.refId, alpha); break;
+            default: break;
+        }
+    }
+}

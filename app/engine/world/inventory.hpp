@@ -40,6 +40,20 @@ class Inventory {
         return false;
     }
 
+    int count(int itemId) const {
+        for (const Slot& slot : m_slots) if (slot.item->id == itemId) return slot.count;
+        return 0;
+    }
+
+    // ¿Tiene alguna herramienta que dé esta habilidad?
+    bool hasSkillTool(int skillId) const {
+        for (const Slot& slot : m_slots) {
+            if (slot.count <= 0 || slot.item->category != ItemCategory::TOOL) continue;
+            if (const Tool* tool = m_data->tool(slot.item->refId); tool && tool->skillId == skillId) return true;
+        }
+        return false;
+    }
+
     // Recorre todos los objetos con sus unidades: f(const Item&, int count).
     template <typename F>
     void forEach(F f) const { for (const Slot& slot : m_slots) f(*slot.item, slot.count); }

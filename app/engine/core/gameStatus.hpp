@@ -18,7 +18,8 @@ struct GameStatus {
     bool canLock = false;                        // hay un pokémon al que fijar la cámara
     const char* interactVerb = nullptr;          // acción disponible junto a un cofre o recurso ("Abrir", "Talar"...)
     const std::string* interactTarget = nullptr; // sobre qué ("Cofre común", "Árbol"...)
-    const std::string* rewardText = nullptr;     // texto de la última recompensa (con Notice::REWARD)
+    const std::string* missingSkill = nullptr;   // habilidad que falta para trabajar el recurso cercano ("Talar"...)
+    const std::string* noticeText = nullptr;     // segunda línea del aviso (recompensa obtenida, pokémon capturado...)
 
     // Pokémon al que se apunta dentro del rango de lanzamiento.
     bool hasAimTarget = false;

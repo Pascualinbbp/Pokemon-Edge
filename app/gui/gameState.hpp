@@ -8,12 +8,14 @@ enum class GameState {
     LOADING,
     PLAYING,
     PAUSED,
-    CONTROLS
+    CONTROLS,
+    INVENTORY,     // inventario, equipo y PC (la partida queda congelada)
+    UPDATING       // actualización de la aplicación en curso
 };
 
 // Estados en los que la escena 3D se dibuja de fondo.
 constexpr bool isInGame(GameState state) {
-    return state == GameState::PLAYING || state == GameState::PAUSED || state == GameState::CONTROLS;
+    return state == GameState::PLAYING || state == GameState::PAUSED || state == GameState::CONTROLS || state == GameState::INVENTORY;
 }
 
 // Estados en los que la ventana va en pantalla completa (desde que empieza la carga de la partida).
@@ -23,5 +25,5 @@ constexpr bool isFullscreen(GameState state) {
 
 // Estados que se redibujan continuamente; el resto solo con eventos.
 constexpr bool isAnimated(GameState state) {
-    return state == GameState::TITLE_SCREEN || state == GameState::LOADING || state == GameState::PLAYING;
+    return state == GameState::TITLE_SCREEN || state == GameState::LOADING || state == GameState::PLAYING || state == GameState::UPDATING;
 }

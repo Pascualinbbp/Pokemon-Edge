@@ -11,6 +11,7 @@ namespace InputBindings {
     inline constexpr uint16_t PAD_LOCK   = Gamepad::R3;    // pulsar el stick derecho: fijar / cambiar objetivo
     inline constexpr uint16_t PAD_PAUSE  = Gamepad::START; // Options en PlayStation, Menú en Xbox
     inline constexpr uint16_t PAD_INTERACT = Gamepad::WEST; // cuadrado en PlayStation, X en Xbox: abrir cofres
+    inline constexpr uint16_t PAD_INVENTORY = Gamepad::BACK; // Select en PlayStation, Ver en Xbox: inventario
     inline constexpr uint16_t PAD_BALL_PREV = Gamepad::L1; // pokéball anterior
     inline constexpr uint16_t PAD_BALL_NEXT = Gamepad::R1; // pokéball siguiente
 

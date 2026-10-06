@@ -51,6 +51,7 @@ namespace ControlsComponent {
             keyRow(dl, offset(o, 420.0f, 90.0f), { "ESC" }, "Pausa / Salir de apuntar", 60.0f);
             keyRow(dl, offset(o, 420.0f, 150.0f), { "TAB" }, "Fijar objetivo (mantener: soltar)", 60.0f);
             keyRow(dl, offset(o, 420.0f, 264.0f), { "F" }, "Interactuar");
+            keyRow(dl, offset(o, 600.0f, 264.0f), { "I" }, "Inventario");
             mouse(dl, offset(o, 440.0f, 204.0f));
             label(dl, o.x + 504.0f, o.y + 206.0f, "Mover la cámara");
             label(dl, o.x + 504.0f, o.y + 228.0f, "Der.: apuntar · Izq.: lanzar");
@@ -137,6 +138,7 @@ namespace ControlsComponent {
             callout(fx + 27.0f, fy, fy, 550.0f, "Agacharse / Deslizarse");
             callout(fx, fy + 27.0f, fy + 58.0f, 550.0f, "Saltar");
             callout(fx - 17.0f, fy, fy + 103.0f, 550.0f, "Interactuar");
+            callout(350.0f, xbox ? 102.0f : 98.0f, 22.0f, 210.0f, "Inventario");
             callout(pauseX, pauseY, 14.0f, 550.0f, "Pausa");
         }
     }

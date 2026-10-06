@@ -4,6 +4,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 #include "../models/saveData.hpp"
 #include "../utils/core/fileUtil.hpp"
 #include "../utils/core/loggerUtil.hpp"
@@ -45,6 +46,8 @@ class SaveManager {
         j["world"]["time"] = data.worldTime;
         j["inventory"]["items"] = data.items;
         j["inventory"]["selected"] = data.selectedBall;
+        j["pokemon"]["team"] = data.team;
+        j["pokemon"]["pc"] = data.pc;
 
         if (!JsonUtil::saveToFile(PathsUtil::saveSlotPath(slot), j)) return false;
         s_slots[slot] = { true, TimeUtil::formatLocal(now) };
@@ -66,6 +69,8 @@ class SaveManager {
         data.worldTime = JsonUtil::find<float>(j, { "world", "time" }).value_or(-1.0f); // partidas antiguas: sin dato
         data.items = JsonUtil::find<std::map<std::string, int>>(j, { "inventory", "items" }).value_or(std::map<std::string, int>{});
         data.selectedBall = JsonUtil::find<std::string>(j, { "inventory", "selected" }).value_or(std::string{});
+        data.team = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "team" }).value_or(std::vector<std::string>{});
+        data.pc = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "pc" }).value_or(std::vector<std::string>{});
         return data;
     }
 

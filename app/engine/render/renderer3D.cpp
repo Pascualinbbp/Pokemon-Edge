@@ -1,5 +1,6 @@
 #include "renderer3D.hpp"
 #include "../../utils/graphics/d3dUtil.hpp"
+#include "../world/pokemonStyle.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -39,7 +40,6 @@ namespace {
 
     const XMFLOAT4 kWhite = { 1.0f, 1.0f, 1.0f, 0.0f };
     const XMFLOAT4 kWallTint = { 0.62f, 0.58f, 0.52f, 0.0f };
-    const XMFLOAT4 kTargetTint = { 1.0f, 0.55f, 0.10f, 0.0f };
     const XMFLOAT4 kNoseTint = { 1.0f, 0.90f, 0.15f, 0.0f };
 
     // Mapa de sombras: una proyección ortográfica fija que cubre todo el mundo (así las sombras no "nadan"
@@ -490,15 +490,7 @@ void Renderer3D::collect(const Scene& scene) {
 
     for (const CaptureTarget& target : scene.targets) {
         const float size = target.scale();
-        if (size > 0.001f) {
-            const XMFLOAT3 c = target.drawCenter();
-            add(m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), kTargetTint);
-
-            const float nose = size * 0.4f;
-            add(m_cube, XMMatrixScaling(nose, nose, nose) *
-                XMMatrixTranslation(c.x + std::sin(target.yaw()) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(target.yaw()) * size * 0.5f),
-                kNoseTint);
-        }
+        if (size > 0.001f) addCreature(target.drawCenter(), size, target.yaw(), PokemonStyle::color(target.speciesId()));
 
         // Animación de captura: la bola (tambaleándose) y las estrellas, que brillan y no proyectan sombra.
         if (const CaptureSequence* sequence = target.sequence()) {
@@ -517,10 +509,25 @@ void Renderer3D::collect(const Scene& scene) {
         }
     }
 
+    if (scene.companion.active()) {
+        const Companion& pet = scene.companion;
+        addCreature({ pet.body.position.x, pet.body.position.y + Companion::SIZE * 0.5f + pet.bob(), pet.body.position.z },
+                    Companion::SIZE, pet.yaw(), PokemonStyle::color(pet.speciesId()));
+    }
+
     for (const Chest& chest : scene.chests.entities) addChest(chest);
     for (const ResourceNode& node : scene.nodes.entities) addNode(node);
 
     for (const Pokeball& ball : scene.balls) addBall(ball, 0.0f, 1.0f, 0.0f);
+}
+
+// Pokémon (salvaje o compañero): cubo del color de su especie con un morro amarillo que marca hacia dónde mira.
+void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, const XMFLOAT3& color) {
+    add(m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), { color.x, color.y, color.z, 0.0f });
+
+    const float nose = size * 0.4f;
+    add(m_cube, XMMatrixScaling(nose, nose, nose) *
+        XMMatrixTranslation(c.x + std::sin(yaw) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(yaw) * size * 0.5f), kNoseTint);
 }
 
 // Nodo de recolección: árbol (tronco y copa) o roca (bloques irregulares, con vetas si es mena). Se sacude al golpearlo.

@@ -30,6 +30,15 @@ class CaptureTarget {
     bool hittable() const { return m_state == State::IDLE; }
     float yaw() const { return SPAWNS[m_slot][2]; }
     float baseChance() const { return m_baseChance; }
+
+    // Especie de este pokémon salvaje (índice en GameData::species y su id). -1 = aún sin asignar: la escena la
+    // asigna al aparecer, para que toda la lógica de elección esté en un solo sitio.
+    int speciesIndex() const { return m_speciesIndex; }
+    int speciesId() const { return m_speciesId; }
+    void setSpecies(int index, int id) {
+        m_speciesIndex = index;
+        m_speciesId = id;
+    }
     CaptureRules::Throw throwKind() const { return m_sequence.kind(); }
 
     void reroll() { m_baseChance = RandomUtil::range(CaptureRules::MIN_BASE, CaptureRules::MAX_BASE); }
@@ -59,7 +68,7 @@ class CaptureTarget {
     const CaptureSequence* sequence() const { return m_state == State::CAPTURING ? &m_sequence : nullptr; }
 
     // Hitbox sólida (la que ve el jugador al caminar); desaparece en cuanto empieza la captura.
-    Physics::World::Box solid() const { return { center(), { HALF, HALF, HALF } }; }
+    Physics::World::Box solid() const { return { center(), { HALF, HALF, HALF }, false }; } // se salta por encima, pero no se puede estar encima
 
     // ¿Toca una esfera (centro, radio) al cubo?
     bool hitBy(const DirectX::XMFLOAT3& c, float radius) const {
@@ -146,6 +155,7 @@ class CaptureTarget {
         body.position = { SPAWNS[m_slot][0], 0.0f, SPAWNS[m_slot][1] };
         m_state = State::IDLE;
         m_timer = 0.0f;
+        m_speciesIndex = m_speciesId = -1;
         reroll();
     }
 
@@ -154,4 +164,6 @@ class CaptureTarget {
     float m_timer = 0.0f;
     float m_baseChance = 50.0f;
     int m_slot = 0;
+    int m_speciesIndex = -1;
+    int m_speciesId = -1;
 };

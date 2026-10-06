@@ -8,6 +8,7 @@ struct ResourceNodeType {
     std::string name;
     std::string action; // verbo de la ayuda: "Talar", "Picar"...
     int materialId = -1;
+    int skillId = -1;   // habilidad necesaria para recolectarlo
     int hits = 1;
     int minYield = 1;
     int maxYield = 1;

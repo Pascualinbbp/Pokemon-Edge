@@ -3,6 +3,7 @@
 #include <cstdio>
 #include "imgui.h"
 #include "../style/guiPrompts.hpp"
+#include "../style/itemIcon.hpp"
 #include "../../engine/core/gameStatus.hpp"
 #include "../../engine/core/inputDevice.hpp"
 #include "../../engine/world/captureRules.hpp"
@@ -84,23 +85,6 @@ namespace HudComponent {
             dl->AddCircle(c, BUTTON, color, 16, 2.5f);
         }
 
-        // Pokéball de HUD: mitad de color, mitad blanca, con banda y botón central.
-        inline void drawBallIcon(ImDrawList* dl, const ImVec2& c, float r, const PokeballType& type, float alpha) {
-            const int a = static_cast<int>(255.0f * alpha);
-            const DirectX::XMFLOAT3 tone = PokeballStyle::color(type.id);
-            const ImU32 color = IM_COL32(static_cast<int>(tone.x * 255.0f), static_cast<int>(tone.y * 255.0f), static_cast<int>(tone.z * 255.0f), a);
-            const ImU32 white = IM_COL32(240, 240, 240, a);
-            const ImU32 dark = IM_COL32(20, 20, 25, a);
-
-            dl->AddCircleFilled(c, r, white, 28);
-            dl->PathArcTo(c, r, 3.1415927f, 6.2831853f, 20);
-            dl->PathFillConvex(color);
-            dl->AddCircle(c, r, dark, 28, 2.0f);
-            dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), dark, 2.0f);
-            dl->AddCircleFilled(c, r * 0.32f, white, 16);
-            dl->AddCircle(c, r * 0.32f, dark, 16, 2.0f);
-        }
-
         // Selector de pokéball (solo al apuntar): todas las del inventario, la equipada resaltada, con sus unidades
         // y el multiplicador de captura. Q / E o la rueda en teclado; L1 / R1 en mando.
         inline void drawBallSelector(ImDrawList* dl, const GameStatus& status, InputDevice device) {
@@ -119,7 +103,7 @@ namespace HudComponent {
                 const bool selected = i == inventory.selectedIndex();
                 const ImVec2 c(startX + SPACING * static_cast<float>(i), centerY);
                 if (selected) dl->AddCircle(c, SELECTED_RADIUS + 6.0f, IM_COL32(255, 255, 255, a), 32, 2.5f);
-                drawBallIcon(dl, c, selected ? SELECTED_RADIUS : OTHER_RADIUS, inventory.ball(i).type, selected ? alpha : alpha * 0.55f);
+                ItemIcon::ball(dl, c, selected ? SELECTED_RADIUS : OTHER_RADIUS, PokeballStyle::color(inventory.ball(i).type.id), selected ? alpha : alpha * 0.55f);
                 if (!selected) {
                     std::snprintf(buffer, sizeof(buffer), "x%d", inventory.ball(i).count);
                     centered(dl, ImVec2(c.x, c.y + OTHER_RADIUS + 6.0f), buffer, 0.8f, IM_COL32(220, 220, 220, static_cast<int>(a * 0.7f)));
@@ -131,8 +115,6 @@ namespace HudComponent {
             const ImU32 textColor = slot.count > 0 ? IM_COL32(255, 255, 255, a) : IM_COL32(235, 70, 60, a);
             const float nameY = centerY + SELECTED_RADIUS + 26.0f;
             centered(dl, ImVec2(screen.x * 0.5f, nameY), buffer, 1.0f, textColor);
-            centered(dl, ImVec2(screen.x * 0.5f, nameY + ImGui::GetFontSize() + 4.0f), slot.type.description.c_str(), 0.85f,
-                IM_COL32(200, 200, 210, static_cast<int>(a * 0.8f)));
 
             if (count > 1) {
                 const bool pad = isGamepad(device);
@@ -173,6 +155,7 @@ namespace HudComponent {
                 add(Action::CROUCH, "Agacharse");
                 add(Action::SPRINT, "Correr");
                 add(Action::AIM, "Modo captura");
+                add(Action::INVENTORY, "Inventario");
                 add(Action::PAUSE, "Pausa");
             }
 
@@ -247,13 +230,19 @@ namespace HudComponent {
 
         detail::drawHints(dl, status, device);
 
+        if (status.missingSkill) {
+            char text[96];
+            std::snprintf(text, sizeof(text), "Necesitas la habilidad %s (herramienta o pokémon)", status.missingSkill->c_str());
+            detail::centered(dl, ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.62f), text, 1.1f, IM_COL32(255, 150, 40, 255));
+        }
+
         if (status.notice != Notice::NONE) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
             const detail::NoticeStyle& style = detail::NOTICES[static_cast<int>(status.notice)];
             detail::centered(dl, ImVec2(size.x * 0.5f, size.y * 0.2f), style.text, 1.8f, style.color);
-            if (status.rewardText) {
+            if (status.noticeText) {
                 detail::centered(dl, ImVec2(size.x * 0.5f, size.y * 0.2f + ImGui::GetFontSize() * 1.8f + 8.0f),
-                    status.rewardText->c_str(), 1.5f, IM_COL32(255, 255, 255, 255));
+                    status.noticeText->c_str(), 1.5f, IM_COL32(255, 255, 255, 255));
             }
         }
     }

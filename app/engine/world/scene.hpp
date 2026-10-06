@@ -9,7 +9,9 @@
 #include "../core/input.hpp"
 #include "../physics/physicsWorld.hpp"
 #include "../../models/gameData.hpp"
+#include "../../utils/core/randomUtil.hpp"
 #include "camera.hpp"
+#include "companion.hpp"
 #include "chestSpawn.hpp"
 #include "captureRules.hpp"
 #include "captureTarget.hpp"
@@ -18,6 +20,7 @@
 #include "inventory.hpp"
 #include "player.hpp"
 #include "pokeball.hpp"
+#include "pokemonStorage.hpp"
 #include "resourceSpawn.hpp"
 #include "spawnField.hpp"
 
@@ -47,7 +50,9 @@ struct Scene {
     Inventory inventory;
     SpawnField<Chest> chests;
     SpawnField<ResourceNode> nodes;
-    std::string rewardText; // recompensa del último cofre abierto
+    PokemonStorage storage;   // equipo (6) y PC
+    Companion companion;      // el líder del equipo, que acompaña al jugador y trabaja recursos
+    std::string noticeText;   // segunda línea del aviso: recompensa obtenida, pokémon capturado...
 
     int captures = 0;
     Notice notice = Notice::NONE;
@@ -59,6 +64,7 @@ struct Scene {
     // Dos paredes sencillas, más altas que el personaje: bloquean el paso, las pokéballs y la luz.
     explicit Scene(const GameData& gameData = GameData::empty()) : m_data(&gameData) {
         inventory.setData(gameData);
+        storage.setData(gameData);
         chests.setup(ChestSpawn::COUNT);
         nodes.setup(ResourceSpawn::COUNT);
         world.obstacles = {
@@ -100,7 +106,10 @@ struct Scene {
         noticeTime = (std::max)(0.0f, noticeTime - dt);
         if (m_aiming && input.throwBall && throwCooldown <= 0.0f) throwBall();
 
-        for (CaptureTarget& target : targets) handleCaptureEvent(target, target.update(dt, world));
+        for (CaptureTarget& target : targets) {
+            if (target.speciesIndex() < 0) assignSpecies(target);
+            handleCaptureEvent(target, target.update(dt, world));
+        }
         updateBalls(dt);
         chests.update(dt, ChestSpawn::DELAY,
             [&](Chest& chest) { world.step(chest.body, dt); chest.update(dt); },
@@ -108,6 +117,7 @@ struct Scene {
         nodes.update(dt, ResourceSpawn::DELAY,
             [&](ResourceNode& node) { world.step(node.body, dt); node.update(dt); },
             [&](int spot) { return ResourceSpawn::make(*m_data, spot); });
+        updateCompanion(dt);
         updateInteraction();
         if (input.interact) interact();
         updateAimInfo();
@@ -128,6 +138,8 @@ struct Scene {
         s.data = m_data;
         s.aiming = m_aiming;
         s.canLock = anyLockable();
+        if (m_missingSkill >= 0) if (const Skill* skill = m_data->skill(m_missingSkill)) s.missingSkill = &skill->name;
+        if (!noticeText.empty()) s.noticeText = &noticeText;
         if (m_interaction.kind == Interaction::CHEST) {
             s.interactVerb = CHEST_VERB;
             s.interactTarget = &m_data->chests[chests.entities[m_interaction.index].typeIndex()].name;
@@ -136,7 +148,6 @@ struct Scene {
             s.interactVerb = type.action.c_str();
             s.interactTarget = &type.name;
         }
-        if (notice == Notice::REWARD) s.rewardText = &rewardText;
         if (m_aimTarget >= 0) {
             const CaptureTarget& t = targets[m_aimTarget];
             s.hasAimTarget = true;
@@ -157,8 +168,9 @@ struct Scene {
         return CaptureRules::percent(t.baseChance(), isBehind(t), player.crouched(), ballMultiplier);
     }
 
-    void showNotice(Notice kind) {
+    void showNotice(Notice kind, std::string text = {}) {
         notice = kind;
+        noticeText = std::move(text);
         noticeTime = NOTICE_TIME;
     }
 
@@ -171,11 +183,49 @@ struct Scene {
         }
 
         ++captures;
-        switch (target.throwKind()) {
-            case CaptureRules::Throw::LUCKY:       showNotice(Notice::LUCKY); break;
-            case CaptureRules::Throw::SUPER_LUCKY: showNotice(Notice::SUPER_LUCKY); break;
-            default:                               showNotice(Notice::CAPTURED); break;
+        std::string text;
+        if (const PokemonSpecies* species = m_data->speciesById(target.speciesId())) {
+            bool sentToPc = false;
+            text = species->name + (!storage.add(species->id, sentToPc) ? " (sin espacio)" : sentToPc ? " (enviado al PC)" : "");
         }
+        switch (target.throwKind()) {
+            case CaptureRules::Throw::LUCKY:       showNotice(Notice::LUCKY, text); break;
+            case CaptureRules::Throw::SUPER_LUCKY: showNotice(Notice::SUPER_LUCKY, text); break;
+            default:                               showNotice(Notice::CAPTURED, text); break;
+        }
+    }
+
+    // Especie de un pokémon salvaje que acaba de aparecer, según el peso de cada una.
+    void assignSpecies(CaptureTarget& target) const {
+        const int index = RandomUtil::weightedIndex(m_data->species, [](const PokemonSpecies& s) { return s.spawnWeight; });
+        if (index >= 0) target.setSpecies(index, m_data->species[index].id);
+    }
+
+    // El líder del equipo acompaña al jugador y trabaja solo los recursos cercanos cuya habilidad conoce.
+    void updateCompanion(float dt) {
+        const int lead = storage.leadSpeciesId();
+        if (lead != companion.speciesId()) companion.set(lead, player.body.position, camera.yaw());
+
+        ResourceNode* target = nullptr;
+        float power = 0.0f;
+        if (const PokemonSpecies* species = m_data->speciesById(lead)) {
+            float best = 1.0e9f;
+            for (ResourceNode& node : nodes.entities) {
+                if (node.depleted()) continue;
+                const SpeciesSkill* skill = species->skill(m_data->nodes[node.typeIndex()].skillId);
+                if (!skill) continue;
+                const float dx = node.body.position.x - companion.body.position.x;
+                const float dz = node.body.position.z - companion.body.position.z;
+                const float d2 = dx * dx + dz * dz;
+                const float range = Companion::WORK_RANGE + ResourceStyle::look(node.typeId()).half;
+                if (d2 <= range * range && d2 < best) {
+                    best = d2;
+                    target = &node;
+                    power = skill->power;
+                }
+            }
+        }
+        if (companion.update(dt, world, player.body.position, camera.yaw(), target ? power : 0.0f) && target) hitNode(*target);
     }
 
     // --- Interacción (cofres y recursos) ---
@@ -200,7 +250,12 @@ struct Scene {
         float best = 1.0e9f;
         m_interaction = {};
         if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
-        if (const int i = nearestIn(nodes.entities, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) m_interaction = { Interaction::NODE, i };
+        m_missingSkill = -1;
+        if (const int i = nearestIn(nodes.entities, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) {
+            const int skill = m_data->nodes[nodes.entities[i].typeIndex()].skillId;
+            if (inventory.hasSkillTool(skill)) m_interaction = { Interaction::NODE, i };
+            else m_missingSkill = skill; // sin herramienta: solo un pokémon con la habilidad puede trabajarlo
+        }
     }
 
     void interact() {
@@ -212,8 +267,8 @@ struct Scene {
     void giveReward(int itemId, int quantity) {
         if (!inventory.add(itemId, quantity)) return;
         const Item* item = m_data->item(itemId);
-        rewardText = std::to_string(quantity) + "x " + (item ? m_data->itemName(*item) : std::string("?"));
-        showNotice(Notice::REWARD);
+        std::string text = std::to_string(quantity) + "x " + (item ? m_data->itemName(*item) : std::string("?"));
+        showNotice(Notice::REWARD, std::move(text));
     }
 
     // Abre el cofre: una recompensa al azar de las de su tipo, directa al inventario.
@@ -407,6 +462,7 @@ struct Scene {
     static constexpr const char* CHEST_VERB = "Abrir";
 
     const GameData* m_data;
+    int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)
     Interaction m_interaction; // lo que el jugador puede usar ahora mismo (cofre o recurso cercano)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
     int m_aimTarget = -1;  // pokémon al que apunta la cruceta dentro del alcance

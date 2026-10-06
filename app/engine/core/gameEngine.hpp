@@ -32,6 +32,7 @@ class GameEngine {
         m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
         m_scene.dayCycle.setTime(save.worldTime);
         m_scene.inventory.restore(save.items, save.selectedBall);
+        m_scene.storage.restore(save.team, save.pc);
     }
 
     SaveData captureSave() const {
@@ -40,6 +41,7 @@ class GameEngine {
         save.playerPosition = { p.x, p.y, p.z };
         save.worldTime = m_scene.dayCycle.time();
         m_scene.inventory.store(save.items, save.selectedBall);
+        m_scene.storage.store(save.team, save.pc);
         return save;
     }
 
@@ -52,6 +54,11 @@ class GameEngine {
     void render(ID3D11DeviceContext* context, int screenW, int screenH) {
         m_renderer.render(context, m_scene, screenW, screenH);
     }
+
+    // Lo que necesita la pantalla de inventario (el equipo se modifica desde ella).
+    const GameData& data() const { return m_data; }
+    const Inventory& inventory() const { return m_scene.inventory; }
+    PokemonStorage& storage() { return m_scene.storage; }
 
     GameStatus status() const {
         return m_scene.status();

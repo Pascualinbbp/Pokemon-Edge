@@ -2,7 +2,7 @@
   "configs": {
     "tag": "v0.0.2",
     "name": "Pokemon Edge v0.0.2",
-    "description": "Versión preliminar de prueba.",
+    "description": "Evolución a 3D con motor de juego propio, interfaz gráfica integrada, nuevas mecánicas y ampliación de la base de datos.",
     "prerelease": false,
     "make_latest": true,
     "branch": "main"

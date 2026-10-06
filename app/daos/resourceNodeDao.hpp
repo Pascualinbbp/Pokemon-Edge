@@ -10,7 +10,7 @@ class ResourceNodeDao {
         std::vector<ResourceNodeType> nodes;
         for (const auto& row : SqliteUtil::executeSelect(SELECT_ALL)) {
             nodes.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::text(row, "action"),
-                              DaoRow::integer(row, "material_id"), DaoRow::integer(row, "hits"),
+                              DaoRow::integer(row, "material_id"), DaoRow::integer(row, "skill_id"), DaoRow::integer(row, "hits"),
                               DaoRow::integer(row, "min_yield"), DaoRow::integer(row, "max_yield"), DaoRow::real(row, "spawn_weight") });
         }
         if (nodes.empty()) Logger::logError("RESOURCE_NODE_DAO", "La tabla resource_node no existe o está vacía (falta aplicar testing/sql/material.sql).");
@@ -19,5 +19,5 @@ class ResourceNodeDao {
 
     private:
     static constexpr const char* SELECT_ALL =
-        "SELECT id, name, action, material_id, hits, min_yield, max_yield, spawn_weight FROM resource_node ORDER BY id;";
+        "SELECT id, name, action, material_id, skill_id, hits, min_yield, max_yield, spawn_weight FROM resource_node ORDER BY id;";
 };

@@ -23,6 +23,7 @@ struct InputState {
     bool escape = false;      // ESC: sale del modo lanzamiento o, si no, pausa
     bool lockTap = false;     // TAB / R3 (pulsación corta): fijar la cámara o cambiar de objetivo
     bool lockCancel = false;  // TAB / R3 mantenido: soltar el objetivo
+    bool inventory = false;   // I / Select (View en Xbox): abrir el inventario
     bool interact = false;    // F / cuadrado (X en Xbox): abrir un cofre cercano
     int ballSwitch = 0;       // Q / E / rueda del ratón / L1 / R1: -1 pokéball anterior, +1 siguiente
 };
