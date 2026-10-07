@@ -109,16 +109,22 @@ jobs:
       - name: 🎨 Incrustar assets (todo assets/ dentro del .exe)
         shell: pwsh
         run: |
-          # Cada fichero de assets/ (menos .ico, que va con su ID en resources.rc) pasa a ser un recurso RCDATA
-          # con su ruta relativa como nombre ("types/1.png"). Añadir un asset nuevo = dejarlo en assets/.
+          # Cada fichero de assets/ (menos .ico, que va con su ID en resources.rc) pasa a ser un recurso RCDATA con ID numérico
+          # (assets.rc) y su ruta queda en el índice assets.idx ("1000 types/1.png"), que también va incrustado.
+          # Añadir un asset nuevo = dejarlo en assets/.
           $root = (Resolve-Path "assets").Path
-          $lines = Get-ChildItem "assets" -Recurse -File | Where-Object { $_.Extension -ne ".ico" -and $_.Name -ne ".gitkeep" } | Sort-Object FullName | ForEach-Object {
-              $rel = $_.FullName.Substring($root.Length + 1).Replace([string][char]92, "/")
-              '"{0}" RCDATA "assets/{0}"' -f $rel
+          $files = Get-ChildItem "assets" -Recurse -File | Where-Object { $_.Extension -ne ".ico" -and $_.Name -ne ".gitkeep" } | Sort-Object FullName
+          $rc = @("// assets generados"); $idx = @(); $id = 1000
+          foreach ($f in $files) {
+              $rel = $f.FullName.Substring($root.Length + 1).Replace([string][char]92, "/")
+              $rc += ('{0} RCDATA "assets/{1}"' -f $id, $rel)
+              $idx += ('{0} {1}' -f $id, $rel)
+              $id++
           }
-          if (-not $lines) { $lines = @("// sin assets") }
-          $lines | Set-Content -Path "assets.rc" -Encoding ascii
-          Write-Host "[LOG] $(@($lines).Count) assets incrustados."
+          $rc | Set-Content -Path "assets.rc" -Encoding ascii
+          if (-not $idx) { $idx = @("0 -") }
+          $idx | Set-Content -Path "assets.idx" -Encoding ascii
+          Write-Host "[LOG] $($files.Count) assets incrustados."
 
       - name: 🔨 Compilar Motor con ImGui y DirectX 11 (Sin Consola)
         shell: cmd

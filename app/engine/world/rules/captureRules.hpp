@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <DirectXMath.h>
+#include "evRules.hpp"
 #include "../../../utils/core/randomUtil.hpp"
 
 // Reglas del porcentaje de captura: bonificaciones fijas sobre el porcentaje base del pokémon.
@@ -26,6 +27,15 @@ namespace CaptureRules {
     inline constexpr int MAX_FAIL_WOBBLES = 2;          // un fallo da 0, 1 o 2 giros
 
     enum class Throw { NORMAL, LUCKY, SUPER_LUCKY };
+
+    // Potencial mínimo que garantiza cada tipo de lanzamiento al pokémon capturado.
+    inline EvRules::Rank minimumRank(Throw kind) {
+        switch (kind) {
+            case Throw::SUPER_LUCKY: return EvRules::Rank::S;
+            case Throw::LUCKY:       return EvRules::Rank::A;
+            default:                 return EvRules::Rank::D;
+        }
+    }
 
     // Resultado de un lanzamiento, decidido al instante; la animación solo lo reproduce.
     struct Result {

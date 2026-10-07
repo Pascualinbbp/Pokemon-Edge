@@ -40,6 +40,26 @@ namespace EvRules {
         return caps;
     }
 
+    // Potencial al capturar con un mínimo garantizado: tras tirar al azar, se ponen al máximo estadísticas al azar hasta
+    // llegar al rango mínimo (B = 1 al máximo, A = 2, S = 3; S+ = sus tres mejores estadísticas base).
+    inline Evs rollCaps(const BaseStats& base, Rank minimum) {
+        Evs caps = rollCaps();
+        if (minimum == Rank::S_PLUS) {
+            const auto order = byBase(base);
+            for (int i = 0; i < TOP_STATS; ++i) caps[order[i]] = MAX_EV;
+            return caps;
+        }
+        const int needed = minimum == Rank::S ? 3 : minimum == Rank::A ? 2 : minimum == Rank::B ? 1 : 0;
+        std::array<int, BaseStats::COUNT> order;
+        std::iota(order.begin(), order.end(), 0);
+        std::shuffle(order.begin(), order.end(), RandomUtil::engine());
+        int maxed = static_cast<int>(std::count(caps.begin(), caps.end(), MAX_EV));
+        for (int i = 0; i < BaseStats::COUNT && maxed < needed; ++i) {
+            if (caps[order[i]] < MAX_EV) { caps[order[i]] = MAX_EV; ++maxed; }
+        }
+        return caps;
+    }
+
     inline Evs clamped(Evs evs) {
         for (int& ev : evs) ev = (std::clamp)(ev, 0, MAX_EV);
         return evs;

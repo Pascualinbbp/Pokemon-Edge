@@ -16,7 +16,7 @@ class Companion {
     static constexpr float TELEPORT_DISTANCE = 20.0f; // si se queda más lejos, aparece junto al jugador
     static constexpr float JUMP_SPEED = 8.0f;
     static constexpr float WORK_RANGE = 3.0f;     // distancia al borde de un recurso para trabajarlo
-    static constexpr float SEARCH_RANGE = 16.0f;  // radio alrededor del jugador donde busca cosas que recoger o trabajar
+    static constexpr float SEARCH_RANGE = 12.0f;  // radio alrededor del jugador donde busca cosas que recoger o trabajar
     static constexpr float APPROACH = 1.5f;       // se acerca hasta esta distancia de su objetivo
     static constexpr float WORK_INTERVAL = 1.4f;  // segundos por golpe con power 1
     static constexpr float LEVEL_SPEEDUP = 0.25f; // cada nivel de recolección por encima del 1 trabaja un 25 % más rápido

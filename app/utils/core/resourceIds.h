@@ -5,4 +5,4 @@
 // IMPORTANTE: rc.exe exige que la última línea termine en salto de línea (si no, error RC1004).
 #define IDR_DATABASE 101
 #define IDI_ICON1 102
-
+#define IDR_ASSET_INDEX 103

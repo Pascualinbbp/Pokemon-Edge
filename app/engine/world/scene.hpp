@@ -291,7 +291,7 @@ struct Scene {
             owned.level = (std::min)(target.level(), progress.levelCap()); // no puede pasar del límite del jugador
             owned.shiny = target.shiny();
             owned.ballId = target.ballId();
-            owned.evCaps = EvRules::rollCaps();
+            owned.evCaps = EvRules::rollCaps(species->stats, CaptureRules::minimumRank(target.throwKind()));
             bool sentToPc = false;
             const bool stored = storage.add(owned, sentToPc);
             text = (owned.shiny ? "* " : "") + species->name + "  Nv. " + std::to_string(owned.level) +
