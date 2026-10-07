@@ -32,7 +32,8 @@ class GameEngine {
         m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
         m_scene.dayCycle.setTime(save.worldTime);
         m_scene.inventory.restore(save.items, save.selectedBall, save.money);
-        m_scene.storage.restore(save.team, save.pc);
+        m_scene.storage.restore(save.team, save.pc, save.autoReleaseRank);
+        m_scene.progress.restore(save.playerLevel, save.playerXp, save.badges);
     }
 
     SaveData captureSave() const {
@@ -42,6 +43,10 @@ class GameEngine {
         save.worldTime = m_scene.dayCycle.time();
         m_scene.inventory.store(save.items, save.selectedBall, save.money);
         m_scene.storage.store(save.team, save.pc);
+        save.autoReleaseRank = m_scene.storage.autoRankIndex();
+        save.playerLevel = m_scene.progress.level();
+        save.playerXp = m_scene.progress.xp();
+        save.badges = m_scene.progress.badges();
         return save;
     }
 
@@ -59,6 +64,17 @@ class GameEngine {
     const GameData& data() const { return m_data; }
     Inventory& inventory() { return m_scene.inventory; }
     PokemonStorage& storage() { return m_scene.storage; }
+    const PlayerProgress& progress() const { return m_scene.progress; }
+
+    bool needsStarter() const { return m_scene.needsStarter(); }
+    void chooseStarter(int speciesId) { m_scene.chooseStarter(speciesId); }
+
+    // true una sola vez cuando el jugador acaba de usar la máquina de investigación.
+    bool takeResearchRequest() {
+        const bool requested = m_scene.researchRequested;
+        m_scene.researchRequested = false;
+        return requested;
+    }
 
     GameStatus status() const {
         GameStatus s = m_scene.status();

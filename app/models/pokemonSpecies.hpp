@@ -36,7 +36,13 @@ struct PokemonSpecies {
     int passiveId = -1;     // habilidad pasiva (-1 = no tiene)
     std::vector<int> types; // uno o dos id de la tabla type
     BaseStats stats;
-    float spawnWeight = 1.0f;
+    float spawnWeight = 1.0f; // cuanto menor, más raro
+    int catchRate = 45;       // ratio de captura fijo de la especie (1..255)
+    int minLevel = 1;         // nivel al aparecer salvaje
+    int maxLevel = 1;
+    int evolvesToId = -1;     // -1 = no evoluciona
+    int evolveLevel = 0;      // nivel que hay que alcanzar al subir de nivel para evolucionar
+    bool starter = false;     // se puede elegir como pokémon inicial
 
     // Nivel que tiene en una habilidad del mundo (0 = no la tiene).
     int levelIn(int skill) const { return skill == skillId ? skillLevel : 0; }

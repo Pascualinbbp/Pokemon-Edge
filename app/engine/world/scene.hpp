@@ -17,6 +17,9 @@
 #include "captureTarget.hpp"
 #include "chestRules.hpp"
 #include "evRules.hpp"
+#include "playerProgress.hpp"
+#include "pokemonRules.hpp"
+#include "researchMachine.hpp"
 #include "groundSpawn.hpp"
 #include "dayCycle.hpp"
 #include "inventory.hpp"
@@ -56,6 +59,9 @@ struct Scene {
     SpawnField<ResourceNode> nodes;
     SpawnField<GroundItem> groundItems;
     PokemonStorage storage;   // equipo (6) y PC
+    PlayerProgress progress;  // nivel, experiencia y medallas del jugador
+    ResearchMachine machine;  // máquina de investigación (fija)
+    bool researchRequested = false; // el jugador ha usado la máquina: la interfaz abre su pantalla
     Companion companion;      // el líder del equipo, que acompaña al jugador y trabaja recursos
     std::string noticeText;   // segunda línea del aviso: recompensa obtenida, pokémon capturado...
 
@@ -87,7 +93,11 @@ struct Scene {
         }
         if (input.aimToggle) aimMode = !aimMode;
         m_aiming = aimMode || input.aimHold;
-        if (m_aiming && input.ballSwitch != 0) inventory.cycle(input.ballSwitch);
+        if (input.ballSwitch != 0) {
+            if (m_aiming) inventory.cycle(input.ballSwitch);
+            else storage.cycleLead(input.ballSwitch); // fuera del modo captura cambia el pokémon que acompaña
+        }
+        if (input.teamSelect > 0) storage.makeLead(input.teamSelect - 1);
 
         if (input.lockCancel) lockedIndex = -1;
         else if (input.lockTap) cycleLock();
@@ -103,6 +113,7 @@ struct Scene {
         world.props.clear();
         for (const Chest& chest : chests.entities) if (chest.closed()) world.props.push_back(chest.solid());
         for (const ResourceNode& node : nodes.entities) if (!node.depleted()) world.props.push_back(node.solid());
+        world.props.push_back(machine.solid());
 
         player.aiming = m_aiming;
         player.update(dt, input, camera.yaw(), world);
@@ -134,6 +145,26 @@ struct Scene {
 
     const GameData& data() const { return *m_data; }
 
+    // Al empezar una partida nueva el jugador elige su pokémon inicial: aún no tiene ninguno.
+    bool needsStarter() const { return storage.empty(); }
+
+    // Crea el pokémon inicial: nivel inicial, analizado, con su pokéball exclusiva y sus 3 mejores estadísticas (las de su
+    // evolución final) con el EV máximo al máximo.
+    void chooseStarter(int speciesId) {
+        const PokemonSpecies* species = m_data->speciesById(speciesId);
+        const PokeballType* ball = m_data->starterBall();
+        if (!species || !species->starter || !needsStarter()) return;
+
+        OwnedPokemon owned;
+        owned.speciesId = species->id;
+        owned.level = PokemonRules::STARTER_LEVEL;
+        owned.ballId = ball ? ball->id : -1;
+        owned.analyzed = true;
+        owned.evCaps = EvRules::starterCaps(m_data->finalForm(*species)->stats);
+        bool sentToPc = false;
+        storage.add(owned, sentToPc);
+    }
+
     DirectX::XMMATRIX getViewMatrix() const {
         return camera.viewMatrix(player.body.position);
     }
@@ -141,6 +172,9 @@ struct Scene {
     GameStatus status() const {
         GameStatus s;
         s.aimBlend = camera.aimBlend();
+        s.playerLevel = progress.level();
+        s.playerXp = progress.xpFraction();
+        s.levelCap = progress.levelCap();
         s.notice = noticeTime > 0.0f ? notice : Notice::NONE;
         s.locked = lockedIndex >= 0;
         s.inventory = &inventory;
@@ -152,6 +186,12 @@ struct Scene {
             s.missingLevel = m_missingLevel;
         }
         addNameTags(s);
+        for (size_t i = 0; i < storage.team().size(); ++i) {
+            const OwnedPokemon& owned = storage.team()[i];
+            if (const PokemonSpecies* species = m_data->speciesById(owned.speciesId)) {
+                s.team.push_back({ species->id, &species->name, owned.level, owned.shiny, i == 0 });
+            }
+        }
         if (!noticeText.empty()) s.noticeText = &noticeText;
         if (m_interaction.kind == Interaction::CHEST) {
             s.interactVerb = CHEST_VERB;
@@ -163,12 +203,11 @@ struct Scene {
             s.interactVerb = skill ? skill->name.c_str() : type.action.c_str();
             s.interactTarget = &type.name;
         } else if (m_interaction.kind == Interaction::GROUND) {
-            const GroundItem& item = groundItems.entities[m_interaction.index];
             s.interactVerb = PICK_VERB;
-            if (const Item* it = m_data->item(item.itemId())) {
-                m_targetName = m_data->itemName(*it);
-                s.interactTarget = &m_targetName;
-            }
+            s.interactTarget = &GROUND_NAME;
+        } else if (m_interaction.kind == Interaction::MACHINE) {
+            s.interactVerb = USE_VERB;
+            s.interactTarget = &MACHINE_NAME;
         }
         if (m_aimTarget >= 0) {
             const CaptureTarget& t = targets[m_aimTarget];
@@ -181,19 +220,24 @@ struct Scene {
     }
 
     private:
-    // Nombre sobre cada pokémon visible (los salvajes y el acompañante).
+    // Nombre y nivel sobre cada pokémon visible (los salvajes y el acompañante).
     void addNameTags(GameStatus& s) const {
         constexpr float TAG_RANGE = 30.0f;
         constexpr float TAG_LIFT = 0.35f;
-        const auto add = [&](int speciesId, const DirectX::XMFLOAT3& head) {
+        const auto add = [&](int speciesId, int level, bool shiny, const DirectX::XMFLOAT3& head) {
             const PokemonSpecies* species = m_data->speciesById(speciesId);
             const float dx = head.x - player.body.position.x, dz = head.z - player.body.position.z;
-            if (species && dx * dx + dz * dz <= TAG_RANGE * TAG_RANGE) s.nameTags.push_back({ { head.x, head.y + TAG_LIFT, head.z }, &species->name });
+            if (species && dx * dx + dz * dz <= TAG_RANGE * TAG_RANGE) {
+                s.nameTags.push_back({ { head.x, head.y + TAG_LIFT, head.z }, (shiny ? "* " : "") + species->name + "  Nv. " + std::to_string(level), shiny });
+            }
         };
         for (const CaptureTarget& target : targets) {
-            if (target.hittable()) add(target.speciesId(), { target.body.position.x, target.body.position.y + CaptureTarget::SIZE, target.body.position.z });
+            if (target.hittable()) add(target.speciesId(), target.level(), target.shiny(), { target.body.position.x, target.body.position.y + CaptureTarget::SIZE, target.body.position.z });
         }
-        if (companion.active()) add(companion.speciesId(), { companion.body.position.x, companion.body.position.y + Companion::SIZE, companion.body.position.z });
+        if (companion.active() && !storage.team().empty()) {
+            const OwnedPokemon& lead = storage.team().front();
+            add(companion.speciesId(), lead.level, lead.shiny, { companion.body.position.x, companion.body.position.y + Companion::SIZE, companion.body.position.z });
+        }
     }
 
     // --- Porcentaje de captura ---
@@ -202,7 +246,9 @@ struct Scene {
     }
 
     float chancePercent(const CaptureTarget& t, float ballMultiplier) const {
-        return CaptureRules::percent(t.baseChance(), isBehind(t), player.crouched(), ballMultiplier);
+        const PokemonSpecies* species = m_data->speciesById(t.speciesId());
+        const float base = species ? CaptureRules::basePercent(species->catchRate, t.level(), progress.level()) : 0.0f;
+        return CaptureRules::percent(base, isBehind(t), player.crouched(), ballMultiplier);
     }
 
     void showNotice(Notice kind, std::string text = {}) {
@@ -223,12 +269,16 @@ struct Scene {
         if (const PokemonSpecies* species = m_data->speciesById(target.speciesId())) {
             OwnedPokemon owned;
             owned.speciesId = species->id;
-            owned.evs = EvRules::roll();
+            owned.level = (std::min)(target.level(), progress.levelCap()); // no puede pasar del límite del jugador
+            owned.shiny = target.shiny();
+            owned.ballId = target.ballId();
+            owned.evCaps = EvRules::rollCaps();
             bool sentToPc = false;
             const bool stored = storage.add(owned, sentToPc);
-            text = species->name + "  [" + EvRules::label(EvRules::rank(species->stats, owned.evs)) + "]" +
+            text = (owned.shiny ? "* " : "") + species->name + "  Nv. " + std::to_string(owned.level) +
                    (!stored ? " (sin espacio)" : sentToPc ? " (enviado al PC)" : "");
         }
+        if (const int levels = progress.addXp(Xp::CAPTURE); levels > 0) text += "   ¡Nivel " + std::to_string(progress.level()) + "!";
         switch (target.throwKind()) {
             case CaptureRules::Throw::LUCKY:       showNotice(Notice::LUCKY, text); break;
             case CaptureRules::Throw::SUPER_LUCKY: showNotice(Notice::SUPER_LUCKY, text); break;
@@ -239,7 +289,7 @@ struct Scene {
     // Especie de un pokémon salvaje que acaba de aparecer, según el peso de cada una.
     void assignSpecies(CaptureTarget& target) const {
         const int index = RandomUtil::weightedIndex(m_data->species, [](const PokemonSpecies& s) { return s.spawnWeight; });
-        if (index >= 0) target.setSpecies(index, m_data->species[index].id);
+        if (index >= 0) target.setSpecies(index, m_data->species[index].id, PokemonRules::rollLevel(m_data->species[index]), PokemonRules::rollShiny());
     }
 
     // El líder del equipo acompaña al jugador y trabaja solo lo cercano: recoge plantas crecidas y objetos sueltos (cualquier
@@ -325,6 +375,11 @@ struct Scene {
         m_missingSkill = -1;
         if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
         if (const int i = nearestIn(groundItems.entities, [](const GroundItem& g) { return g.available(); }, best); i >= 0) m_interaction = { Interaction::GROUND, i };
+        const float mx = machine.body.position.x - player.body.position.x, mz = machine.body.position.z - player.body.position.z;
+        if (const float d2 = mx * mx + mz * mz; d2 <= machine.reach() * machine.reach() && d2 < best) {
+            best = d2;
+            m_interaction = { Interaction::MACHINE, 0 };
+        }
         if (const int i = nearestIn(nodes.entities, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) {
             const ResourceNode& node = nodes.entities[i];
             if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
@@ -339,6 +394,7 @@ struct Scene {
     void interact() {
         if (m_interaction.kind == Interaction::CHEST) openChest(chests.entities[m_interaction.index]);
         else if (m_interaction.kind == Interaction::GROUND) collect(groundItems.entities[m_interaction.index]);
+        else if (m_interaction.kind == Interaction::MACHINE) researchRequested = true;
         else if (m_interaction.kind == Interaction::NODE) {
             ResourceNode& node = nodes.entities[m_interaction.index];
             const bool tool = node.growing() || !node.plant();
@@ -359,6 +415,7 @@ struct Scene {
         const ChestReward* reward = ChestRules::pickReward(m_data->chests[chest.typeIndex()]);
         chest.open();
         if (reward) giveReward(reward->itemId, reward->quantity);
+        gainXp(Xp::CHEST);
     }
 
     // Un paso de trabajo en el nodo (riego o golpe); al agotarlo da su material.
@@ -366,13 +423,22 @@ struct Scene {
         if (!node.work(byPlayer, speed) || !node.depleted()) return;
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
         if (const Item* item = m_data->materialItem(type.materialId)) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
+        gainXp(Xp::GATHER);
     }
 
     // Recoge un objeto suelto del mundo.
     void collect(GroundItem& item) {
         if (!item.available()) return;
-        giveReward(item.itemId(), item.quantity());
+        if (const GroundItemType* reward = GroundSpawn::pickReward(*m_data)) {
+            giveReward(reward->itemId, RandomUtil::integer(reward->minQuantity, reward->maxQuantity));
+            gainXp(Xp::PICK_UP);
+        }
         item.take();
+    }
+
+    // Experiencia del jugador por una acción en el mundo. Si sube de nivel lo avisa (salvo que ya haya un aviso de recompensa).
+    void gainXp(int amount) {
+        if (progress.addXp(amount) > 0) showNotice(Notice::LEVEL_UP, "Nivel " + std::to_string(progress.level()));
     }
 
     // --- Fijado de cámara ---
@@ -491,6 +557,7 @@ struct Scene {
 
         const PokeballType& type = inventory.selectedBall().type;
         Pokeball ball;
+        ball.typeId = type.id;
         ball.captureMultiplier = type.captureMultiplier;
         ball.color = PokeballStyle::color(type.id);
         ball.body.position = { p.x + cosYaw * SPAWN_SIDE + sinYaw * SPAWN_FORWARD,
@@ -548,7 +615,7 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE, GROUND } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE } kind = NONE;
         int index = -1;
     };
 
@@ -559,7 +626,9 @@ struct Scene {
 
     static constexpr const char* CHEST_VERB = "Abrir";
     static constexpr const char* PICK_VERB = "Recoger";
-    mutable std::string m_targetName; // nombre del objeto suelto señalado (para el aviso de interacción)
+    static constexpr const char* USE_VERB = "Usar";
+    inline static const std::string GROUND_NAME = "objeto brillante";
+    inline static const std::string MACHINE_NAME = "máquina de investigación";
 
     const GameData* m_data;
     int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)

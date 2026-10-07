@@ -81,8 +81,9 @@ class Renderer3D {
     void addBall(const Pokeball& ball, float tilt, float scale, float glow);
     void addChest(const Chest& chest);
     void addNode(const ResourceNode& node);
-    void addGroundItem(const GroundItem& item, const GameData& data);
-    void addCreature(const DirectX::XMFLOAT3& position, float size, float yaw, const DirectX::XMFLOAT3& color);
+    void addGroundItem(const GroundItem& item);
+    void addMachine();
+    void addCreature(const DirectX::XMFLOAT3& position, float size, float yaw, int speciesId, bool shiny);
     void setObject(ID3D11DeviceContext* context, DirectX::CXMMATRIX world, DirectX::CXMMATRIX worldViewProj,
         const DirectX::XMFLOAT4& tint) const;
     void drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) const;

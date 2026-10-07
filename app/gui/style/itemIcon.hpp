@@ -63,6 +63,23 @@ namespace ItemIcon {
         }
     }
 
+    // Caramelo (sube de nivel) o vitamina (sube EVs).
+    inline void training(ImDrawList* dl, const ImVec2& c, float r, TrainingItem::Effect effect, float alpha = 1.0f) {
+        const int a = static_cast<int>(255.0f * alpha);
+        if (effect == TrainingItem::Effect::LEVEL) {
+            const ImU32 wrap = IM_COL32(120, 200, 255, a);
+            dl->AddTriangleFilled(ImVec2(c.x - r * 0.55f, c.y), ImVec2(c.x - r * 1.0f, c.y - r * 0.4f), ImVec2(c.x - r * 1.0f, c.y + r * 0.4f), wrap);
+            dl->AddTriangleFilled(ImVec2(c.x + r * 0.55f, c.y), ImVec2(c.x + r * 1.0f, c.y - r * 0.4f), ImVec2(c.x + r * 1.0f, c.y + r * 0.4f), wrap);
+            dl->AddCircleFilled(c, r * 0.62f, IM_COL32(90, 160, 240, a), 24);
+            dl->AddCircle(c, r * 0.62f, IM_COL32(230, 245, 255, a), 24, 2.0f);
+            dl->AddLine(ImVec2(c.x - r * 0.3f, c.y - r * 0.15f), ImVec2(c.x + r * 0.3f, c.y - r * 0.15f), IM_COL32(255, 255, 255, a), 2.0f);
+        } else {
+            dl->AddRectFilled(ImVec2(c.x - r * 0.35f, c.y - r * 0.9f), ImVec2(c.x + r * 0.35f, c.y + r * 0.9f), IM_COL32(235, 235, 240, a), r * 0.35f);
+            dl->AddRectFilled(ImVec2(c.x - r * 0.35f, c.y), ImVec2(c.x + r * 0.35f, c.y + r * 0.9f), IM_COL32(230, 70, 80, a), r * 0.35f, ImDrawFlags_RoundCornersBottom);
+            dl->AddRect(ImVec2(c.x - r * 0.35f, c.y - r * 0.9f), ImVec2(c.x + r * 0.35f, c.y + r * 0.9f), IM_COL32(20, 20, 25, a), r * 0.35f, 0, 2.0f);
+        }
+    }
+
     // Pokémon: cubo del color de su especie con morro (igual que en el mundo).
     inline void creature(ImDrawList* dl, const ImVec2& c, float r, int speciesId, float alpha = 1.0f) {
         const DirectX::XMFLOAT3 tone = PokemonStyle::color(speciesId);
@@ -77,6 +94,7 @@ namespace ItemIcon {
             case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::color(type->id), alpha); break;
             case ItemCategory::MATERIAL: material(dl, c, r, item.refId, alpha); break;
             case ItemCategory::TOOL:     tool(dl, c, r, item.refId, alpha); break;
+            case ItemCategory::TRAINING: if (const TrainingItem* type = data.training(item.refId)) training(dl, c, r, type->effect, alpha); break;
             default: break;
         }
     }
@@ -87,6 +105,7 @@ namespace ItemIcon {
             case ItemCategory::POKEBALL: return IM_COL32(52, 96, 190, 255);
             case ItemCategory::MATERIAL: return IM_COL32(196, 128, 48, 255);
             case ItemCategory::TOOL:     return IM_COL32(120, 76, 190, 255);
+            case ItemCategory::TRAINING: return IM_COL32(40, 150, 120, 255);
             default:                     return IM_COL32(90, 90, 100, 255);
         }
     }
@@ -97,6 +116,7 @@ namespace ItemIcon {
             case ItemCategory::POKEBALL: ball(dl, c, r, { 0.90f, 0.20f, 0.20f }); break;
             case ItemCategory::MATERIAL: material(dl, c, r, 2); break;
             case ItemCategory::TOOL:     tool(dl, c, r, 1); break;
+            case ItemCategory::TRAINING: training(dl, c, r, TrainingItem::Effect::LEVEL); break;
             default: break;
         }
     }

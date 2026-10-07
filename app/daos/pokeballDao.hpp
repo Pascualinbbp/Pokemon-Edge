@@ -12,12 +12,12 @@ class PokeballDao {
         balls.reserve(rows.size());
         for (const auto& row : rows) {
             balls.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::text(row, "description"),
-                              DaoRow::real(row, "capture_multiplier") });
+                              DaoRow::real(row, "capture_multiplier"), DaoRow::integer(row, "obtainable") != 0 });
         }
         if (balls.empty()) Logger::logError("POKEBALL_DAO", "La tabla pokeball no existe o está vacía (falta aplicar testing/sql/pokeball.sql).");
         return balls;
     }
 
     private:
-    static constexpr const char* SELECT_ALL = "SELECT id, name, description, capture_multiplier FROM pokeball ORDER BY id;";
+    static constexpr const char* SELECT_ALL = "SELECT id, name, description, capture_multiplier, obtainable FROM pokeball ORDER BY id;";
 };

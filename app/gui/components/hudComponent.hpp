@@ -21,6 +21,7 @@ namespace HudComponent {
             { "¡SUPER SUERTE!",             IM_COL32(150, 235, 255, 255) },
             { "¡SIN UNIDADES!",             IM_COL32(255, 150, 40, 255) },
             { "¡HAS OBTENIDO!",             IM_COL32(255, 215, 70, 255) },
+            { "¡SUBES DE NIVEL!",           IM_COL32(120, 220, 255, 255) },
         };
 
         // Color según la probabilidad de captura: verde muy alta, amarillo buena, naranja dudosa, rojo muy baja.
@@ -49,7 +50,7 @@ namespace HudComponent {
                 DirectX::XMStoreFloat4(&clip, DirectX::XMVector4Transform(DirectX::XMVectorSet(tag.position.x, tag.position.y, tag.position.z, 1.0f), viewProj));
                 if (clip.w <= 0.1f) continue; // detrás de la cámara
                 const ImVec2 at((clip.x / clip.w * 0.5f + 0.5f) * screen.x, (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * screen.y);
-                centered(dl, ImVec2(at.x, at.y - ImGui::GetFontSize()), tag.name->c_str(), 1.0f, IM_COL32(255, 255, 255, 235));
+                centered(dl, ImVec2(at.x, at.y - ImGui::GetFontSize()), tag.text.c_str(), 1.0f, tag.shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, 235));
             }
         }
 
@@ -145,7 +146,7 @@ namespace HudComponent {
                 Action action;
                 char text[64];
             };
-            Hint hints[8];
+            Hint hints[9];
             int count = 0;
             const auto add = [&](Action action, const char* text) {
                 hints[count].action = action;
@@ -168,6 +169,7 @@ namespace HudComponent {
                 add(Action::CROUCH, "Agacharse");
                 add(Action::SPRINT, "Correr");
                 add(Action::AIM, "Modo captura");
+                if (status.team.size() > 1) add(Action::BALL_SWITCH, "Cambiar de pokémon");
                 add(Action::INVENTORY, "Mochila");
                 add(Action::PAUSE, "Pausa");
             }
@@ -178,6 +180,43 @@ namespace HudComponent {
             for (int i = 0; i < count; ++i) {
                 GuiPrompts::draw(dl, pos, hints[i].action, hints[i].text, device);
                 pos.y += ROW;
+            }
+        }
+
+        // Nivel del jugador y su experiencia (arriba a la derecha).
+        inline void drawLevel(ImDrawList* dl, const GameStatus& status) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            constexpr float WIDTH = 150.0f;
+            char text[48];
+            std::snprintf(text, sizeof(text), "Nv. %d / %d", status.playerLevel, status.levelCap);
+            const ImVec2 at(screen.x - WIDTH - 24.0f, 14.0f);
+            dl->AddText(at, IM_COL32(255, 255, 255, 235), text);
+            const ImVec2 bar(at.x, at.y + ImGui::GetFontSize() + 4.0f);
+            dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH, bar.y + 6.0f), IM_COL32(255, 255, 255, 50), 3.0f);
+            dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH * status.playerXp, bar.y + 6.0f), IM_COL32(120, 220, 255, 255), 3.0f);
+        }
+
+        // Equipo en una lista vertical a la derecha: el líder (el que acompaña) resaltado y su tecla para elegirlo.
+        inline void drawTeam(ImDrawList* dl, const GameStatus& status) {
+            if (status.team.empty()) return;
+            constexpr float WIDTH = 190.0f, ROW = 46.0f, GAP = 6.0f;
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            const float total = static_cast<float>(status.team.size()) * (ROW + GAP) - GAP;
+            float y = screen.y * 0.5f - total * 0.5f;
+            const float x = screen.x - WIDTH - 24.0f;
+            char text[64];
+            for (size_t i = 0; i < status.team.size(); ++i) {
+                const TeamEntry& entry = status.team[i];
+                const ImVec2 a(x - (entry.lead ? 14.0f : 0.0f), y), b(x + WIDTH, y + ROW);
+                dl->AddRectFilled(a, b, entry.lead ? IM_COL32(40, 70, 140, 215) : IM_COL32(24, 24, 34, 190), 10.0f);
+                dl->AddRect(a, b, entry.lead ? IM_COL32(255, 255, 255, 220) : IM_COL32(255, 255, 255, 40), 10.0f, 0, entry.lead ? 2.0f : 1.0f);
+                ItemIcon::creature(dl, ImVec2(a.x + 26.0f, a.y + ROW * 0.5f), 14.0f, entry.speciesId);
+                dl->AddText(ImVec2(a.x + 50.0f, a.y + 6.0f), entry.shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, 240), entry.name->c_str());
+                std::snprintf(text, sizeof(text), "Nv. %d", entry.level);
+                dl->AddText(ImVec2(a.x + 50.0f, a.y + 6.0f + ImGui::GetFontSize()), IM_COL32(200, 200, 210, 220), text);
+                std::snprintf(text, sizeof(text), "%d", static_cast<int>(i) + 1);
+                dl->AddText(ImVec2(b.x - 16.0f, a.y + 6.0f), IM_COL32(255, 255, 255, 150), text);
+                y += ROW + GAP;
             }
         }
 
@@ -232,6 +271,8 @@ namespace HudComponent {
         }
 
         detail::drawNameTags(dl, status);
+        detail::drawLevel(dl, status);
+        detail::drawTeam(dl, status);
         detail::drawHints(dl, status, device);
 
         if (status.missingSkill) {

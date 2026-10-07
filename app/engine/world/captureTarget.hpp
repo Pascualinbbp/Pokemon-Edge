@@ -32,19 +32,21 @@ class CaptureTarget {
 
     bool hittable() const { return m_state == State::IDLE; }
     float yaw() const { return m_yaw; }
-    float baseChance() const { return m_baseChance; }
 
     // Especie de este pokémon salvaje (índice en GameData::species y su id). -1 = aún sin asignar: la escena la
     // asigna al aparecer, para que toda la lógica de elección esté en un solo sitio.
     int speciesIndex() const { return m_speciesIndex; }
     int speciesId() const { return m_speciesId; }
-    void setSpecies(int index, int id) {
+    int level() const { return m_level; }
+    bool shiny() const { return m_shiny; }
+    int ballId() const { return m_ballId; } // pokéball con la que se está capturando
+    void setSpecies(int index, int id, int level, bool shiny) {
         m_speciesIndex = index;
         m_speciesId = id;
+        m_level = level;
+        m_shiny = shiny;
     }
     CaptureRules::Throw throwKind() const { return m_sequence.kind(); }
-
-    void reroll() { m_baseChance = RandomUtil::range(CaptureRules::MIN_BASE, CaptureRules::MAX_BASE); }
 
     // Arista actual del cubo dibujado (se encoge al entrar en la bola).
     float scale() const {
@@ -112,6 +114,7 @@ class CaptureTarget {
     // La bola ha tocado al pokémon: empieza la animación del resultado ya decidido.
     void beginCapture(const Pokeball& ball, const CaptureRules::Result& result) {
         m_state = State::CAPTURING;
+        m_ballId = ball.typeId;
         m_sequence.start(ball, result);
     }
 
@@ -129,8 +132,7 @@ class CaptureTarget {
                         m_state = State::HIDDEN;
                         m_timer = 0.0f;
                     } else {
-                        m_state = State::IDLE; // escapó: ya está de nuevo en su sitio, con otro porcentaje
-                        reroll();
+                        m_state = State::IDLE; // escapó: ya está de nuevo en su sitio
                     }
                 }
                 break;
@@ -182,13 +184,12 @@ class CaptureTarget {
         m_state = State::IDLE;
         m_timer = 0.0f;
         m_speciesIndex = m_speciesId = -1;
-        reroll();
+        m_shiny = false;
     }
 
     State m_state = State::IDLE;
     CaptureSequence m_sequence;
     float m_timer = 0.0f;
-    float m_baseChance = 50.0f;
     int m_slot = 0;
     float m_yaw = 0.0f;
     float m_heading = 0.0f;   // hacia dónde quiere caminar
@@ -196,4 +197,7 @@ class CaptureTarget {
     bool m_walking = false;
     int m_speciesIndex = -1;
     int m_speciesId = -1;
+    int m_level = 1;
+    bool m_shiny = false;
+    int m_ballId = -1;
 };

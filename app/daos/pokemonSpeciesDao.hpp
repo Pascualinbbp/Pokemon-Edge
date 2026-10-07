@@ -23,6 +23,12 @@ class PokemonSpeciesDao {
             entry.stats = { DaoRow::integer(row, "hp"), DaoRow::integer(row, "attack"), DaoRow::integer(row, "sp_attack"),
                             DaoRow::integer(row, "defense"), DaoRow::integer(row, "sp_defense"), DaoRow::integer(row, "speed") };
             entry.spawnWeight = DaoRow::real(row, "spawn_weight");
+            entry.catchRate = DaoRow::integer(row, "catch_rate");
+            entry.minLevel = DaoRow::integer(row, "min_level");
+            entry.maxLevel = DaoRow::integer(row, "max_level");
+            entry.evolvesToId = DaoRow::integer(row, "evolves_to_id") > 0 ? DaoRow::integer(row, "evolves_to_id") : -1;
+            entry.evolveLevel = DaoRow::integer(row, "evolve_level");
+            entry.starter = DaoRow::integer(row, "starter") != 0;
             species.push_back(std::move(entry));
         }
         if (species.empty()) Logger::logError("POKEMON_DAO", "La tabla pokemon no existe o está vacía (falta aplicar testing/sql/pokemon.sql).");
@@ -41,5 +47,5 @@ class PokemonSpeciesDao {
     private:
     static constexpr const char* SELECT_POKEMON =
         "SELECT id, name, description, skill_id, skill_level, ability_id, passive_id, type1_id, type2_id, "
-        "hp, attack, sp_attack, defense, sp_defense, speed, spawn_weight FROM pokemon ORDER BY id;";
+        "hp, attack, sp_attack, defense, sp_defense, speed, spawn_weight, catch_rate, min_level, max_level, evolves_to_id, evolve_level, starter FROM pokemon ORDER BY id;";
 };

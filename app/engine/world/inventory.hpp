@@ -54,6 +54,7 @@ class Inventory {
 
     // --- Pokémonedas y venta ---
     int money() const { return m_money; }
+    void addMoney(int amount) { m_money = (std::max)(0, m_money + amount); }
 
     // Vende hasta 'quantity' unidades de un objeto a su precio de venta (0 = no se vende). Devuelve lo cobrado.
     int sell(int itemId, int quantity) {

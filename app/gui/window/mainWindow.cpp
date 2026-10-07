@@ -13,6 +13,8 @@
 #include "../components/controlsComponent.hpp"
 #include "../components/inventoryComponent.hpp"
 #include "../components/pokemonComponent.hpp"
+#include "../components/researchComponent.hpp"
+#include "../components/starterComponent.hpp"
 #include "../components/updateComponent.hpp"
 #include "../../managers/databaseManager.hpp"
 #include "../../managers/saveManager.hpp"
@@ -263,10 +265,19 @@ void MainWindow::run() {
         const float dt = timer.tick(kMaxFrameSeconds);
 
         bool justPaused = false;
+        if (g_state == GameState::PLAYING && engine.needsStarter()) {
+            g_state = GameState::STARTER; // partida nueva: primero se elige el pokémon inicial
+            redrawFrames = 2;
+        }
         if (g_state == GameState::PLAYING) {
             const InputState input = InputHandler::poll(dt);
             if (input.pause || engine.update(dt, input) || input.inventory) {
                 g_state = input.inventory && !input.pause ? GameState::INVENTORY : GameState::PAUSED;
+                g_backState = GameState::PLAYING;
+                redrawFrames = 2;
+                justPaused = true;
+            } else if (engine.takeResearchRequest()) {
+                g_state = GameState::RESEARCH;
                 g_backState = GameState::PLAYING;
                 redrawFrames = 2;
                 justPaused = true;
@@ -351,7 +362,17 @@ void MainWindow::run() {
                 InventoryComponent::render(g_state, g_backState, engine.data(), engine.inventory());
                 break;
             case GameState::POKEMON:
-                PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage());
+                PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress());
+                break;
+            case GameState::RESEARCH:
+                ResearchComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory());
+                break;
+            case GameState::STARTER:
+                if (const int starter = StarterComponent::render(engine.data()); starter >= 0) {
+                    engine.chooseStarter(starter);
+                    g_state = GameState::PLAYING;
+                    SessionManager::saveCurrent();
+                }
                 break;
         }
         ImGui::End();

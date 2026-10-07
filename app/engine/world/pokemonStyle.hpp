@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <DirectXMath.h>
 
 // Aspecto de cada pokémon y tipo (por id de la base de datos). Es el único sitio donde se definen sus colores.
@@ -17,6 +18,11 @@ namespace PokemonStyle {
             case 9:  return { 0.22f, 0.40f, 0.75f }; // Blastoise
             default: return { 1.00f, 0.55f, 0.10f };
         }
+    }
+
+    // Color del variocolor: los canales rotados y algo más claros.
+    inline DirectX::XMFLOAT3 shiny(const DirectX::XMFLOAT3& c) {
+        return { (std::min)(1.0f, c.z * 1.3f + 0.15f), (std::min)(1.0f, c.x * 1.1f + 0.1f), (std::min)(1.0f, c.y * 1.3f + 0.15f) };
     }
 
     // Color de la etiqueta de cada tipo (RGB 0..255); el orden de la tabla type fija los id.

@@ -13,6 +13,7 @@
 #include "resourceNodeType.hpp"
 #include "skill.hpp"
 #include "tool.hpp"
+#include "trainingItem.hpp"
 
 // Todos los datos de juego que viven en la base de datos, cargados una sola vez al arrancar.
 struct GameData {
@@ -26,6 +27,7 @@ struct GameData {
     std::vector<Ability> abilities;
     std::vector<PokemonType> types;
     std::vector<GroundItemType> groundItems;
+    std::vector<TrainingItem> trainingItems;
     std::vector<ChestType> chests;
     std::vector<ResourceNodeType> nodes;
 
@@ -39,9 +41,38 @@ struct GameData {
     const Tool* tool(int id) const { return find(tools, id); }
     const Skill* skill(int id) const { return find(skills, id); }
     const Item* item(int id) const { return find(items, id); }
+    const TrainingItem* training(int id) const { return find(trainingItems, id); }
     const Ability* ability(int id) const { return find(abilities, id); }
     const PokemonType* type(int id) const { return find(types, id); }
     const PokemonSpecies* speciesById(int id) const { return find(species, id); }
+
+    // Pokéball exclusiva del pokémon inicial (la que no existe como objeto). nullptr si no hay.
+    const PokeballType* starterBall() const {
+        for (const PokeballType& entry : balls) if (!entry.obtainable) return &entry;
+        return nullptr;
+    }
+
+    const PokeballType* ballByName(const std::string& name) const {
+        for (const PokeballType& entry : balls) if (entry.name == name) return &entry;
+        return nullptr;
+    }
+
+    // Última forma de la línea evolutiva de una especie (ella misma si no evoluciona).
+    const PokemonSpecies* finalForm(const PokemonSpecies& from) const {
+        const PokemonSpecies* current = &from;
+        for (int guard = 0; guard < 8 && current->evolvesToId > 0; ++guard) {
+            const PokemonSpecies* next = speciesById(current->evolvesToId);
+            if (!next) break;
+            current = next;
+        }
+        return current;
+    }
+
+    // El objeto de entrenamiento con ese efecto (nullptr si no existe) y su objeto de inventario.
+    const TrainingItem* trainingWith(TrainingItem::Effect effect) const {
+        for (const TrainingItem& entry : trainingItems) if (entry.effect == effect) return &entry;
+        return nullptr;
+    }
 
     int speciesIndex(int id) const {
         for (size_t i = 0; i < species.size(); ++i) if (species[i].id == id) return static_cast<int>(i);
@@ -79,6 +110,7 @@ struct GameData {
             case ItemCategory::POKEBALL: if (const PokeballType* type = ball(item.refId)) return type->name; break;
             case ItemCategory::MATERIAL: if (const Material* type = material(item.refId)) return type->name; break;
             case ItemCategory::TOOL:     if (const Tool* type = tool(item.refId)) return type->name; break;
+            case ItemCategory::TRAINING: if (const TrainingItem* type = training(item.refId)) return type->name; break;
             default: break;
         }
         return unknown;
@@ -101,6 +133,7 @@ struct GameData {
             case ItemCategory::POKEBALL: if (const PokeballType* type = ball(item.refId)) return type->description; break;
             case ItemCategory::MATERIAL: if (const Material* type = material(item.refId)) return type->description; break;
             case ItemCategory::TOOL:     if (const Tool* type = tool(item.refId)) return type->description; break;
+            case ItemCategory::TRAINING: if (const TrainingItem* type = training(item.refId)) return type->description; break;
             default: break;
         }
         return none;

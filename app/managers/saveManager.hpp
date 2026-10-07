@@ -49,6 +49,10 @@ class SaveManager {
         j["inventory"]["money"] = data.money;
         j["pokemon"]["team"] = data.team;
         j["pokemon"]["pc"] = data.pc;
+        j["pokemon"]["autoReleaseRank"] = data.autoReleaseRank;
+        j["player"]["level"] = data.playerLevel;
+        j["player"]["xp"] = data.playerXp;
+        j["player"]["badges"] = data.badges;
 
         if (!JsonUtil::saveToFile(PathsUtil::saveSlotPath(slot), j)) return false;
         s_slots[slot] = { true, TimeUtil::formatLocal(now) };
@@ -73,6 +77,10 @@ class SaveManager {
         data.money = JsonUtil::find<int>(j, { "inventory", "money" }).value_or(0);
         data.team = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "team" }).value_or(std::vector<std::string>{});
         data.pc = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "pc" }).value_or(std::vector<std::string>{});
+        data.autoReleaseRank = JsonUtil::find<int>(j, { "pokemon", "autoReleaseRank" }).value_or(0);
+        data.playerLevel = JsonUtil::find<int>(j, { "player", "level" }).value_or(1);
+        data.playerXp = JsonUtil::find<int>(j, { "player", "xp" }).value_or(0);
+        data.badges = JsonUtil::find<int>(j, { "player", "badges" }).value_or(0);
         return data;
     }
 

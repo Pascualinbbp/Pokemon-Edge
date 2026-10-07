@@ -6,12 +6,22 @@
 #include "../world/inventory.hpp"
 
 // Avisos grandes en pantalla.
-enum class Notice { NONE, CAPTURED, ESCAPED, LUCKY, SUPER_LUCKY, OUT_OF_STOCK, REWARD };
+enum class Notice { NONE, CAPTURED, ESCAPED, LUCKY, SUPER_LUCKY, OUT_OF_STOCK, REWARD, LEVEL_UP };
 
 // Nombre que se dibuja sobre un pokémon (posición en el mundo, sobre su cabeza).
 struct NameTag {
     DirectX::XMFLOAT3 position;
-    const std::string* name;
+    std::string text; // "Nombre  Nv. 12"
+    bool shiny = false;
+};
+
+// Un pokémon del equipo para la lista lateral del juego.
+struct TeamEntry {
+    int speciesId = -1;
+    const std::string* name = nullptr;
+    int level = 1;
+    bool shiny = false;
+    bool lead = false; // el que acompaña al jugador
 };
 
 // Estado del juego que la interfaz necesita mostrar (el HUD no conoce la escena).
@@ -28,6 +38,10 @@ struct GameStatus {
     const std::string* missingSkill = nullptr;   // habilidad que falta para trabajar el recurso cercano ("Talar"...)
     int missingLevel = 0;                        // nivel que exige ese recurso
     std::vector<NameTag> nameTags;               // nombres sobre los pokémon visibles
+    std::vector<TeamEntry> team;                 // el equipo, para la lista lateral
+    int playerLevel = 1;                         // nivel del jugador, su experiencia (0..1) y su límite de nivel
+    float playerXp = 0.0f;
+    int levelCap = 1;
     DirectX::XMFLOAT4X4 viewProj = {};           // vista * proyección (para colocar los nombres en pantalla)
     const std::string* noticeText = nullptr;     // segunda línea del aviso (recompensa obtenida, pokémon capturado...)
 

@@ -2,13 +2,14 @@
 #include <string>
 
 // Categorías de objeto (tabla item_category). Cada una tiene su propia tabla de datos; item.ref_id apunta a ella.
-enum class ItemCategory { UNKNOWN, POKEBALL, MATERIAL, TOOL };
+enum class ItemCategory { UNKNOWN, POKEBALL, MATERIAL, TOOL, TRAINING };
 
 namespace ItemCategoryText {
     inline ItemCategory parse(const std::string& text) {
         if (text == "POKEBALL") return ItemCategory::POKEBALL;
         if (text == "MATERIAL") return ItemCategory::MATERIAL;
         if (text == "TOOL") return ItemCategory::TOOL;
+        if (text == "TRAINING") return ItemCategory::TRAINING;
         return ItemCategory::UNKNOWN;
     }
 }

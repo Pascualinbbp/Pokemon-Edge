@@ -11,6 +11,7 @@
 #include "../daos/skillDao.hpp"
 #include "../daos/pokemonSpeciesDao.hpp"
 #include "../daos/groundItemDao.hpp"
+#include "../daos/trainingItemDao.hpp"
 
 class DatabaseManager {
     private:
@@ -23,6 +24,7 @@ class DatabaseManager {
     inline static SkillDao skillDaoInstance;
     inline static PokemonSpeciesDao speciesDaoInstance;
     inline static GroundItemDao groundItemDaoInstance;
+    inline static TrainingItemDao trainingItemDaoInstance;
 
     public:
     static void init() {
@@ -77,6 +79,7 @@ class DatabaseManager {
         data.abilities = speciesDaoInstance.findAbilities();
         data.types = typeDaoInstance.findAll();
         data.groundItems = groundItemDaoInstance.findAll();
+        data.trainingItems = trainingItemDaoInstance.findAll();
         Logger::logInfo("DB_MANAGER", "Datos de juego: " + std::to_string(data.items.size()) + " objetos, " +
             std::to_string(data.balls.size()) + " pokéballs, " + std::to_string(data.materials.size()) + " materiales, " +
             std::to_string(data.chests.size()) + " cofres, " + std::to_string(data.nodes.size()) + " nodos de recolección, " + std::to_string(data.skills.size()) + " habilidades, " +

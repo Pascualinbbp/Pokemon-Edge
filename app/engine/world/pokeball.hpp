@@ -9,6 +9,7 @@ namespace PokeballStyle {
             case 1:  return { 0.86f, 0.16f, 0.16f }; // Poké Ball: roja
             case 2:  return { 0.16f, 0.39f, 0.90f }; // Super Ball: azul
             case 3:  return { 0.96f, 0.80f, 0.16f }; // Ultra Ball: amarilla
+            case 4:  return { 0.62f, 0.26f, 0.85f }; // Starter Ball: morada (solo la lleva el pokémon inicial)
             default: return { 0.70f, 0.70f, 0.70f };
         }
     }
@@ -25,6 +26,7 @@ struct Pokeball {
 
     Physics::Body body;
     float age = 0.0f;
+    int typeId = -1;                                // tabla pokeball: el tipo de bola lanzada
     float captureMultiplier = 1.0f;                 // del tipo de bola lanzada
     DirectX::XMFLOAT3 color = { 1.0f, 1.0f, 1.0f }; // PokeballStyle::color del tipo lanzado
 

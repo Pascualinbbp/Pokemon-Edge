@@ -491,7 +491,7 @@ void Renderer3D::collect(const Scene& scene) {
 
     for (const CaptureTarget& target : scene.targets) {
         const float size = target.scale();
-        if (size > 0.001f) addCreature(target.drawCenter(), size, target.yaw(), PokemonStyle::color(target.speciesId()));
+        if (size > 0.001f) addCreature(target.drawCenter(), size, target.yaw(), target.speciesId(), target.shiny());
 
         // Animación de captura: la bola (tambaleándose) y las estrellas, que brillan y no proyectan sombra.
         if (const CaptureSequence* sequence = target.sequence()) {
@@ -513,19 +513,22 @@ void Renderer3D::collect(const Scene& scene) {
     if (scene.companion.active()) {
         const Companion& pet = scene.companion;
         addCreature({ pet.body.position.x, pet.body.position.y + Companion::SIZE * 0.5f + pet.bob(), pet.body.position.z },
-                    Companion::SIZE, pet.yaw(), PokemonStyle::color(pet.speciesId()));
+                    Companion::SIZE, pet.yaw(), pet.speciesId(), !scene.storage.team().empty() && scene.storage.team().front().shiny);
     }
 
     for (const Chest& chest : scene.chests.entities) addChest(chest);
     for (const ResourceNode& node : scene.nodes.entities) addNode(node);
-    for (const GroundItem& item : scene.groundItems.entities) addGroundItem(item, scene.data());
+    for (const GroundItem& item : scene.groundItems.entities) addGroundItem(item);
+    addMachine();
 
     for (const Pokeball& ball : scene.balls) addBall(ball, 0.0f, 1.0f, 0.0f);
 }
 
 // Pokémon (salvaje o compañero): cubo del color de su especie con un morro amarillo que marca hacia dónde mira.
-void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, const XMFLOAT3& color) {
-    add(m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), { color.x, color.y, color.z, 0.0f });
+void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, int speciesId, bool shiny) {
+    const XMFLOAT3 base = PokemonStyle::color(speciesId);
+    const XMFLOAT3 color = shiny ? PokemonStyle::shiny(base) : base;
+    add(m_cube, XMMatrixScaling(size, size, size) * XMMatrixTranslation(c.x, c.y, c.z), { color.x, color.y, color.z, shiny ? 0.3f : 0.0f });
 
     const float nose = size * 0.4f;
     add(m_cube, XMMatrixScaling(nose, nose, nose) *
@@ -576,24 +579,27 @@ void Renderer3D::addNode(const ResourceNode& node) {
     }
 }
 
-// Objeto suelto: cubito del color de su material que gira y flota (varios cubitos si son varias unidades).
-void Renderer3D::addGroundItem(const GroundItem& item, const GameData& data) {
-    const Item* found = data.item(item.itemId());
-    XMFLOAT3 color = { 0.8f, 0.8f, 0.8f };
-    if (found && found->category == ItemCategory::MATERIAL) color = ItemStyle::materialColor(found->refId);
-    else if (found && found->category == ItemCategory::POKEBALL) color = PokeballStyle::color(found->refId);
-
+// Objeto suelto: mini estrella quieta en el suelo, que brilla y no proyecta sombra.
+void Renderer3D::addGroundItem(const GroundItem& item) {
     const XMFLOAT3& p = item.body.position;
     const float s = GroundItem::SIZE * item.scale();
-    const int cubes = (std::min)(item.quantity(), 3);
-    for (int i = 0; i < cubes; ++i) {
-        const float angle = item.spin() + static_cast<float>(i) * 2.1f;
-        const float offset = cubes > 1 ? 0.22f : 0.0f;
-        add(m_cube, XMMatrixScaling(s, s, s) * XMMatrixRotationY(angle) *
-            XMMatrixTranslation(p.x + std::cos(angle) * offset, p.y + s * 0.5f + 0.15f + item.bob() + static_cast<float>(i) * 0.04f,
-                                p.z + std::sin(angle) * offset),
-            { color.x, color.y, color.z, 0.35f });
-    }
+    if (s <= 0.001f) return;
+    add(m_star, XMMatrixScaling(s, s, s) * XMMatrixTranslation(p.x, p.y + GroundItem::LIFT, p.z), { 1.0f, 0.88f, 0.35f, 1.0f }, false);
+}
+
+// Máquina de investigación: cuerpo metálico con una pantalla que brilla, un panel y una antena.
+void Renderer3D::addMachine() {
+    const XMMATRIX place = XMMatrixRotationY(ResearchMachine::YAW) *
+                           XMMatrixTranslation(ResearchMachine::POSITION.x, ResearchMachine::POSITION.y, ResearchMachine::POSITION.z);
+    const auto part = [&](const XMFLOAT3& size, const XMFLOAT3& at, const XMFLOAT3& color, float glow) {
+        add(m_cube, XMMatrixScaling(size.x, size.y, size.z) * XMMatrixTranslation(at.x, at.y, at.z) * place, { color.x, color.y, color.z, glow });
+    };
+    constexpr float W = ResearchMachine::WIDTH, D = ResearchMachine::DEPTH, H = ResearchMachine::HEIGHT;
+    part({ W, H * 0.62f, D }, { 0.0f, H * 0.31f, 0.0f }, { 0.34f, 0.38f, 0.46f }, 0.0f);                 // cuerpo
+    part({ W * 0.9f, H * 0.34f, D * 0.8f }, { 0.0f, H * 0.62f + H * 0.17f, -D * 0.05f }, { 0.26f, 0.29f, 0.36f }, 0.0f); // cabezal
+    part({ W * 0.7f, H * 0.2f, 0.06f }, { 0.0f, H * 0.8f, D * 0.36f }, { 0.35f, 0.85f, 0.95f }, 0.9f);   // pantalla
+    part({ W * 0.6f, 0.08f, 0.06f }, { 0.0f, H * 0.45f, D * 0.5f }, { 0.95f, 0.78f, 0.22f }, 0.5f);      // franja de luz
+    part({ 0.08f, 0.5f, 0.08f }, { W * 0.3f, H + 0.25f, 0.0f }, { 0.7f, 0.7f, 0.75f }, 0.0f);            // antena
 }
 
 // Cofre: cuerpo, cerradura y tapa con bisagra atrás; al abrirse suelta chispas del color de su rareza.

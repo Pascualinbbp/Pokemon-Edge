@@ -12,7 +12,11 @@ struct SaveData {
     std::string selectedBall;         // pokéball equipada; vacío = la primera
     int money = 0;                    // pokémonedas
     std::vector<std::string> team;    // especies del equipo (el primero es el líder)
-    std::vector<std::string> pc;      // especies guardadas en el PC
+    std::vector<std::string> pc;      // pokémon guardados en el PC
+    int playerLevel = 1;              // nivel, experiencia y medallas del jugador
+    int playerXp = 0;
+    int badges = 0;
+    int autoReleaseRank = 0;          // potencial mínimo que conserva la máquina de investigación (índice de EvRules::RANKS)
 };
 
 // Resumen de una ranura de partida para mostrarla en los menús.

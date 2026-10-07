@@ -45,7 +45,7 @@ namespace ControlsComponent {
 
             keyRow(dl, offset(o, 40.0f, 144.0f), { "W", "W" }, "Correr (pulsa W dos veces)");
             keyRow(dl, offset(o, 40.0f, 204.0f), { "SHIFT" }, "Agacharse / Deslizarse", 90.0f);
-            keyRow(dl, offset(o, 40.0f, 264.0f), { "Q", "E" }, "Cambiar de Pokéball (o rueda)");
+            keyRow(dl, offset(o, 40.0f, 264.0f), { "Q", "E" }, "Pokéball (apuntando) / pokémon (1-6)");
 
             keyRow(dl, offset(o, 420.0f, 30.0f), { "ESPACIO" }, "Saltar", 150.0f);
             keyRow(dl, offset(o, 420.0f, 90.0f), { "ESC" }, "Pausa / Salir de apuntar", 60.0f);
@@ -133,8 +133,8 @@ namespace ControlsComponent {
             callout(layout.rsX, layout.rsY, layout.rsElbowY, 550.0f, "Cámara · Fijar objetivo (R3)");
             callout(302.0f, 40.0f, 40.0f, 210.0f, "Apuntar (L2)");
             callout(457.0f, 40.0f, 40.0f, 550.0f, "Lanzar (R2)");
-            callout(285.0f, 64.0f, 64.0f, 210.0f, "Pokéball anterior (L1)");
-            callout(475.0f, 64.0f, 64.0f, 550.0f, "Pokéball siguiente (R1)");
+            callout(285.0f, 64.0f, 64.0f, 210.0f, "Pokéball / pokémon anterior (L1)");
+            callout(475.0f, 64.0f, 64.0f, 550.0f, "Pokéball / pokémon siguiente (R1)");
             callout(fx + 27.0f, fy, fy, 550.0f, "Agacharse / Deslizarse");
             callout(fx, fy + 27.0f, fy + 58.0f, 550.0f, "Saltar");
             callout(fx - 17.0f, fy, fy + 103.0f, 550.0f, "Interactuar");

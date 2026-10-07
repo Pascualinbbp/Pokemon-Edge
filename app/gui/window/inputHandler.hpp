@@ -30,6 +30,7 @@ namespace InputHandler {
             bool lockTap = false;                                       // TAB pulsado y soltado rápido
             bool tabDown = false, tabFired = false;                     // TAB mantenido
             int ballSwitch = 0;                                         // Q (-1), E (+1) o rueda del ratón
+            int teamSelect = 0;                                         // teclas 1..6 (solo mientras se juega)
             DWORD tabSince = 0;
         };
         inline Keyboard keys;
@@ -57,6 +58,7 @@ namespace InputHandler {
             keys.jump = keys.crouch = keys.sprint = keys.throwBall = keys.interact = keys.inventory = false;
             keys.aimToggle = keys.escape = keys.lockTap = false;
             keys.ballSwitch = 0;
+            keys.teamSelect = 0;
         }
 
         inline bool readPad(GamepadState& out) {
@@ -147,6 +149,9 @@ namespace InputHandler {
                 break;
             case 'I':
                 if (newPress && detail::captured) k.inventory = true;
+                break;
+            case '1': case '2': case '3': case '4': case '5': case '6':
+                if (newPress && detail::captured) k.teamSelect = static_cast<int>(key - '0');
                 break;
             case VK_SPACE:
                 if (newPress) k.jump = true;
@@ -323,6 +328,7 @@ namespace InputHandler {
             input.escape = k.escape;
             input.lockTap = k.lockTap;
             input.ballSwitch = k.ballSwitch;
+            input.teamSelect = k.teamSelect;
             if (k.tabDown && !k.tabFired && GetTickCount() - k.tabSince >= InputBindings::LOCK_HOLD_MS) {
                 detail::keys.tabFired = true;
                 input.lockCancel = true;
