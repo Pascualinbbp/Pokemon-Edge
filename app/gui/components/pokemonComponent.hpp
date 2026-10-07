@@ -131,7 +131,7 @@ namespace PokemonComponent {
             std::snprintf(level, sizeof(level), "Nv. %d", owned->level);
             GuiCards::text(dl, ImVec2(a.x + 84.0f, a.y + 30.0f), IM_COL32(255, 255, 255, 210), level, 0.85f);
             typeChips(dl, data, *species, ImVec2(a.x + 84.0f, a.y + 54.0f));
-            if (index == 0 && !selecting) GuiCards::chip(dl, ImVec2(b.x - 62.0f, a.y + 8.0f), "Líder", IM_COL32(0, 0, 0, 140), 0.8f);
+            if (index == storage.activeIndex() && !selecting) GuiCards::chip(dl, ImVec2(b.x - 86.0f, a.y + 8.0f), "Acompaña", IM_COL32(0, 0, 0, 140), 0.8f);
             if (selecting) markBox(dl, ImVec2(b.x, a.y), teamMarks.count(index) > 0, !storage.bound(*owned));
             if (selected) dl->AddRect(a, b, GuiCards::SELECT, 12.0f, 0, 3.0f);
             return clicked;
@@ -366,7 +366,7 @@ namespace PokemonComponent {
             }
 
             ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + headerHeight + 10.0f));
-            ImGui::BeginChild("##detail", ImVec2(size.x - 32.0f, size.y - headerHeight - 74.0f), false);
+            ImGui::BeginChild("##detail", ImVec2(size.x - 32.0f, size.y - headerHeight - 116.0f), false);
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextUnformatted(species->description.c_str());
             ImGui::PopTextWrapPos();
@@ -387,19 +387,30 @@ namespace PokemonComponent {
             ImGui::EndChild();
 
             // Acciones
-            ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + size.y - 54.0f));
-            const auto fixIndex = [&]() {
+            const auto fixIndexAfter = [&]() {
                 const int count = static_cast<int>((selection.inTeam ? storage.team() : storage.pc()).size());
                 select(selection.inTeam, (std::max)(0, (std::min)(selection.index, count - 1)));
                 clearMarks();
             };
-            if (selection.inTeam) {
-                if (GuiCards::button("##lead", "LÍDER", ImVec2(100.0f, 38.0f), selection.index > 0)) {
-                    storage.makeLead(selection.index);
-                    select(true, 0);
+            if (selection.inTeam) { // quién acompaña y en qué posición está: el orden del equipo solo cambia desde aquí
+                ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + size.y - 98.0f));
+                if (GuiCards::button("##active", "ACOMPAÑAR", ImVec2(140.0f, 34.0f), selection.index != storage.activeIndex())) storage.setActive(selection.index);
+                ImGui::SameLine();
+                if (GuiCards::button("##up", "SUBIR", ImVec2(90.0f, 34.0f), selection.index > 0)) {
+                    storage.moveInTeam(selection.index, -1);
+                    select(true, selection.index - 1);
                     clearMarks();
                 }
                 ImGui::SameLine();
+                if (GuiCards::button("##down", "BAJAR", ImVec2(90.0f, 34.0f), selection.index + 1 < static_cast<int>(storage.team().size()))) {
+                    storage.moveInTeam(selection.index, 1);
+                    select(true, selection.index + 1);
+                    clearMarks();
+                }
+            }
+            ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + size.y - 54.0f));
+            const auto& fixIndex = fixIndexAfter;
+            if (selection.inTeam) {
                 if (GuiCards::button("##sendPc", "AL PC", ImVec2(90.0f, 38.0f), !storage.pcFull() && storage.team().size() > 1)) {
                     storage.sendToPc(selection.index);
                     fixIndex();

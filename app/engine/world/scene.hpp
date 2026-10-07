@@ -95,9 +95,9 @@ struct Scene {
         m_aiming = aimMode || input.aimHold;
         if (input.ballSwitch != 0) {
             if (m_aiming) inventory.cycle(input.ballSwitch);
-            else storage.cycleLead(input.ballSwitch); // fuera del modo captura cambia el pokémon que acompaña
+            else storage.cycleActive(input.ballSwitch); // fuera del modo captura cambia el pokémon que acompaña
         }
-        if (input.teamSelect > 0) storage.makeLead(input.teamSelect - 1);
+        if (input.teamSelect > 0) storage.setActive(input.teamSelect - 1); // la misma tecla que el que ya está fuera no cambia nada
 
         if (input.lockCancel) lockedIndex = -1;
         else if (input.lockTap) cycleLock();
@@ -184,12 +184,14 @@ struct Scene {
         if (m_missingSkill >= 0) if (const Skill* skill = m_data->skill(m_missingSkill)) {
             s.missingSkill = &skill->name;
             s.missingLevel = m_missingLevel;
+            s.missingPos = m_missingPos;
         }
+        s.interactPos = interactionAnchor();
         addNameTags(s);
         for (size_t i = 0; i < storage.team().size(); ++i) {
             const OwnedPokemon& owned = storage.team()[i];
             if (const PokemonSpecies* species = m_data->speciesById(owned.speciesId)) {
-                s.team.push_back({ species->id, &species->name, owned.level, owned.shiny, i == 0 });
+                s.team.push_back({ species, owned.level, owned.shiny, owned.ballId, static_cast<int>(i) == storage.activeIndex() });
             }
         }
         if (!noticeText.empty()) s.noticeText = &noticeText;
@@ -234,10 +236,27 @@ struct Scene {
         for (const CaptureTarget& target : targets) {
             if (target.hittable()) add(target.speciesId(), target.level(), target.shiny(), { target.body.position.x, target.body.position.y + CaptureTarget::SIZE, target.body.position.z });
         }
-        if (companion.active() && !storage.team().empty()) {
-            const OwnedPokemon& lead = storage.team().front();
+        if (companion.active() && !companion.changing() && storage.active()) {
+            const OwnedPokemon& lead = *storage.active();
             add(companion.speciesId(), lead.level, lead.shiny, { companion.body.position.x, companion.body.position.y + Companion::SIZE, companion.body.position.z });
         }
+    }
+
+    // Punto del mundo sobre lo que se interactúa, donde se dibuja la ayuda de cómo hacerlo.
+    DirectX::XMFLOAT3 interactionAnchor() const {
+        const auto above = [](const Physics::Body& body, float height) { return DirectX::XMFLOAT3{ body.position.x, body.position.y + height, body.position.z }; };
+        switch (m_interaction.kind) {
+            case Interaction::CHEST:   return above(chests.entities[m_interaction.index].body, Chest::HEIGHT + 0.5f);
+            case Interaction::NODE:    return nodeAnchor(nodes.entities[m_interaction.index]);
+            case Interaction::GROUND:  return above(groundItems.entities[m_interaction.index].body, 0.9f);
+            case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
+            default:                   return {};
+        }
+    }
+
+    static DirectX::XMFLOAT3 nodeAnchor(const ResourceNode& node) {
+        const float height = (std::min)(ResourceStyle::look(node.typeId()).height, 1.6f) + 0.5f; // los árboles altos: a mano del jugador
+        return { node.body.position.x, node.body.position.y + height, node.body.position.z };
     }
 
     // --- Porcentaje de captura ---
@@ -295,9 +314,14 @@ struct Scene {
     // El líder del equipo acompaña al jugador y trabaja solo lo cercano: recoge plantas crecidas y objetos sueltos (cualquier
     // pokémon) y trabaja los nodos y riega las plantas si su habilidad del mundo llega al nivel que piden.
     void updateCompanion(float dt) {
-        const int lead = storage.leadSpeciesId();
-        const PokemonSpecies* species = m_data->speciesById(lead);
-        if (lead != companion.speciesId()) companion.set(lead, species && m_data->levitates(*species), player.body.position, camera.yaw());
+        const OwnedPokemon* lead = storage.active();
+        const PokemonSpecies* species = lead ? m_data->speciesById(lead->speciesId) : nullptr;
+        if (!lead && companion.active()) companion.set(-1, false, player.body.position, camera.yaw());
+        else if (lead && species && (lead->uid != m_shownUid || lead->speciesId != companion.speciesId())) {
+            m_shownUid = lead->uid; // otro pokémon (o ha evolucionado): vuelve el que está fuera y sale su pokéball
+            companion.swap(species->id, m_data->levitates(*species), PokeballStyle::color(lead->ballId), player.body.position, camera.yaw());
+        }
+        if (companion.changing()) species = nullptr; // durante el cambio no trabaja
 
         ResourceNode* nodeTarget = nullptr;
         GroundItem* groundTarget = nullptr;
@@ -387,6 +411,7 @@ struct Scene {
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
                 m_missingSkill = type.skillId; // sin herramienta de ese nivel: solo un pokémon que llegue al nivel puede trabajarlo
                 m_missingLevel = type.level;
+                m_missingPos = nodeAnchor(node);
             }
         }
     }
@@ -414,7 +439,7 @@ struct Scene {
     void openChest(Chest& chest) {
         const ChestReward* reward = ChestRules::pickReward(m_data->chests[chest.typeIndex()]);
         chest.open();
-        if (reward) giveReward(reward->itemId, reward->quantity);
+        if (reward) giveReward(reward->itemId, RandomUtil::integer(reward->minQuantity, reward->maxQuantity));
         gainXp(Xp::CHEST);
     }
 
@@ -631,7 +656,9 @@ struct Scene {
     inline static const std::string MACHINE_NAME = "máquina de investigación";
 
     const GameData* m_data;
+    int m_shownUid = 0;        // pokémon (uid) que está fuera o saliendo
     int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)
+    DirectX::XMFLOAT3 m_missingPos = {};
     int m_missingLevel = 0;    // nivel que exige ese recurso
     Interaction m_interaction; // lo que el jugador puede usar ahora mismo (cofre o recurso cercano)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido

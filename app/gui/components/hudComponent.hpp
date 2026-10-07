@@ -4,6 +4,7 @@
 #include "imgui.h"
 #include "../style/guiPrompts.hpp"
 #include "../style/itemIcon.hpp"
+#include "../style/typeIcons.hpp"
 #include "../../engine/core/gameStatus.hpp"
 #include "../../engine/core/inputDevice.hpp"
 #include "../../engine/world/captureRules.hpp"
@@ -41,16 +42,38 @@ namespace HudComponent {
             dl->AddText(font, size, pos, color, text);
         }
 
+        // Punto del mundo en pantalla. false si queda detrás de la cámara.
+        inline bool project(const GameStatus& status, const DirectX::XMFLOAT3& world, ImVec2& out) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            DirectX::XMFLOAT4 clip;
+            DirectX::XMStoreFloat4(&clip, DirectX::XMVector4Transform(DirectX::XMVectorSet(world.x, world.y, world.z, 1.0f), DirectX::XMLoadFloat4x4(&status.viewProj)));
+            if (clip.w <= 0.1f) return false;
+            out = ImVec2((clip.x / clip.w * 0.5f + 0.5f) * screen.x, (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * screen.y);
+            return true;
+        }
+
         // Nombre de cada pokémon visible, proyectado sobre su cabeza.
         inline void drawNameTags(ImDrawList* dl, const GameStatus& status) {
-            const ImVec2 screen = ImGui::GetIO().DisplaySize;
-            const DirectX::XMMATRIX viewProj = DirectX::XMLoadFloat4x4(&status.viewProj);
             for (const NameTag& tag : status.nameTags) {
-                DirectX::XMFLOAT4 clip;
-                DirectX::XMStoreFloat4(&clip, DirectX::XMVector4Transform(DirectX::XMVectorSet(tag.position.x, tag.position.y, tag.position.z, 1.0f), viewProj));
-                if (clip.w <= 0.1f) continue; // detrás de la cámara
-                const ImVec2 at((clip.x / clip.w * 0.5f + 0.5f) * screen.x, (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * screen.y);
-                centered(dl, ImVec2(at.x, at.y - ImGui::GetFontSize()), tag.text.c_str(), 1.0f, tag.shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, 235));
+                ImVec2 at;
+                if (project(status, tag.position, at)) centered(dl, ImVec2(at.x, at.y - ImGui::GetFontSize()), tag.text.c_str(), 1.0f, tag.shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, 235));
+            }
+        }
+
+        // Ayuda para interactuar, sobre lo que se interactúa (cofre, recurso, objeto suelto, máquina...), y aviso de lo que falta.
+        inline void drawWorldPrompts(ImDrawList* dl, const GameStatus& status, InputDevice device) {
+            ImVec2 at;
+            if (status.interactVerb && status.interactTarget && project(status, status.interactPos, at)) {
+                char text[96];
+                std::snprintf(text, sizeof(text), "%s %s", status.interactVerb, status.interactTarget->c_str());
+                constexpr float ICON = 24.0f; // ancho del icono de la tecla o botón
+                const float width = ICON + 8.0f + ImGui::CalcTextSize(text).x;
+                GuiPrompts::draw(dl, ImVec2(at.x - width * 0.5f, at.y - ICON * 0.5f), GuiPrompts::Action::INTERACT, text, device);
+            }
+            if (status.missingSkill && project(status, status.missingPos, at)) {
+                char text[112];
+                std::snprintf(text, sizeof(text), "Necesitas %s de nivel %d (herramienta o pokémon)", status.missingSkill->c_str(), status.missingLevel);
+                centered(dl, at, text, 1.0f, IM_COL32(255, 150, 40, 255));
             }
         }
 
@@ -146,7 +169,7 @@ namespace HudComponent {
                 Action action;
                 char text[64];
             };
-            Hint hints[9];
+            Hint hints[8];
             int count = 0;
             const auto add = [&](Action action, const char* text) {
                 hints[count].action = action;
@@ -154,11 +177,6 @@ namespace HudComponent {
                 ++count;
             };
 
-            if (status.interactVerb && status.interactTarget) {
-                char text[64];
-                std::snprintf(text, sizeof(text), "%s %s", status.interactVerb, status.interactTarget->c_str());
-                add(Action::INTERACT, text);
-            }
             if (status.aiming) {
                 add(Action::THROW, "Lanzar Pokéball");
                 if (status.inventory && status.inventory->ballCount() > 1) add(Action::BALL_SWITCH, "Cambiar de Pokéball");
@@ -196,27 +214,46 @@ namespace HudComponent {
             dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH * status.playerXp, bar.y + 6.0f), IM_COL32(120, 220, 255, 255), 3.0f);
         }
 
-        // Equipo en una lista vertical a la derecha: el líder (el que acompaña) resaltado y su tecla para elegirlo.
+        // Equipo en círculos verticales a la derecha, siempre en el mismo orden (el del menú de pokémon). El que acompaña
+        // al jugador va resaltado. En cada círculo: el pokémon (más adelante su sprite), el nivel abajo, sus tipos
+        // abajo a la izquierda, la pokéball con la que se capturó abajo a la derecha y la tecla para sacarlo.
         inline void drawTeam(ImDrawList* dl, const GameStatus& status) {
-            if (status.team.empty()) return;
-            constexpr float WIDTH = 190.0f, ROW = 46.0f, GAP = 6.0f;
+            if (status.team.empty() || !status.data) return;
+            constexpr float RADIUS = 30.0f, GAP = 20.0f, MINI = 9.0f;
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
-            const float total = static_cast<float>(status.team.size()) * (ROW + GAP) - GAP;
-            float y = screen.y * 0.5f - total * 0.5f;
-            const float x = screen.x - WIDTH - 24.0f;
-            char text[64];
+            const float total = static_cast<float>(status.team.size()) * (RADIUS * 2.0f + GAP) - GAP;
+            const float x = screen.x - RADIUS - 28.0f;
+            float y = screen.y * 0.5f - total * 0.5f + RADIUS;
+            char text[16];
             for (size_t i = 0; i < status.team.size(); ++i) {
                 const TeamEntry& entry = status.team[i];
-                const ImVec2 a(x - (entry.lead ? 14.0f : 0.0f), y), b(x + WIDTH, y + ROW);
-                dl->AddRectFilled(a, b, entry.lead ? IM_COL32(40, 70, 140, 215) : IM_COL32(24, 24, 34, 190), 10.0f);
-                dl->AddRect(a, b, entry.lead ? IM_COL32(255, 255, 255, 220) : IM_COL32(255, 255, 255, 40), 10.0f, 0, entry.lead ? 2.0f : 1.0f);
-                ItemIcon::creature(dl, ImVec2(a.x + 26.0f, a.y + ROW * 0.5f), 14.0f, entry.speciesId);
-                dl->AddText(ImVec2(a.x + 50.0f, a.y + 6.0f), entry.shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, 240), entry.name->c_str());
-                std::snprintf(text, sizeof(text), "Nv. %d", entry.level);
-                dl->AddText(ImVec2(a.x + 50.0f, a.y + 6.0f + ImGui::GetFontSize()), IM_COL32(200, 200, 210, 220), text);
+                const ImVec2 c(x, y);
+                const ImU32 tone = entry.species->types.empty() ? IM_COL32(60, 60, 80, 255) : GuiCards::typeColor(entry.species->types.front());
+                dl->AddCircleFilled(c, RADIUS, GuiCards::withAlpha(tone, entry.active ? 235 : 150), 40);
+                dl->AddCircle(c, RADIUS, entry.shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, entry.active ? 255 : 90), 40, entry.active ? 3.5f : 1.5f);
+                ItemIcon::creature(dl, ImVec2(c.x, c.y - 4.0f), RADIUS * 0.5f, entry.species->id, entry.active ? 1.0f : 0.8f);
+
+                std::snprintf(text, sizeof(text), "%d", entry.level);
+                const float w = ImGui::CalcTextSize(text).x + 14.0f;
+                const ImVec2 pill(c.x - w * 0.5f, c.y + RADIUS - 11.0f);
+                dl->AddRectFilled(pill, ImVec2(pill.x + w, pill.y + 18.0f), IM_COL32(20, 20, 30, 230), 9.0f);
+                dl->AddText(ImVec2(pill.x + 7.0f, pill.y + 2.0f), IM_COL32(255, 255, 255, 255), text);
+
+                float typeX = c.x - RADIUS * 0.75f;
+                for (const int id : entry.species->types) {
+                    if (const PokemonType* type = status.data->type(id)) TypeIcons::draw(dl, ImVec2(typeX, c.y + RADIUS * 0.7f), MINI, *type);
+                    typeX += MINI * 1.5f;
+                }
+                if (status.data->ball(entry.ballId)) {
+                    dl->AddCircleFilled(ImVec2(c.x + RADIUS * 0.75f, c.y + RADIUS * 0.7f), MINI + 2.0f, IM_COL32(20, 20, 30, 220), 20);
+                    ItemIcon::ball(dl, ImVec2(c.x + RADIUS * 0.75f, c.y + RADIUS * 0.7f), MINI, PokeballStyle::color(entry.ballId));
+                }
+
                 std::snprintf(text, sizeof(text), "%d", static_cast<int>(i) + 1);
-                dl->AddText(ImVec2(b.x - 16.0f, a.y + 6.0f), IM_COL32(255, 255, 255, 150), text);
-                y += ROW + GAP;
+                const ImVec2 badge(c.x + RADIUS * 0.72f, c.y - RADIUS * 0.72f);
+                dl->AddCircleFilled(badge, 9.0f, IM_COL32(20, 20, 30, 230), 16);
+                dl->AddText(ImVec2(badge.x - ImGui::CalcTextSize(text).x * 0.5f, badge.y - ImGui::GetFontSize() * 0.5f), IM_COL32(255, 255, 255, 255), text);
+                y += RADIUS * 2.0f + GAP;
             }
         }
 
@@ -275,11 +312,7 @@ namespace HudComponent {
         detail::drawTeam(dl, status);
         detail::drawHints(dl, status, device);
 
-        if (status.missingSkill) {
-            char text[112];
-            std::snprintf(text, sizeof(text), "Necesitas %s de nivel %d (herramienta o pokémon)", status.missingSkill->c_str(), status.missingLevel);
-            detail::centered(dl, ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.62f), text, 1.1f, IM_COL32(255, 150, 40, 255));
-        }
+        detail::drawWorldPrompts(dl, status, device);
 
         if (status.notice != Notice::NONE) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;

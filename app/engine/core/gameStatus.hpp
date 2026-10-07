@@ -17,11 +17,11 @@ struct NameTag {
 
 // Un pokémon del equipo para la lista lateral del juego.
 struct TeamEntry {
-    int speciesId = -1;
-    const std::string* name = nullptr;
+    const PokemonSpecies* species = nullptr;
     int level = 1;
     bool shiny = false;
-    bool lead = false; // el que acompaña al jugador
+    int ballId = -1;     // pokéball con la que se capturó
+    bool active = false; // el que acompaña al jugador
 };
 
 // Estado del juego que la interfaz necesita mostrar (el HUD no conoce la escena).
@@ -37,6 +37,8 @@ struct GameStatus {
     const std::string* interactTarget = nullptr; // sobre qué ("Cofre común", "Árbol"...)
     const std::string* missingSkill = nullptr;   // habilidad que falta para trabajar el recurso cercano ("Talar"...)
     int missingLevel = 0;                        // nivel que exige ese recurso
+    DirectX::XMFLOAT3 interactPos = {};          // dónde se dibuja la ayuda de interacción (sobre lo que se usa)
+    DirectX::XMFLOAT3 missingPos = {};           // y el aviso de lo que falta (sobre el recurso)
     std::vector<NameTag> nameTags;               // nombres sobre los pokémon visibles
     std::vector<TeamEntry> team;                 // el equipo, para la lista lateral
     int playerLevel = 1;                         // nivel del jugador, su experiencia (0..1) y su límite de nivel

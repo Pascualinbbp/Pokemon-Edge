@@ -32,7 +32,7 @@ class GameEngine {
         m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
         m_scene.dayCycle.setTime(save.worldTime);
         m_scene.inventory.restore(save.items, save.selectedBall, save.money);
-        m_scene.storage.restore(save.team, save.pc, save.autoReleaseRank);
+        m_scene.storage.restore(save.team, save.pc, save.autoReleaseRank, save.activeIndex);
         m_scene.progress.restore(save.playerLevel, save.playerXp, save.badges);
     }
 
@@ -44,6 +44,7 @@ class GameEngine {
         m_scene.inventory.store(save.items, save.selectedBall, save.money);
         m_scene.storage.store(save.team, save.pc);
         save.autoReleaseRank = m_scene.storage.autoRankIndex();
+        save.activeIndex = m_scene.storage.activeIndex();
         save.playerLevel = m_scene.progress.level();
         save.playerXp = m_scene.progress.xp();
         save.badges = m_scene.progress.badges();

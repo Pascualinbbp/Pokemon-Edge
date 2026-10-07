@@ -9,6 +9,7 @@
 
 // Un pokémon del jugador. Su potencial (rango, EVs máximos) está oculto hasta analizarlo en la máquina de investigación.
 struct OwnedPokemon {
+    int uid = 0;                    // identifica a este pokémon concreto durante la partida (no se guarda)
     int speciesId = -1;
     int level = 1;
     bool shiny = false;
@@ -47,6 +48,7 @@ class PokemonStorage {
         m_team.clear();
         m_pc.clear();
         m_autoMin = EvRules::Rank::D;
+        m_active = 0;
     }
 
     const std::vector<OwnedPokemon>& team() const { return m_team; }
@@ -54,32 +56,37 @@ class PokemonStorage {
     bool teamFull() const { return static_cast<int>(m_team.size()) >= TEAM_SIZE; }
     bool pcFull() const { return static_cast<int>(m_pc.size()) >= PC_CAPACITY; }
     bool empty() const { return m_team.empty() && m_pc.empty(); }
-    int leadSpeciesId() const { return m_team.empty() ? -1 : m_team.front().speciesId; }
+
+    // El pokémon que acompaña al jugador: uno del equipo. Cambiarlo no altera el orden del equipo.
+    const OwnedPokemon* active() const { return m_team.empty() ? nullptr : &m_team[m_active]; }
+    int activeIndex() const { return m_active; }
+    void setActive(int teamIndex) { if (teamIndex >= 0 && teamIndex < static_cast<int>(m_team.size())) m_active = teamIndex; }
+    void cycleActive(int direction) { if (!m_team.empty()) m_active = ((m_active + direction) % static_cast<int>(m_team.size()) + static_cast<int>(m_team.size())) % static_cast<int>(m_team.size()); }
 
     // Un pokémon recién capturado va al equipo y, si está lleno, al PC. Devuelve false si no hay sitio en ninguno.
     bool add(const OwnedPokemon& owned, bool& sentToPc) {
         sentToPc = teamFull();
-        if (!sentToPc) m_team.push_back(owned);
-        else if (!pcFull()) m_pc.push_back(owned);
+        OwnedPokemon stored = owned;
+        stored.uid = m_nextUid++;
+        if (!sentToPc) m_team.push_back(stored);
+        else if (!pcFull()) m_pc.push_back(stored);
         else return false;
         return true;
     }
 
-    void makeLead(int teamIndex) {
-        if (teamIndex > 0 && teamIndex < static_cast<int>(m_team.size())) std::swap(m_team[0], m_team[teamIndex]);
-    }
-
-    // Pasa al siguiente (+1) o anterior (-1) pokémon del equipo como líder, conservando el orden circular.
-    void cycleLead(int direction) {
-        if (m_team.size() < 2) return;
-        if (direction > 0) std::rotate(m_team.begin(), m_team.begin() + 1, m_team.end());
-        else std::rotate(m_team.rbegin(), m_team.rbegin() + 1, m_team.rend());
+    // Cambia de posición un pokémon del equipo con el anterior (-1) o el siguiente (+1); el activo sigue siendo el mismo.
+    void moveInTeam(int teamIndex, int direction) {
+        const int other = teamIndex + direction;
+        if (teamIndex < 0 || other < 0 || teamIndex >= static_cast<int>(m_team.size()) || other >= static_cast<int>(m_team.size())) return;
+        std::swap(m_team[teamIndex], m_team[other]);
+        if (m_active == teamIndex) m_active = other;
+        else if (m_active == other) m_active = teamIndex;
     }
 
     void sendToPc(int teamIndex) {
         if (teamIndex < 0 || teamIndex >= static_cast<int>(m_team.size()) || pcFull()) return;
         m_pc.push_back(m_team[teamIndex]);
-        m_team.erase(m_team.begin() + teamIndex);
+        eraseFromTeam(teamIndex);
     }
 
     void sendToTeam(int pcIndex) {
@@ -108,7 +115,8 @@ class PokemonStorage {
             indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
             for (const int index : indices) {
                 if (!canRelease(inTeam, index)) continue;
-                list.erase(list.begin() + index);
+                if (inTeam) eraseFromTeam(index);
+                else list.erase(list.begin() + index);
                 ++released;
             }
         };
@@ -171,7 +179,8 @@ class PokemonStorage {
                 entry.released = drop;
                 report.total += entry.reward;
                 report.entries.push_back(entry);
-                if (drop) list.erase(list.begin() + i);
+                if (drop && &list == &m_team) eraseFromTeam(static_cast<int>(i));
+                else if (drop) list.erase(list.begin() + i);
                 else ++i;
             }
         };
@@ -186,18 +195,26 @@ class PokemonStorage {
         pc = encode(m_pc);
     }
 
-    void restore(const std::vector<std::string>& team, const std::vector<std::string>& pc, int autoRank) {
+    void restore(const std::vector<std::string>& team, const std::vector<std::string>& pc, int autoRank, int active) {
         m_team.clear();
         m_pc.clear();
         for (const std::string& text : team) if (!teamFull()) decode(text, m_team);
         for (const std::string& text : pc) if (!pcFull()) decode(text, m_pc);
         m_autoMin = EvRules::RANKS[(std::clamp)(autoRank, 0, static_cast<int>(std::size(EvRules::RANKS)) - 1)];
+        m_active = m_team.empty() ? 0 : (std::clamp)(active, 0, static_cast<int>(m_team.size()) - 1);
     }
 
     int autoRankIndex() const { return static_cast<int>(m_autoMin); }
 
     private:
     static constexpr char SEPARATOR = '|';
+
+    // Quita a un pokémon del equipo manteniendo como activo al mismo (o al que ocupe su lugar si era él).
+    void eraseFromTeam(int index) {
+        m_team.erase(m_team.begin() + index);
+        if (index < m_active) --m_active;
+        m_active = m_team.empty() ? 0 : (std::min)(m_active, static_cast<int>(m_team.size()) - 1);
+    }
 
     OwnedPokemon* at(bool inTeam, int index) {
         std::vector<OwnedPokemon>& list = inTeam ? m_team : m_pc;
@@ -249,6 +266,7 @@ class PokemonStorage {
         const PokemonSpecies& species = m_data->species[index];
         const auto field = [&](size_t i) -> const std::string& { static const std::string none; return i < fields.size() ? fields[i] : none; };
         OwnedPokemon owned;
+        owned.uid = m_nextUid++;
         owned.speciesId = species.id;
         owned.level = (std::max)(1, field(1).empty() ? species.minLevel : std::atoi(field(1).c_str()));
         owned.shiny = field(2) == "1";
@@ -264,4 +282,6 @@ class PokemonStorage {
     std::vector<OwnedPokemon> m_team;
     std::vector<OwnedPokemon> m_pc;
     EvRules::Rank m_autoMin = EvRules::Rank::D;
+    int m_active = 0;  // índice en el equipo del pokémon que acompaña al jugador
+    mutable int m_nextUid = 1;
 };

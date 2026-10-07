@@ -512,8 +512,12 @@ void Renderer3D::collect(const Scene& scene) {
 
     if (scene.companion.active()) {
         const Companion& pet = scene.companion;
-        addCreature({ pet.body.position.x, pet.body.position.y + Companion::SIZE * 0.5f + pet.bob(), pet.body.position.z },
-                    Companion::SIZE, pet.yaw(), pet.speciesId(), !scene.storage.team().empty() && scene.storage.team().front().shiny);
+        const float size = Companion::SIZE * pet.scale();
+        if (size > 0.001f) {
+            addCreature({ pet.body.position.x, pet.body.position.y + size * 0.5f + pet.bob(), pet.body.position.z },
+                        size, pet.yaw(), pet.speciesId(), scene.storage.active() && scene.storage.active()->shiny);
+        }
+        if (const Pokeball* ball = pet.ball()) addBall(*ball, 0.0f, pet.ballScale(), 0.3f); // cambio de pokémon
     }
 
     for (const Chest& chest : scene.chests.entities) addChest(chest);
@@ -579,12 +583,19 @@ void Renderer3D::addNode(const ResourceNode& node) {
     }
 }
 
-// Objeto suelto: mini estrella quieta en el suelo, que brilla y no proyecta sombra.
+// Objeto suelto: bola de objeto dorada que brilla y late, con una chispa que parpadea encima. No proyectan sombra.
 void Renderer3D::addGroundItem(const GroundItem& item) {
     const XMFLOAT3& p = item.body.position;
-    const float s = GroundItem::SIZE * item.scale();
-    if (s <= 0.001f) return;
-    add(m_star, XMMatrixScaling(s, s, s) * XMMatrixTranslation(p.x, p.y + GroundItem::LIFT, p.z), { 1.0f, 0.88f, 0.35f, 1.0f }, false);
+    const float k = item.scale();
+    if (k <= 0.001f) return;
+
+    const float r = Pokeball::RADIUS * GroundItem::SIZE * k;
+    add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixRotationY(item.spin()) * XMMatrixTranslation(p.x, p.y + GroundItem::LIFT * k, p.z),
+        { 1.0f, 0.82f, 0.30f, item.glow() }, false);
+
+    const float s = (0.08f + 0.12f * item.sparkle()) * k;
+    add(m_star, XMMatrixScaling(s, s, s) * XMMatrixRotationY(item.spin() * 2.0f) * XMMatrixTranslation(p.x + 0.12f, p.y + GroundItem::LIFT + 0.35f * k, p.z),
+        { 1.0f, 0.96f, 0.7f, 1.0f }, false);
 }
 
 // Máquina de investigación: cuerpo metálico con una pantalla que brilla, un panel y una antena.

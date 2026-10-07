@@ -16,6 +16,7 @@ struct SaveData {
     int playerLevel = 1;              // nivel, experiencia y medallas del jugador
     int playerXp = 0;
     int badges = 0;
+    int activeIndex = 0;              // pokémon del equipo que acompaña al jugador
     int autoReleaseRank = 0;          // potencial mínimo que conserva la máquina de investigación (índice de EvRules::RANKS)
 };
 
