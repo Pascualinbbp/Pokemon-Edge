@@ -2,5 +2,7 @@
 
 IDR_DATABASE RCDATA "app/data/db/pokemonEdge.db"
 
-IDI_ICON1 ICON "app/data/icon.ico"
+IDI_ICON1 ICON "assets/icons/icon.ico"
 
+// Todo lo demás de assets/ (logos, tipos, modelos, sprites, música...): lo genera el workflow en cada compilación.
+#include "assets.rc"

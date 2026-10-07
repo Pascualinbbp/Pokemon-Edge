@@ -106,6 +106,20 @@ jobs:
           "DB_KEY_EFFECTIVE=$key" | Add-Content -Path $env:GITHUB_ENV
           Write-Host "[LOG] Base de datos cifrada."
 
+      - name: 🎨 Incrustar assets (todo assets/ dentro del .exe)
+        shell: pwsh
+        run: |
+          # Cada fichero de assets/ (menos .ico, que va con su ID en resources.rc) pasa a ser un recurso RCDATA
+          # con su ruta relativa como nombre ("types/1.png"). Añadir un asset nuevo = dejarlo en assets/.
+          $root = (Resolve-Path "assets").Path
+          $lines = Get-ChildItem "assets" -Recurse -File | Where-Object { $_.Extension -ne ".ico" -and $_.Name -ne ".gitkeep" } | Sort-Object FullName | ForEach-Object {
+              $rel = $_.FullName.Substring($root.Length + 1).Replace([string][char]92, "/")
+              '"{0}" RCDATA "assets/{0}"' -f $rel
+          }
+          if (-not $lines) { $lines = @("// sin assets") }
+          $lines | Set-Content -Path "assets.rc" -Encoding ascii
+          Write-Host "[LOG] $(@($lines).Count) assets incrustados."
+
       - name: 🔨 Compilar Motor con ImGui y DirectX 11 (Sin Consola)
         shell: cmd
         run: |
@@ -132,8 +146,7 @@ jobs:
 
           Copy-Item "PokemonEdge.exe" "$out/"
           Copy-Item "app/data/version.json" "$out/app/data/"
-          if (Test-Path "app/data/logo.png") { Copy-Item "app/data/logo.png" "$out/app/data/" }
-          # icon.ico y la base de datos van incrustados en el .exe (resources.rc): no hace falta enviarlos aparte.
+          # assets/, icon.ico y la base de datos van incrustados en el .exe: no hace falta enviarlos aparte.
 
           Compress-Archive -Path "$out/*" -DestinationPath "PokemonEdge.zip" -Force
 

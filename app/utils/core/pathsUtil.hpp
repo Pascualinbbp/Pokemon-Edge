@@ -29,7 +29,6 @@ class PathsUtil {
 
     // --- Archivos ---
     inline static const fs::path VERSION_JSON_PATH = DATA_DIR / "version.json";
-    inline static const fs::path LOGO_PATH = DATA_DIR / "logo.png";
     inline static const fs::path DB_PATH = DB_DIR / "pokemonEdge.db";
     inline static const fs::path LOG_FILE_PATH = LOG_DIR / "app.log";
     inline static const fs::path TEMP_ZIP_PATH = DOWNLOAD_FOLDER / "update.zip";

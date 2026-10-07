@@ -4,7 +4,7 @@
 #include "imgui.h"
 #include "../style/guiPrompts.hpp"
 #include "../style/itemIcon.hpp"
-#include "../style/typeIcons.hpp"
+#include "../style/teamCircle.hpp"
 #include "../../engine/core/gameStatus.hpp"
 #include "../../engine/core/inputDevice.hpp"
 #include "../../engine/world/captureRules.hpp"
@@ -219,40 +219,14 @@ namespace HudComponent {
         // abajo a la izquierda, la pokéball con la que se capturó abajo a la derecha y la tecla para sacarlo.
         inline void drawTeam(ImDrawList* dl, const GameStatus& status) {
             if (status.team.empty() || !status.data) return;
-            constexpr float RADIUS = 30.0f, GAP = 20.0f, MINI = 9.0f;
+            constexpr float RADIUS = 30.0f, GAP = 20.0f;
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
             const float total = static_cast<float>(status.team.size()) * (RADIUS * 2.0f + GAP) - GAP;
             const float x = screen.x - RADIUS - 28.0f;
             float y = screen.y * 0.5f - total * 0.5f + RADIUS;
-            char text[16];
-            for (size_t i = 0; i < status.team.size(); ++i) {
-                const TeamEntry& entry = status.team[i];
-                const ImVec2 c(x, y);
-                const ImU32 tone = entry.species->types.empty() ? IM_COL32(60, 60, 80, 255) : GuiCards::typeColor(entry.species->types.front());
-                dl->AddCircleFilled(c, RADIUS, GuiCards::withAlpha(tone, entry.active ? 235 : 150), 40);
-                dl->AddCircle(c, RADIUS, entry.shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, entry.active ? 255 : 90), 40, entry.active ? 3.5f : 1.5f);
-                ItemIcon::creature(dl, ImVec2(c.x, c.y - 4.0f), RADIUS * 0.5f, entry.species->id, entry.active ? 1.0f : 0.8f);
-
-                std::snprintf(text, sizeof(text), "%d", entry.level);
-                const float w = ImGui::CalcTextSize(text).x + 14.0f;
-                const ImVec2 pill(c.x - w * 0.5f, c.y + RADIUS - 11.0f);
-                dl->AddRectFilled(pill, ImVec2(pill.x + w, pill.y + 18.0f), IM_COL32(20, 20, 30, 230), 9.0f);
-                dl->AddText(ImVec2(pill.x + 7.0f, pill.y + 2.0f), IM_COL32(255, 255, 255, 255), text);
-
-                float typeX = c.x - RADIUS * 0.75f;
-                for (const int id : entry.species->types) {
-                    if (const PokemonType* type = status.data->type(id)) TypeIcons::draw(dl, ImVec2(typeX, c.y + RADIUS * 0.7f), MINI, *type);
-                    typeX += MINI * 1.5f;
-                }
-                if (status.data->ball(entry.ballId)) {
-                    dl->AddCircleFilled(ImVec2(c.x + RADIUS * 0.75f, c.y + RADIUS * 0.7f), MINI + 2.0f, IM_COL32(20, 20, 30, 220), 20);
-                    ItemIcon::ball(dl, ImVec2(c.x + RADIUS * 0.75f, c.y + RADIUS * 0.7f), MINI, PokeballStyle::color(entry.ballId));
-                }
-
-                std::snprintf(text, sizeof(text), "%d", static_cast<int>(i) + 1);
-                const ImVec2 badge(c.x + RADIUS * 0.72f, c.y - RADIUS * 0.72f);
-                dl->AddCircleFilled(badge, 9.0f, IM_COL32(20, 20, 30, 230), 16);
-                dl->AddText(ImVec2(badge.x - ImGui::CalcTextSize(text).x * 0.5f, badge.y - ImGui::GetFontSize() * 0.5f), IM_COL32(255, 255, 255, 255), text);
+            int number = 1;
+            for (const TeamEntry& entry : status.team) {
+                TeamCircle::draw(dl, ImVec2(x, y), RADIUS, *status.data, *entry.species, entry.level, entry.shiny, entry.ballId, entry.active, number++);
                 y += RADIUS * 2.0f + GAP;
             }
         }

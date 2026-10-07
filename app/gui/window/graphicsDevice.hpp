@@ -1,5 +1,7 @@
 #pragma once
 #include <filesystem>
+#include <string>
+#include <vector>
 #include <windows.h>
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -20,6 +22,7 @@ namespace GraphicsDevice {
     void present();
     
     bool loadTexture(const std::filesystem::path& path, Texture& out);
+    bool loadTexture(const std::vector<unsigned char>& bytes, const std::string& name, Texture& out); // desde memoria; 'name' solo para el log
     
     ID3D11Device* device();
     ID3D11DeviceContext* context();

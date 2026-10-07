@@ -3,6 +3,7 @@
 #include "guiInput.hpp"
 #include "inputHandler.hpp"
 #include "../gameState.hpp"
+#include "../style/assetTexture.hpp"
 #include "../style/guiStyle.hpp"
 #include "../components/titleComponent.hpp"
 #include "../components/menuComponent.hpp"
@@ -175,7 +176,7 @@ void MainWindow::init() {
     WindowUtil::setIcon(g_hwnd, ResourceUtil::loadIcon(IDI_ICON1));
 
     GraphicsDevice::init(g_hwnd);
-    GraphicsDevice::loadTexture(PathsUtil::LOGO_PATH, g_logo); // el logo es opcional: si falla solo se registra
+    AssetTexture::load("logos/logo.png", g_logo); // el logo es opcional: si falla solo se registra
     InputHandler::init(g_hwnd);
 
     ShowWindow(g_hwnd, SW_SHOWDEFAULT);
@@ -362,7 +363,7 @@ void MainWindow::run() {
                 InventoryComponent::render(g_state, g_backState, engine.data(), engine.inventory());
                 break;
             case GameState::POKEMON:
-                PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress());
+                PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress(), InputHandler::activeDevice());
                 break;
             case GameState::RESEARCH:
                 ResearchComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory());

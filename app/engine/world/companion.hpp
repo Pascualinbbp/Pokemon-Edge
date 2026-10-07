@@ -16,6 +16,8 @@ class Companion {
     static constexpr float TELEPORT_DISTANCE = 20.0f; // si se queda más lejos, aparece junto al jugador
     static constexpr float JUMP_SPEED = 8.0f;
     static constexpr float WORK_RANGE = 3.0f;     // distancia al borde de un recurso para trabajarlo
+    static constexpr float SEARCH_RANGE = 16.0f;  // radio alrededor del jugador donde busca cosas que recoger o trabajar
+    static constexpr float APPROACH = 1.5f;       // se acerca hasta esta distancia de su objetivo
     static constexpr float WORK_INTERVAL = 1.4f;  // segundos por golpe con power 1
     static constexpr float LEVEL_SPEEDUP = 0.25f; // cada nivel de recolección por encima del 1 trabaja un 25 % más rápido
     static constexpr float HOVER_HEIGHT = 1.3f;   // altura sobre el jugador al levitar
@@ -82,8 +84,9 @@ class Companion {
     }
 
     // Avanza el seguimiento. 'power' > 0 = trabajando este frame (el multiplicador del pokémon); devuelve true cuando
-    // completa un golpe.
-    bool update(float dt, const Physics::World& world, const DirectX::XMFLOAT3& playerPosition, float cameraYaw, float power) {
+    // completa un golpe. Con 'goal' va hacia ese punto (aunque se separe del jugador) en vez de seguirlo.
+    bool update(float dt, const Physics::World& world, const DirectX::XMFLOAT3& playerPosition, float cameraYaw, float power,
+                const DirectX::XMFLOAT3* goal = nullptr) {
         if (!active()) return false;
         m_time += dt;
         if (m_phase != Phase::NONE) {
@@ -91,15 +94,16 @@ class Companion {
             return false;
         }
 
-        const DirectX::XMFLOAT2 spot = followSpot(playerPosition, cameraYaw);
+        const DirectX::XMFLOAT2 spot = goal ? DirectX::XMFLOAT2{ goal->x, goal->z } : followSpot(playerPosition, cameraYaw);
         const float dx = spot.x - body.position.x, dz = spot.y - body.position.z;
         const float distance = std::sqrt(dx * dx + dz * dz);
-        if (distance > TELEPORT_DISTANCE) {
+        const float stop = goal ? APPROACH : 0.3f;
+        if (!goal && distance > TELEPORT_DISTANCE) {
             body.position = { spot.x, playerPosition.y, spot.y };
             body.velocity = { 0.0f, 0.0f, 0.0f };
             body.onGround = false;
-        } else if (distance > 0.3f) {
-            const float speed = (std::min)(SPEED, distance * 3.0f);
+        } else if (distance > stop) {
+            const float speed = (std::min)(SPEED, (distance - stop + 0.3f) * 3.0f);
             body.velocity.x = dx / distance * speed;
             body.velocity.z = dz / distance * speed;
             m_yaw = std::atan2(dx, dz);

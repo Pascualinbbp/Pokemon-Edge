@@ -317,12 +317,15 @@ struct Scene {
         const OwnedPokemon* lead = storage.active();
         const PokemonSpecies* species = lead ? m_data->speciesById(lead->speciesId) : nullptr;
         if (!lead && companion.active()) companion.set(-1, false, player.body.position, camera.yaw());
-        else if (lead && species && (lead->uid != m_shownUid || lead->speciesId != companion.speciesId())) {
+        else if (lead && species && (lead->uid != m_shownUid || lead->speciesId != m_shownSpecies)) {
             m_shownUid = lead->uid; // otro pokémon (o ha evolucionado): vuelve el que está fuera y sale su pokéball
+            m_shownSpecies = lead->speciesId;
             companion.swap(species->id, m_data->levitates(*species), PokeballStyle::color(lead->ballId), player.body.position, camera.yaw());
         }
         if (companion.changing()) species = nullptr; // durante el cambio no trabaja
 
+        // Busca lo más cercano que sabe trabajar dentro de su radio de búsqueda; si está lejos, va hacia ello (aunque se separe
+        // del jugador) y, al llegar, lo trabaja. Sin nada que hacer vuelve a seguir al jugador.
         ResourceNode* nodeTarget = nullptr;
         GroundItem* groundTarget = nullptr;
         int level = 1;
@@ -331,17 +334,20 @@ struct Scene {
             const float dx = at.x - companion.body.position.x, dz = at.z - companion.body.position.z;
             return dx * dx + dz * dz;
         };
+        const auto near = [&](const DirectX::XMFLOAT3& at) {
+            const float dx = at.x - player.body.position.x, dz = at.z - player.body.position.z;
+            return dx * dx + dz * dz <= Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
+        };
         if (species) {
             for (ResourceNode& node : nodes.entities) {
-                if (node.depleted()) continue;
+                if (node.depleted() || !near(node.body.position)) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
                 const int skillLevel = species->levelIn(type.skillId);
                 if (node.growing() || !node.plant()) {
                     if (skillLevel < type.level) continue; // no sabe regar / extraer esto, o no llega al nivel
                 }
-                const float range = Companion::WORK_RANGE + ResourceStyle::look(node.typeId()).half;
                 const float d2 = distance2(node.body.position);
-                if (d2 <= range * range && d2 < best) {
+                if (d2 < best) {
                     best = d2;
                     nodeTarget = &node;
                     groundTarget = nullptr;
@@ -349,10 +355,9 @@ struct Scene {
                 }
             }
             for (GroundItem& item : groundItems.entities) {
-                if (!item.available()) continue;
-                const float range = Companion::WORK_RANGE;
+                if (!item.available() || !near(item.body.position)) continue;
                 const float d2 = distance2(item.body.position);
-                if (d2 <= range * range && d2 < best) {
+                if (d2 < best) {
                     best = d2;
                     groundTarget = &item;
                     nodeTarget = nullptr;
@@ -360,10 +365,13 @@ struct Scene {
                 }
             }
         }
-        if (nodeTarget) nodeTarget->companionWorking();
-        const float teamBonus = nodeTarget ? nodeTarget->teamBonus(false) : 1.0f;
-        const float power = (nodeTarget || groundTarget) ? Companion::workPower(level, teamBonus) : 0.0f;
-        if (!companion.update(dt, world, player.body.position, camera.yaw(), power)) return;
+        const DirectX::XMFLOAT3* goal = nodeTarget ? &nodeTarget->body.position : groundTarget ? &groundTarget->body.position : nullptr;
+        const float reach = nodeTarget ? Companion::WORK_RANGE + ResourceStyle::look(nodeTarget->typeId()).half : Companion::WORK_RANGE;
+        const bool arrived = goal && best <= reach * reach;
+        if (nodeTarget && arrived) nodeTarget->companionWorking();
+        const float teamBonus = nodeTarget && arrived ? nodeTarget->teamBonus(false) : 1.0f;
+        const float power = arrived ? Companion::workPower(level, teamBonus) : 0.0f;
+        if (!companion.update(dt, world, player.body.position, camera.yaw(), power, goal)) return;
         if (nodeTarget) workNode(*nodeTarget, false);
         else if (groundTarget) collect(*groundTarget);
     }
@@ -590,7 +598,10 @@ struct Scene {
                                p.z - sinYaw * SPAWN_SIDE + cosYaw * SPAWN_FORWARD };
         ball.body.velocity = launchVelocity(ball.body.position, aim, dir);
 
-        if (balls.size() >= MAX_BALLS) balls.erase(balls.begin());
+        if (balls.size() >= MAX_BALLS) {
+            returnBall(balls.front());
+            balls.erase(balls.begin());
+        }
         balls.push_back(ball);
         inventory.consume();
     }
@@ -631,12 +642,22 @@ struct Scene {
                 for (CaptureTarget& target : targets) {
                     if (!target.hitBy(ball.body.position, Pokeball::RADIUS + Pokeball::CONTACT_MARGIN)) continue;
                     target.beginCapture(ball, CaptureRules::roll(chancePercent(target, ball.captureMultiplier)));
+                    ball.spent = true;
                     ball.age = Pokeball::LIFETIME; // la bola pasa a ser la de la animación de captura
                     break;
                 }
             }
         }
+        for (const Pokeball& ball : balls) if (ball.expired()) returnBall(ball);
         balls.erase(std::remove_if(balls.begin(), balls.end(), [](const Pokeball& b) { return b.expired(); }), balls.end());
+    }
+
+    // Una bola que no tocó a ningún pokémon vuelve al inventario al desaparecer (la que alcanzó a uno se gasta).
+    void returnBall(const Pokeball& ball) {
+        if (ball.spent) return;
+        const Item* item = m_data->itemOf(ItemCategory::POKEBALL, ball.typeId);
+        if (!item || !inventory.add(item->id, 1)) return;
+        if (noticeTime <= 0.0f) showNotice(Notice::REWARD, "1x " + m_data->itemName(*item));
     }
 
     struct Interaction {
@@ -656,7 +677,8 @@ struct Scene {
     inline static const std::string MACHINE_NAME = "máquina de investigación";
 
     const GameData* m_data;
-    int m_shownUid = 0;        // pokémon (uid) que está fuera o saliendo
+    int m_shownUid = 0;        // pokémon (uid y especie) que está fuera o saliendo
+    int m_shownSpecies = -1;
     int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)
     DirectX::XMFLOAT3 m_missingPos = {};
     int m_missingLevel = 0;    // nivel que exige ese recurso

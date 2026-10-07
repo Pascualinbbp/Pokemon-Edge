@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <cmath>
 
 // Experiencia que da cada acción del jugador en el mundo (único sitio donde se define). Se irán añadiendo más.
 namespace Xp {
@@ -17,14 +18,14 @@ class PlayerProgress {
     static constexpr int BASE_CAP = 15;       // nivel máximo sin medallas
     static constexpr int CAP_PER_BADGE = 5;   // nivel máximo extra por cada medalla
     static constexpr int MAX_BADGES = 8;
-    static constexpr int XP_BASE = 20;        // experiencia para subir de nivel: XP_BASE + XP_PER_LEVEL * nivel
-    static constexpr int XP_PER_LEVEL = 10;
+    static constexpr float XP_BASE = 40.0f;   // experiencia para subir de nivel: XP_BASE * nivel ^ XP_EXPONENT
+    static constexpr float XP_EXPONENT = 1.4f;
 
     int level() const { return m_level; }
     int xp() const { return m_xp; }
     int badges() const { return m_badges; }
     int levelCap() const { return BASE_CAP + CAP_PER_BADGE * m_badges; }
-    int xpToNext() const { return XP_BASE + XP_PER_LEVEL * m_level; }
+    int xpToNext() const { return static_cast<int>(XP_BASE * std::pow(static_cast<float>(m_level), XP_EXPONENT)); }
     bool maxed() const { return m_level >= levelCap(); }
     float xpFraction() const { return maxed() ? 1.0f : static_cast<float>(m_xp) / static_cast<float>(xpToNext()); }
 

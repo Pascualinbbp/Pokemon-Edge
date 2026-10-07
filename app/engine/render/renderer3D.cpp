@@ -302,7 +302,7 @@ Renderer3D::Mesh Renderer3D::createCube(ID3D11Device* device) {
 
 // Pokéball unitaria: la mitad superior (alfa 1) se tiñe con el color del tipo, el ecuador es una banda oscura y la
 // mitad inferior es blanca. Así se nota cómo se inclina al tambalearse.
-Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
+Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device, bool dome) {
     constexpr int rings = 16;
     constexpr int segments = 16;
     constexpr int bandFirst = 7, bandLast = 9;
@@ -312,11 +312,12 @@ Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
     vertices.reserve((rings + 1) * segments);
     indices.reserve(rings * segments * 6);
 
-    for (int r = 0; r <= rings; ++r) {
+    const int last = dome ? rings / 2 : rings; // la semiesfera llega hasta el ecuador
+    for (int r = 0; r <= last; ++r) {
         const float phi = XM_PI * static_cast<float>(r) / rings; // 0 = polo superior
         const float y = std::cos(phi);
         const float ring = std::sin(phi);
-        const XMFLOAT4 color = r < bandFirst ? XMFLOAT4{ 1.0f, 1.0f, 1.0f, 1.0f }
+        const XMFLOAT4 color = dome ? XMFLOAT4{ 1.0f, 1.0f, 1.0f, 1.0f } : r < bandFirst ? XMFLOAT4{ 1.0f, 1.0f, 1.0f, 1.0f }
                              : r <= bandLast ? XMFLOAT4{ 0.07f, 0.07f, 0.08f, 0.0f }
                                              : XMFLOAT4{ 0.95f, 0.95f, 0.95f, 0.0f };
         for (int s = 0; s < segments; ++s) {
@@ -327,7 +328,7 @@ Renderer3D::Mesh Renderer3D::createSphere(ID3D11Device* device) {
     }
 
     const XMFLOAT3 center = { 0.0f, 0.0f, 0.0f };
-    for (int r = 0; r < rings; ++r) {
+    for (int r = 0; r < last; ++r) {
         for (int s = 0; s < segments; ++s) {
             const int next = (s + 1) % segments;
             const int a = r * segments + s, b = r * segments + next;
@@ -462,6 +463,7 @@ void Renderer3D::init(ID3D11Device* device) {
     m_player = createPlayer(device);
     m_cube = createCube(device);
     m_sphere = createSphere(device);
+    m_dome = createSphere(device, true);
     m_star = createStar(device);
     m_draws.reserve(32);
 }
@@ -583,19 +585,22 @@ void Renderer3D::addNode(const ResourceNode& node) {
     }
 }
 
-// Objeto suelto: bola de objeto dorada que brilla y late, con una chispa que parpadea encima. No proyectan sombra.
+// Objeto suelto: semiesfera blanca que brilla y late, con destellos en forma de estrella alrededor. No proyecta sombra.
 void Renderer3D::addGroundItem(const GroundItem& item) {
     const XMFLOAT3& p = item.body.position;
     const float k = item.scale();
     if (k <= 0.001f) return;
 
-    const float r = Pokeball::RADIUS * GroundItem::SIZE * k;
-    add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixRotationY(item.spin()) * XMMatrixTranslation(p.x, p.y + GroundItem::LIFT * k, p.z),
-        { 1.0f, 0.82f, 0.30f, item.glow() }, false);
+    const float r = GroundItem::RADIUS * k;
+    add(m_dome, XMMatrixScaling(r, r, r) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, item.glow() }, false);
 
-    const float s = (0.08f + 0.12f * item.sparkle()) * k;
-    add(m_star, XMMatrixScaling(s, s, s) * XMMatrixRotationY(item.spin() * 2.0f) * XMMatrixTranslation(p.x + 0.12f, p.y + GroundItem::LIFT + 0.35f * k, p.z),
-        { 1.0f, 0.96f, 0.7f, 1.0f }, false);
+    for (int i = 0; i < GroundItem::SPARKLES; ++i) {
+        XMFLOAT3 position;
+        float size, spin;
+        item.sparkle(i, position, size, spin);
+        add(m_star, XMMatrixScaling(size, size, size) * XMMatrixRotationY(spin) * XMMatrixTranslation(position.x, position.y, position.z),
+            { 1.0f, 0.97f, 0.8f, 1.0f }, false);
+    }
 }
 
 // Máquina de investigación: cuerpo metálico con una pantalla que brilla, un panel y una antena.
@@ -792,6 +797,7 @@ void Renderer3D::cleanup() {
     m_pixelShader.Reset();
     m_vertexShader.Reset();
     m_sphere = {};
+    m_dome = {};
     m_star = {};
     m_cube = {};
     m_player = {};

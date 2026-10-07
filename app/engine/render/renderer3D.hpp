@@ -72,7 +72,7 @@ class Renderer3D {
     static Mesh createFloor(ID3D11Device* device);
     static Mesh createPlayer(ID3D11Device* device);
     static Mesh createCube(ID3D11Device* device);
-    static Mesh createSphere(ID3D11Device* device);
+    static Mesh createSphere(ID3D11Device* device, bool dome = false); // pokéball o, con dome, la semiesfera superior blanca
     static Mesh createStar(ID3D11Device* device);
     static DirectX::XMMATRIX lightViewProj(const DirectX::XMFLOAT3& lightDir);
 
@@ -110,6 +110,7 @@ class Renderer3D {
     Mesh m_player;
     Mesh m_cube;   // cubo unitario blanco centrado en el origen: paredes, pokémon y su morro (se tiñe al dibujar)
     Mesh m_sphere; // pokéball: mitad tintada con el color del tipo, banda oscura y mitad blanca
+    Mesh m_dome;   // semiesfera blanca de los objetos sueltos
     Mesh m_star;   // estrella de la animación de captura
 
     std::vector<Draw> m_draws; // se reutiliza entre frames

@@ -112,10 +112,13 @@ namespace GraphicsDevice {
             Logger::logError("GRAPHICS", "No se pudo abrir la textura: " + path.string());
             return false;
         }
+        return loadTexture(*bytes, path.string(), out);
+    }
 
-        const auto image = ImageUtil::decode(*bytes);
+    bool loadTexture(const std::vector<unsigned char>& bytes, const std::string& name, Texture& out) {
+        const auto image = ImageUtil::decode(bytes);
         if (!image) {
-            Logger::logError("GRAPHICS", "No se pudo decodificar la textura: " + path.string());
+            Logger::logError("GRAPHICS", "No se pudo decodificar la textura: " + name);
             return false;
         }
 
@@ -134,7 +137,7 @@ namespace GraphicsDevice {
         HRESULT hr = g_device->CreateTexture2D(&desc, &data, &texture);
         if (SUCCEEDED(hr)) hr = g_device->CreateShaderResourceView(texture.Get(), nullptr, &out.srv);
         if (FAILED(hr)) {
-            Logger::logError("GRAPHICS", "No se pudo crear la textura en GPU: " + path.string());
+            Logger::logError("GRAPHICS", "No se pudo crear la textura en GPU: " + name);
             return false;
         }
 

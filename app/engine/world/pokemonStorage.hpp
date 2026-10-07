@@ -74,25 +74,50 @@ class PokemonStorage {
         return true;
     }
 
-    // Cambia de posición un pokémon del equipo con el anterior (-1) o el siguiente (+1); el activo sigue siendo el mismo.
-    void moveInTeam(int teamIndex, int direction) {
-        const int other = teamIndex + direction;
-        if (teamIndex < 0 || other < 0 || teamIndex >= static_cast<int>(m_team.size()) || other >= static_cast<int>(m_team.size())) return;
-        std::swap(m_team[teamIndex], m_team[other]);
-        if (m_active == teamIndex) m_active = other;
-        else if (m_active == other) m_active = teamIndex;
+    // Un lugar donde puede estar un pokémon: una posición del equipo o del PC. Un índice igual al tamaño de la lista es
+    // "al final" (casilla vacía).
+    struct Place {
+        bool inTeam = true;
+        int index = 0;
+        bool operator==(const Place& other) const { return inTeam == other.inTeam && index == other.index; }
+    };
+
+    // Mueve un pokémon a otro lugar: si el destino está ocupado intercambian sus sitios; si está vacío pasa al final de esa
+    // lista. El equipo nunca se queda sin pokémon ni pasa de 6, ni el PC de su capacidad. El activo sigue siendo el mismo
+    // pokémon cuando solo cambia de posición. Devuelve false si no se pudo y deja en 'landed' dónde ha quedado.
+    bool move(const Place& from, const Place& to, Place& landed) {
+        std::vector<OwnedPokemon>& source = from.inTeam ? m_team : m_pc;
+        std::vector<OwnedPokemon>& target = to.inTeam ? m_team : m_pc;
+        if (from.index < 0 || from.index >= static_cast<int>(source.size()) || to.index < 0 || from == to) return false;
+
+        if (to.index < static_cast<int>(target.size())) { // intercambio
+            std::swap(source[from.index], target[to.index]);
+            if (from.inTeam && to.inTeam) {
+                if (m_active == from.index) m_active = to.index;
+                else if (m_active == to.index) m_active = from.index;
+            }
+            landed = to;
+            return true;
+        }
+        if (&source == &target) { // al final de su misma lista
+            std::rotate(source.begin() + from.index, source.begin() + from.index + 1, source.end());
+            if (from.inTeam) m_active = m_active == from.index ? static_cast<int>(source.size()) - 1 : m_active > from.index ? m_active - 1 : m_active;
+            landed = { from.inTeam, static_cast<int>(source.size()) - 1 };
+            return true;
+        }
+        const bool full = to.inTeam ? teamFull() : pcFull();
+        if (full || (from.inTeam && m_team.size() <= 1)) return false;
+        target.push_back(source[from.index]);
+        if (from.inTeam) eraseFromTeam(from.index);
+        else source.erase(source.begin() + from.index);
+        landed = { to.inTeam, static_cast<int>(target.size()) - 1 };
+        return true;
     }
 
-    void sendToPc(int teamIndex) {
-        if (teamIndex < 0 || teamIndex >= static_cast<int>(m_team.size()) || pcFull()) return;
-        m_pc.push_back(m_team[teamIndex]);
-        eraseFromTeam(teamIndex);
-    }
-
-    void sendToTeam(int pcIndex) {
-        if (pcIndex < 0 || pcIndex >= static_cast<int>(m_pc.size()) || teamFull()) return;
-        m_team.push_back(m_pc[pcIndex]);
-        m_pc.erase(m_pc.begin() + pcIndex);
+    // ¿Merece confirmación antes de liberarlo? Los variocolor y los de mucho potencial (A o más, ya analizados).
+    bool valuable(const OwnedPokemon& owned) const {
+        const PokemonSpecies* species = m_data->speciesById(owned.speciesId);
+        return owned.shiny || (owned.analyzed && species && EvRules::rank(species->stats, owned.evCaps) >= EvRules::Rank::A);
     }
 
     // --- Liberar ---

@@ -1,16 +1,13 @@
 #pragma once
 #include <cstdint>
-#include <filesystem>
 #include <map>
 #include <string>
-#include <type_traits>
 #include "imgui.h"
 #include "guiCards.hpp"
-#include "../window/graphicsDevice.hpp"
+#include "assetTexture.hpp"
 #include "../../models/pokemonType.hpp"
-#include "../../utils/core/pathsUtil.hpp"
 
-// Icono de cada tipo: la imagen app/data/types/<id del tipo>.png (junto al logo). Se carga la primera vez que se pide;
+// Icono de cada tipo: la imagen assets/types/<id del tipo>.png (incrustada en el exe). Se carga la primera vez que se pide;
 // si no existe se dibuja un círculo con el color del tipo y su inicial.
 namespace TypeIcons {
     namespace detail {
@@ -24,12 +21,7 @@ namespace TypeIcons {
             auto it = textures.find(typeId);
             if (it == textures.end()) {
                 Texture loaded;
-                const std::filesystem::path file = std::filesystem::path(PathsUtil::LOGO_PATH).parent_path() / "types" / (std::to_string(typeId) + ".png");
-                if (std::filesystem::exists(file)) {
-                    using PathType = std::decay_t<decltype(PathsUtil::LOGO_PATH)>;
-                    if constexpr (std::is_constructible_v<PathType, std::string>) GraphicsDevice::loadTexture(PathType(file.string()), loaded);
-                    else GraphicsDevice::loadTexture(file.string().c_str(), loaded);
-                }
+                AssetTexture::load("types/" + std::to_string(typeId) + ".png", loaded);
                 it = textures.emplace(typeId, std::move(loaded)).first;
             }
             return (ImTextureID)(intptr_t)it->second.srv.Get();
