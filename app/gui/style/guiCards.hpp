@@ -5,8 +5,9 @@
 #include <string>
 #include "imgui.h"
 #include "guiStyle.hpp"
-#include "../../engine/world/pokemonStyle.hpp"
-#include "../../models/pokemonType.hpp"
+#include "../../engine/world/style/pokemonStyle.hpp"
+#include "../../engine/world/rules/evRules.hpp"
+#include "../../models/pokemon/pokemonType.hpp"
 
 // Piezas visuales de los paneles del juego (menú lateral, mochila, pokémon): tarjetas redondeadas, fichas,
 // casillas seleccionables, barras y gráfico hexagonal. Es el único sitio donde se define su aspecto.
@@ -32,6 +33,26 @@ namespace GuiCards {
 
     inline void centeredText(ImDrawList* dl, const ImVec2& center, ImU32 color, const char* value, float scale = 1.0f) {
         text(dl, ImVec2(center.x - textWidth(value, scale) * 0.5f, center.y - ImGui::GetFontSize() * scale * 0.5f), color, value, scale);
+    }
+
+    // Color de cada rango de potencial (D..S+).
+    inline ImU32 rankColor(EvRules::Rank rank) {
+        switch (rank) {
+            case EvRules::Rank::D:      return IM_COL32(120, 120, 130, 255);
+            case EvRules::Rank::C:      return IM_COL32(90, 150, 200, 255);
+            case EvRules::Rank::B:      return IM_COL32(80, 180, 110, 255);
+            case EvRules::Rank::A:      return IM_COL32(230, 170, 50, 255);
+            case EvRules::Rank::S:      return IM_COL32(230, 100, 60, 255);
+            case EvRules::Rank::S_PLUS: return IM_COL32(200, 70, 200, 255);
+        }
+        return IM_COL32(120, 120, 130, 255);
+    }
+
+    // Párrafo de texto apagado dentro de una ventana ImGui (con salto de línea automático).
+    inline void muted(const char* value) {
+        ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
+        ImGui::TextWrapped("%s", value);
+        ImGui::PopStyleColor();
     }
 
     // Ficha redondeada con texto. Devuelve su ancho.

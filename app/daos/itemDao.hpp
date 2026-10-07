@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
-#include "../models/item.hpp"
-#include "../models/itemCategoryInfo.hpp"
+#include "../models/items/item.hpp"
+#include "../models/items/itemCategoryInfo.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "daoRow.hpp"
 

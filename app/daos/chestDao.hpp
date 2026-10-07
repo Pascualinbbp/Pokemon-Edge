@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "../models/chestType.hpp"
+#include "../models/world/chestType.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "daoRow.hpp"
 

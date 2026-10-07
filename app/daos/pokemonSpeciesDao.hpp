@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
-#include "../models/ability.hpp"
-#include "../models/pokemonSpecies.hpp"
+#include "../models/pokemon/ability.hpp"
+#include "../models/pokemon/pokemonSpecies.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "daoRow.hpp"
 

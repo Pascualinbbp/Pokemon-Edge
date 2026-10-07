@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "../models/groundItemType.hpp"
+#include "../models/world/groundItemType.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "daoRow.hpp"
 

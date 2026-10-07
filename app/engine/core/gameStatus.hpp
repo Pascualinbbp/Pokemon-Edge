@@ -3,7 +3,7 @@
 #include <vector>
 #include <DirectXMath.h>
 #include "../../models/gameData.hpp"
-#include "../world/inventory.hpp"
+#include "../world/state/inventory.hpp"
 
 // Avisos grandes en pantalla.
 enum class Notice { NONE, CAPTURED, ESCAPED, LUCKY, SUPER_LUCKY, OUT_OF_STOCK, REWARD, LEVEL_UP };

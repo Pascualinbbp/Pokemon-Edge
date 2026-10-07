@@ -11,23 +11,23 @@
 #include "../../models/gameData.hpp"
 #include "../../utils/core/randomUtil.hpp"
 #include "camera.hpp"
-#include "companion.hpp"
-#include "chestSpawn.hpp"
-#include "captureRules.hpp"
-#include "captureTarget.hpp"
-#include "chestRules.hpp"
-#include "evRules.hpp"
-#include "playerProgress.hpp"
-#include "pokemonRules.hpp"
-#include "researchMachine.hpp"
-#include "groundSpawn.hpp"
+#include "entities/companion.hpp"
+#include "spawn/chestSpawn.hpp"
+#include "rules/captureRules.hpp"
+#include "entities/captureTarget.hpp"
+#include "rules/chestRules.hpp"
+#include "rules/evRules.hpp"
+#include "state/playerProgress.hpp"
+#include "rules/pokemonRules.hpp"
+#include "state/researchMachine.hpp"
+#include "spawn/groundSpawn.hpp"
 #include "dayCycle.hpp"
-#include "inventory.hpp"
-#include "player.hpp"
-#include "pokeball.hpp"
-#include "pokemonStorage.hpp"
-#include "resourceSpawn.hpp"
-#include "spawnField.hpp"
+#include "state/inventory.hpp"
+#include "entities/player.hpp"
+#include "entities/pokeball.hpp"
+#include "state/pokemonStorage.hpp"
+#include "spawn/resourceSpawn.hpp"
+#include "spawn/spawnField.hpp"
 
 struct Scene {
     static constexpr float HALF_SIZE = Physics::World::HALF_SIZE;
@@ -334,13 +334,13 @@ struct Scene {
             const float dx = at.x - companion.body.position.x, dz = at.z - companion.body.position.z;
             return dx * dx + dz * dz;
         };
-        const auto near = [&](const DirectX::XMFLOAT3& at) {
+        const auto inRange = [&](const DirectX::XMFLOAT3& at) {
             const float dx = at.x - player.body.position.x, dz = at.z - player.body.position.z;
             return dx * dx + dz * dz <= Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
         };
         if (species) {
             for (ResourceNode& node : nodes.entities) {
-                if (node.depleted() || !near(node.body.position)) continue;
+                if (node.depleted() || !inRange(node.body.position)) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
                 const int skillLevel = species->levelIn(type.skillId);
                 if (node.growing() || !node.plant()) {
@@ -355,7 +355,7 @@ struct Scene {
                 }
             }
             for (GroundItem& item : groundItems.entities) {
-                if (!item.available() || !near(item.body.position)) continue;
+                if (!item.available() || !inRange(item.body.position)) continue;
                 const float d2 = distance2(item.body.position);
                 if (d2 < best) {
                     best = d2;

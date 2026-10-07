@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "../models/material.hpp"
+#include "../models/items/material.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "daoRow.hpp"
 

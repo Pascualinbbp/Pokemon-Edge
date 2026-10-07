@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "../models/trainingItem.hpp"
+#include "../models/items/trainingItem.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "daoRow.hpp"
 

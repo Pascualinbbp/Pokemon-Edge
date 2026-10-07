@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "../models/pokemonType.hpp"
+#include "../models/pokemon/pokemonType.hpp"
 #include "../utils/data/sqliteUtil.hpp"
 
 class TypeDao {

@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "../models/pokeballType.hpp"
+#include "../models/items/pokeballType.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "daoRow.hpp"
 

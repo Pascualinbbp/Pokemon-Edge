@@ -1,19 +1,19 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "ability.hpp"
-#include "chestType.hpp"
-#include "groundItemType.hpp"
-#include "item.hpp"
-#include "itemCategoryInfo.hpp"
-#include "material.hpp"
-#include "pokeballType.hpp"
-#include "pokemonType.hpp"
-#include "pokemonSpecies.hpp"
-#include "resourceNodeType.hpp"
-#include "skill.hpp"
-#include "tool.hpp"
-#include "trainingItem.hpp"
+#include "pokemon/ability.hpp"
+#include "world/chestType.hpp"
+#include "world/groundItemType.hpp"
+#include "items/item.hpp"
+#include "items/itemCategoryInfo.hpp"
+#include "items/material.hpp"
+#include "items/pokeballType.hpp"
+#include "pokemon/pokemonType.hpp"
+#include "pokemon/pokemonSpecies.hpp"
+#include "world/resourceNodeType.hpp"
+#include "pokemon/skill.hpp"
+#include "items/tool.hpp"
+#include "items/trainingItem.hpp"
 
 // Todos los datos de juego que viven en la base de datos, cargados una sola vez al arrancar.
 struct GameData {

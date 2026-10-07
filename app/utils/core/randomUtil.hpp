@@ -37,6 +37,13 @@ namespace RandomUtil {
         return static_cast<int>(items.size()) - 1;
     }
 
+    // Elemento elegido al azar según su peso (ver weightedIndex). nullptr si no hay peso total.
+    template <typename Container, typename Weight>
+    inline const typename Container::value_type* pick(const Container& items, Weight weight) {
+        const int index = weightedIndex(items, weight);
+        return index < 0 ? nullptr : &items[index];
+    }
+
     // true con la probabilidad indicada (0..100).
     inline bool roll(float percent) {
         return range(0.0f, 100.0f) < percent;

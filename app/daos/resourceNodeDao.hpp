@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "../models/resourceNodeType.hpp"
+#include "../models/world/resourceNodeType.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "daoRow.hpp"
 

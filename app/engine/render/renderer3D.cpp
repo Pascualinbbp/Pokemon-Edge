@@ -1,7 +1,7 @@
 #include "renderer3D.hpp"
 #include "../../utils/graphics/d3dUtil.hpp"
-#include "../world/itemStyle.hpp"
-#include "../world/pokemonStyle.hpp"
+#include "../world/style/itemStyle.hpp"
+#include "../world/style/pokemonStyle.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
