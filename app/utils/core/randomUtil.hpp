@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <random>
 
 // Números aleatorios de la aplicación (un único generador, sembrado una vez).
@@ -6,6 +7,13 @@ namespace RandomUtil {
     inline std::mt19937& engine() {
         static std::mt19937 generator{ std::random_device{}() };
         return generator;
+    }
+
+    // Semilla nueva para un mundo: mezcla el reloj con el generador del sistema (en algunos compiladores random_device se repite).
+    inline unsigned freshSeed() {
+        const unsigned clock = static_cast<unsigned>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+        const unsigned seed = (clock * 2654435761u) ^ std::random_device{}() ^ static_cast<unsigned>(engine()());
+        return seed ? seed : 1u;
     }
 
     // Número real en [low, high).

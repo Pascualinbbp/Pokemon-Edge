@@ -10,27 +10,59 @@
 
 // Pokémon salvaje (un cubo): vaga libremente cerca de su punto de aparición; el cubito amarillo marca hacia dónde mira.
 // Una pokéball que lo toca lo captura: el resultado se decide al instante y CaptureSequence lo anima.
-// Si se captura desaparece unos segundos y reaparece en su sitio con un porcentaje nuevo; si escapa, sale de la bola.
+// Vive en un chunk (WildField): conserva su sitio y su especie aunque el jugador se aleje; solo se muestra y se simula
+// mientras está cerca, y aparece/desaparece encogiéndose y creciendo. Si se captura o se derrota, el chunk lo renueva más tarde.
 class CaptureTarget {
     public:
     static constexpr float SIZE          = 1.2f;  // arista del cubo
     static constexpr float HALF          = SIZE * 0.5f;
-    static constexpr float RESPAWN_DELAY = 2.5f;  // segundos oculto antes de reaparecer
+    static constexpr float REFILL_DELAY  = 90.0f; // segundos fuera de juego antes de que el chunk lo renueve
+    static constexpr float APPEAR_TIME   = 1.4f;  // segundos que tarda en aparecer o desaparecer al entrar/salir del alcance
+    static constexpr float SOLID_APPEAR  = 0.6f;  // a partir de este avance de aparición ya se puede golpear y es sólido
     static constexpr float WALK_SPEED    = 1.8f;  // m/s al vagar
     static constexpr float TURN_SPEED    = 6.0f;  // rad/s al girar hacia donde camina
-    static constexpr float LEASH         = 9.0f;  // distancia máxima a su punto de aparición
+    static constexpr float LEASH         = 6.0f;  // distancia máxima a su punto de aparición
 
     enum class Event { NONE, CAPTURED, ESCAPED }; // se emite en el instante en que la animación revela el resultado
 
     Physics::Body body; // pasa por la misma física que el resto (suelo, paredes)
 
-    explicit CaptureTarget(int slot = 0) : m_slot(slot % SLOT_COUNT) {
+    CaptureTarget() {
         body.collisionRadius = HALF;
         body.collisionHeight = SIZE;
-        spawn();
     }
 
-    bool hittable() const { return m_state == State::IDLE; }
+    // Lo coloca (o recoloca) en un punto del mundo, vivo, con la vida entera y sin especie asignada.
+    void place(float x, float z, float yaw) {
+        body.position = { x, 0.0f, z };
+        body.velocity = { 0.0f, 0.0f, 0.0f };
+        m_home = { x, z };
+        m_yaw = m_heading = yaw;
+        m_walking = false;
+        m_wanderTimer = RandomUtil::range(0.5f, 3.0f);
+        m_state = State::IDLE;
+        m_timer = 0.0f;
+        m_appear = 0.0f;
+        m_speciesIndex = m_speciesId = -1;
+        m_shiny = false;
+        m_hp = 1.0f;
+    }
+
+    bool hittable() const { return m_state == State::IDLE && m_appear >= SOLID_APPEAR; }
+    bool gone() const { return m_state == State::HIDDEN; }       // capturado o derrotado: espera a que el chunk lo renueve
+    bool capturing() const { return m_state == State::CAPTURING; }
+    bool shown() const { return m_state == State::CAPTURING || (m_state == State::IDLE && m_appear > 0.0f); } // cargado en el mundo (se simula y se dibuja)
+
+    // Hace aparecer (show) o desaparecer el modelo poco a poco.
+    void fade(float dt, bool show) {
+        m_appear = std::clamp(m_appear + (show ? dt : -dt) / APPEAR_TIME, 0.0f, 1.0f);
+    }
+
+    // Cuenta el tiempo fuera de juego; true cuando el chunk ya puede renovarlo.
+    bool refillDue(float dt) {
+        m_timer += dt;
+        return m_timer >= REFILL_DELAY;
+    }
 
     // Vida restante (1 = entera). La reducen los golpes del acompañante; al llegar a 0 queda derrotado y reaparece más tarde.
     float hpFraction() const { return m_hp; }
@@ -63,7 +95,7 @@ class CaptureTarget {
     // Arista actual del cubo dibujado (se encoge al entrar en la bola).
     float scale() const {
         switch (m_state) {
-            case State::IDLE:      return SIZE;
+            case State::IDLE:      return SIZE * m_appear * m_appear * (3.0f - 2.0f * m_appear); // suavizado
             case State::CAPTURING: return SIZE * m_sequence.pokemonScale();
             default:               return 0.0f;
         }
@@ -149,9 +181,7 @@ class CaptureTarget {
                 }
                 break;
             case State::HIDDEN:
-                m_timer += dt;
-                if (m_timer >= RESPAWN_DELAY) spawn();
-                break;
+                return event;
         }
         world.step(body, dt);
         return event;
@@ -160,20 +190,11 @@ class CaptureTarget {
     private:
     enum class State { IDLE, CAPTURING, HIDDEN };
 
-    // Posición (x, z) y hacia dónde mira (yaw, 0 = +Z) de cada pokémon. El jugador empieza en el origen mirando a +Z.
-    static constexpr float SPAWNS[][3] = {
-        {   0.0f,  14.0f,  3.14159265f },  // de frente al jugador
-        { -12.0f,  18.0f,  0.0f },         // de espaldas al jugador
-        {  14.0f,  10.0f, -1.57079633f },  // mirando hacia el centro
-        {  -8.0f, -14.0f,  3.14159265f },  // de espaldas al jugador
-    };
-    static constexpr int SLOT_COUNT = static_cast<int>(sizeof(SPAWNS) / sizeof(SPAWNS[0]));
-
     // Alterna paradas y paseos en una dirección al azar; si se aleja demasiado de su punto, vuelve hacia él.
     void wander(float dt) {
         m_wanderTimer -= dt;
         if (m_wanderTimer <= 0.0f) {
-            const float homeDx = SPAWNS[m_slot][0] - body.position.x, homeDz = SPAWNS[m_slot][1] - body.position.z;
+            const float homeDx = m_home.x - body.position.x, homeDz = m_home.y - body.position.z;
             const bool tooFar = homeDx * homeDx + homeDz * homeDz > LEASH * LEASH;
             m_walking = tooFar || RandomUtil::roll(65.0f);
             m_wanderTimer = m_walking ? RandomUtil::range(1.5f, 3.5f) : RandomUtil::range(1.5f, 4.0f);
@@ -187,23 +208,11 @@ class CaptureTarget {
         body.velocity.z = go ? std::cos(m_yaw) * WALK_SPEED : 0.0f;
     }
 
-    void spawn() {
-        body.position = { SPAWNS[m_slot][0], 0.0f, SPAWNS[m_slot][1] };
-        body.velocity = { 0.0f, 0.0f, 0.0f };
-        m_yaw = m_heading = SPAWNS[m_slot][2];
-        m_walking = false;
-        m_wanderTimer = RandomUtil::range(0.5f, 3.0f);
-        m_state = State::IDLE;
-        m_timer = 0.0f;
-        m_speciesIndex = m_speciesId = -1;
-        m_shiny = false;
-        m_hp = 1.0f;
-    }
-
     State m_state = State::IDLE;
     CaptureSequence m_sequence;
     float m_timer = 0.0f;
-    int m_slot = 0;
+    DirectX::XMFLOAT2 m_home = {};  // punto de aparición (x, z)
+    float m_appear = 0.0f;          // 0 = no se ve, 1 = del todo presente
     float m_yaw = 0.0f;
     float m_heading = 0.0f;   // hacia dónde quiere caminar
     float m_wanderTimer = 0.0f;

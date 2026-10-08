@@ -14,7 +14,7 @@ class HabitatMap {
     public:
     static constexpr float MARGIN = 6.0f;      // las zonas no se centran pegadas al borde del mundo
     static constexpr float FALLOFF = 2.2f;     // cuanto mayor, más corta la transición entre zonas
-    static constexpr float SPACING = 0.7f;     // separación mínima entre centros, en fracción de la suma de radios
+    static constexpr float SPACING = 0.55f;     // separación mínima entre centros, en fracción de la suma de radios
     static constexpr int PLACE_TRIES = 40;
 
     struct Zone {
@@ -22,6 +22,9 @@ class HabitatMap {
         float x = 0.0f;
         float z = 0.0f;
         float radius = 10.0f;
+        float stretch = 1.0f; // alargamiento de la zona (elipse) y hacia dónde apunta
+        float cosA = 1.0f;
+        float sinA = 0.0f;
     };
 
     void generate(const GameData& data, unsigned seed) {
@@ -39,6 +42,10 @@ class HabitatMap {
                 Zone zone;
                 zone.habitat = h;
                 zone.radius = between(habitat.minRadius, habitat.maxRadius);
+                zone.stretch = between(0.65f, 1.55f);
+                const float angle = between(0.0f, 6.2831853f);
+                zone.cosA = std::cos(angle);
+                zone.sinA = std::sin(angle);
                 for (int attempt = 0; attempt < PLACE_TRIES; ++attempt) {
                     zone.x = between(-reach, reach);
                     zone.z = between(-reach, reach);
@@ -47,6 +54,10 @@ class HabitatMap {
                 m_zones.push_back(zone);
             }
         }
+        // Ondulación de las fronteras: el mismo desplazamiento en todo el mundo, distinto en cada semilla.
+        for (float& value : m_warp) value = between(0.0f, 6.2831853f);
+        m_warpSize = between(3.0f, 6.0f);
+        m_warpFrequency = between(0.07f, 0.13f);
     }
 
     unsigned seed() const { return m_seed; }
@@ -55,6 +66,10 @@ class HabitatMap {
 
     // Peso de cada hábitat en (x, z): suman 1. Vacío si no hay hábitats.
     void weights(float x, float z, std::vector<float>& out) const {
+        const float wx = x + m_warpSize * std::sin(z * m_warpFrequency + m_warp[0]) + 0.5f * m_warpSize * std::sin(z * m_warpFrequency * 2.3f + m_warp[2]);
+        const float wz = z + m_warpSize * std::sin(x * m_warpFrequency + m_warp[1]) + 0.5f * m_warpSize * std::sin(x * m_warpFrequency * 2.3f + m_warp[3]);
+        x = wx;
+        z = wz;
         out.assign(m_habitats, 0.0f);
         if (m_zones.empty()) return;
 
@@ -79,8 +94,10 @@ class HabitatMap {
     private:
     // Distancia al cuadrado al centro, medida en radios de la zona (las grandes pesan más lejos).
     static float distance2(const Zone& zone, float x, float z) {
-        const float dx = (x - zone.x) / zone.radius, dz = (z - zone.z) / zone.radius;
-        return dx * dx + dz * dz;
+        const float dx = x - zone.x, dz = z - zone.z;
+        const float u = (dx * zone.cosA + dz * zone.sinA) / (zone.radius * zone.stretch);
+        const float v = (dz * zone.cosA - dx * zone.sinA) * zone.stretch / zone.radius;
+        return u * u + v * v;
     }
 
     bool separated(const Zone& candidate) const {
@@ -93,6 +110,9 @@ class HabitatMap {
     }
 
     unsigned m_seed = 0;
+    float m_warp[4] = {};
+    float m_warpSize = 0.0f;
+    float m_warpFrequency = 0.1f;
     int m_habitats = 0;
     std::vector<Zone> m_zones;
 };

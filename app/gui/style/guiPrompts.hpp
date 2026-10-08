@@ -6,7 +6,7 @@
 // Ayudas de "qué botón pulsar" dentro del juego. El icono depende del dispositivo en uso, así que
 // cambian solas al pasar de teclado a mando (y de un mando a otro).
 namespace GuiPrompts {
-    enum class Action { JUMP, CROUCH, SPRINT, PAUSE, AIM, THROW, LOCK, BALL_SWITCH, INTERACT, INVENTORY };
+    enum class Action { JUMP, CROUCH, SPRINT, PAUSE, AIM, THROW, LOCK, BALL_SWITCH, INTERACT, INVENTORY, MODE };
 
     namespace detail {
         inline constexpr float HEIGHT = 24.0f;
@@ -18,6 +18,7 @@ namespace GuiPrompts {
                 case Action::JUMP:     face = GuiDraw::Face::SOUTH; return true;
                 case Action::CROUCH:   face = GuiDraw::Face::EAST;  return true;
                 case Action::INTERACT: face = GuiDraw::Face::WEST;  return true;
+                case Action::MODE:     face = GuiDraw::Face::NORTH; return true;
                 default:               return false;
             }
         }
@@ -36,6 +37,7 @@ namespace GuiPrompts {
                     case Action::BALL_SWITCH: return "Q / E";
                     case Action::INTERACT:    return "F";
                     case Action::INVENTORY:   return "I";
+                    case Action::MODE:        return "R";
                 }
             }
             switch (action) {

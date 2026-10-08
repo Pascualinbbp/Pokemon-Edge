@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include "../../utils/core/stringUtil.hpp"
 #include "imgui.h"
 #include "../gameState.hpp"
 #include "../style/guiLayout.hpp"
@@ -19,11 +20,24 @@ namespace UpdateComponent {
             switch (phase) {
                 case UpdateManager::Phase::CHECKING:    return "Buscando actualizaciones...";
                 case UpdateManager::Phase::DOWNLOADING: return "Descargando actualización...";
+                case UpdateManager::Phase::EXTRACTING:  return "Descomprimiendo archivos...";
                 case UpdateManager::Phase::INSTALLING:  return "Instalando...";
                 case UpdateManager::Phase::RESTARTING:  return "Reiniciando...";
                 case UpdateManager::Phase::FAILED:      return "No se pudo actualizar";
                 default:                                return "";
             }
+        }
+
+        // Barra con el porcentaje encima; progreso negativo = indeterminado (la barra recorre el ancho).
+        inline void bar(float progress) {
+            const bool known = progress >= 0.0f;
+            const float value = known ? (std::min)(progress, 1.0f) : static_cast<float>(std::fmod(ImGui::GetTime() * 0.6, 1.0));
+            if (known) {
+                char percent[16];
+                GuiLayout::centeredText(StringUtil::formatTo(percent, "%d%%", static_cast<int>(std::lround(value * 100.0f))), GuiStyle::MUTED);
+            }
+            GuiLayout::centerX(BAR_WIDTH);
+            ImGui::ProgressBar(value, ImVec2(BAR_WIDTH, BAR_HEIGHT), "");
         }
 
         // Contorno de pokéball con el ecuador girando (el mismo estilo que el aviso de autoguardado).
@@ -59,18 +73,12 @@ namespace UpdateComponent {
         GuiLayout::gap(GuiLayout::GAP_SMALL);
 
         if (!failed) {
-            GuiLayout::centerX(detail::BAR_WIDTH);
-            if (update.progress >= 0.0f) {
-                ImGui::ProgressBar((std::min)(update.progress, 1.0f), ImVec2(detail::BAR_WIDTH, detail::BAR_HEIGHT), "");
-                char percent[16];
-                std::snprintf(percent, sizeof(percent), "%d%%", static_cast<int>(std::lround((std::min)(update.progress, 1.0f) * 100.0f)));
-                GuiLayout::centeredText(percent, GuiStyle::MUTED);
-            } else { // progreso indeterminado: la barra recorre el ancho
-                const float t = static_cast<float>(std::fmod(ImGui::GetTime() * 0.6, 1.0));
-                ImGui::ProgressBar(t, ImVec2(detail::BAR_WIDTH, detail::BAR_HEIGHT), "");
-            }
+            detail::bar(update.progress);
+            GuiLayout::gap(GuiLayout::GAP_SMALL);
+            GuiLayout::centeredText("Progreso total", GuiStyle::MUTED);
+            detail::bar(update.overall);
         }
-        if (!update.message.empty()) GuiLayout::centeredText(update.message.c_str(), GuiStyle::MUTED);
+        if (!update.message.empty()) GuiLayout::centeredText(update.message.c_str(), failed ? GuiStyle::MUTED : GuiStyle::FOREGROUND);
 
         if (failed) {
             GuiLayout::gap(GuiLayout::GAP_LARGE);

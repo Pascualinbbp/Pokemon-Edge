@@ -27,6 +27,7 @@
 #include "habitat/habitatMap.hpp"
 #include "habitat/weatherSystem.hpp"
 #include "spawn/wildSpawn.hpp"
+#include "spawn/wildField.hpp"
 #include "state/inventory.hpp"
 #include "entities/player.hpp"
 #include "entities/pokeball.hpp"
@@ -36,7 +37,6 @@
 
 struct Scene {
     static constexpr float HALF_SIZE = Physics::World::HALF_SIZE;
-    static constexpr int TARGET_COUNT = 4;
 
     // Lanzamiento
     static constexpr float THROW_SPEED = 40.0f;       // m/s: trayectoria tensa (la pokéball cae con la mitad de gravedad)
@@ -57,7 +57,7 @@ struct Scene {
     Physics::World world;
     Player player;
     Camera camera;
-    std::array<CaptureTarget, TARGET_COUNT> targets = { CaptureTarget(0), CaptureTarget(1), CaptureTarget(2), CaptureTarget(3) };
+    WildField wild;           // pokémon salvajes por chunks: solo los cercanos están cargados
     std::vector<Pokeball> balls;
     DayCycle dayCycle;
     HabitatMap habitats;      // zonas de cada hábitat, generadas al empezar la partida
@@ -77,10 +77,10 @@ struct Scene {
     float noticeTime = 0.0f;
     float throwCooldown = 0.0f;
     bool aimMode = false;     // modo lanzamiento activado con el clic derecho
-    int lockedIndex = -1;     // objetivo al que está fijada la cámara (-1 = ninguno)
+    CaptureTarget* lockedTarget = nullptr; // objetivo al que está fijada la cámara (nullptr = ninguno)
 
     // Dos paredes sencillas, más altas que el personaje: bloquean el paso, las pokéballs y la luz.
-    explicit Scene(const GameData& gameData = GameData::empty(), unsigned worldSeed = std::random_device{}()) : m_data(&gameData) {
+    explicit Scene(const GameData& gameData = GameData::empty(), unsigned worldSeed = RandomUtil::freshSeed()) : m_data(&gameData) {
         habitats.generate(gameData, worldSeed);
         weather.setup(gameData);
         inventory.setData(gameData);
@@ -107,19 +107,25 @@ struct Scene {
             if (m_aiming) inventory.cycle(input.ballSwitch);
             else storage.cycleActive(input.ballSwitch); // fuera del modo captura cambia el pokémon que acompaña
         }
+        if (input.modeSwitch && storage.active()) {
+            storage.cycleMode(true, storage.activeIndex());
+            showNotice(Notice::REWARD, std::string("Modo: ") + CompanionRules::label(storage.active()->mode));
+        }
         if (input.teamSelect > 0) storage.setActive(input.teamSelect - 1); // la misma tecla que el que ya está fuera no cambia nada
 
-        if (input.lockCancel) lockedIndex = -1;
+        wild.update(dt, player.body.position.x, player.body.position.z, *m_data, habitats, [this](CaptureTarget& target) { assignSpecies(target); });
+
+        if (input.lockCancel) lockedTarget = nullptr;
         else if (input.lockTap) cycleLock();
         validateLock(dt);
 
         camera.update(dt, m_aiming);
-        if (lockedIndex >= 0) camera.trackToward(player.body.position, targets[lockedIndex].center(), dt);
+        if (lockedTarget) camera.trackToward(player.body.position, lockedTarget->center(), dt);
         else camera.rotate(input.lookX, input.lookY);
 
         // Los pokémon son sólidos para quien los pisa: el jugador los rodea igual que a las paredes.
         world.creatures.clear();
-        for (const CaptureTarget& target : targets) if (target.hittable()) world.creatures.push_back(target.solid());
+        for (const CaptureTarget* target : wild.loaded()) if (target->hittable()) world.creatures.push_back(target->solid());
         world.props.clear();
         for (const Chest& chest : chests.entities) if (chest.closed()) world.props.push_back(chest.solid());
         for (const ResourceNode& node : nodes.entities) if (!node.depleted()) world.props.push_back(node.solid());
@@ -133,10 +139,7 @@ struct Scene {
         noticeTime = (std::max)(0.0f, noticeTime - dt);
         if (m_aiming && input.throwBall && throwCooldown <= 0.0f) throwBall();
 
-        for (CaptureTarget& target : targets) {
-            if (target.speciesIndex() < 0) assignSpecies(target);
-            handleCaptureEvent(target, target.update(dt, world));
-        }
+        for (CaptureTarget* target : wild.loaded()) handleCaptureEvent(*target, target->update(dt, world));
         updateBalls(dt);
         chests.update(dt, ChestSpawn::DELAY,
             [&](Chest& chest) { world.step(chest.body, dt); chest.update(dt); },
@@ -187,7 +190,7 @@ struct Scene {
         s.playerXp = progress.xpFraction();
         s.levelCap = progress.levelCap();
         s.notice = noticeTime > 0.0f ? notice : Notice::NONE;
-        s.locked = lockedIndex >= 0;
+        s.locked = lockedTarget != nullptr;
         s.inventory = &inventory;
         s.data = m_data;
         s.aiming = m_aiming;
@@ -198,7 +201,13 @@ struct Scene {
             s.missingPos = m_missingPos;
         }
         s.interactPos = interactionAnchor();
-        s.locationText = locationText();
+        fillLocation(s);
+        s.habitatMap = &habitats;
+        s.playerX = player.body.position.x;
+        s.playerZ = player.body.position.z;
+        s.playerYaw = camera.yaw();
+        s.dayAngle = dayCycle.sunAngle();
+        for (const CaptureTarget* target : wild.loaded()) if (target->hittable()) s.wildDots.push_back({ target->body.position.x, target->body.position.z });
         if (const OwnedPokemon* lead = storage.active()) s.companionMode = CompanionRules::label(lead->mode);
         addNameTags(s);
         for (size_t i = 0; i < storage.team().size(); ++i) {
@@ -224,8 +233,8 @@ struct Scene {
             s.interactVerb = USE_VERB;
             s.interactTarget = &MACHINE_NAME;
         }
-        if (m_aimTarget >= 0) {
-            const CaptureTarget& t = targets[m_aimTarget];
+        if (m_aimTarget) {
+            const CaptureTarget& t = *m_aimTarget;
             s.hasAimTarget = true;
             s.behind = isBehind(t);
             s.hidden = player.crouched();
@@ -236,12 +245,14 @@ struct Scene {
 
     private:
     // "Pradera · Arcoíris": hábitat que más pesa donde está el jugador y el clima más fuerte.
-    std::string locationText() const {
+    void fillLocation(GameStatus& s) const {
         const WildSpawn::Context context = spawnContext(player.body.position.x, player.body.position.z);
-        if (context.habitats.empty()) return {};
+        if (context.habitats.empty()) return;
         const int habitat = static_cast<int>(std::max_element(context.habitats.begin(), context.habitats.end()) - context.habitats.begin());
         const Weather* current = context.weather.empty() ? nullptr : m_data->weather(context.weather.front().weatherId);
-        return m_data->habitats[habitat].name + " · " + (current ? current->name : CLEAR_SKY);
+        s.habitatName = &m_data->habitats[habitat].name;
+        s.weatherName = current ? &current->name : nullptr;
+        s.locationText = *s.habitatName + " · " + (current ? current->name : CLEAR_SKY);
     }
 
     // Nombre y nivel sobre cada pokémon visible (los salvajes y el acompañante).
@@ -256,8 +267,8 @@ struct Scene {
                     (hp < 1.0f ? "  PS " + std::to_string(static_cast<int>(std::ceil(hp * 100.0f))) + "%" : std::string()), shiny });
             }
         };
-        for (const CaptureTarget& target : targets) {
-            if (target.hittable()) add(target.speciesId(), target.level(), target.shiny(), { target.body.position.x, target.body.position.y + CaptureTarget::SIZE, target.body.position.z }, target.hpFraction());
+        for (const CaptureTarget* target : wild.loaded()) {
+            if (target->hittable()) add(target->speciesId(), target->level(), target->shiny(), { target->body.position.x, target->body.position.y + CaptureTarget::SIZE, target->body.position.z }, target->hpFraction());
         }
         if (companion.active() && !companion.changing() && storage.active()) {
             const OwnedPokemon& lead = *storage.active();
@@ -419,13 +430,13 @@ struct Scene {
     CaptureTarget* fightTargetFor(CompanionRules::Mode mode) {
         CaptureTarget* best = nullptr;
         float bestDistance = Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
-        for (CaptureTarget& target : targets) {
-            if (!target.hittable() || target.speciesIndex() < 0) continue;
-            if (mode == CompanionRules::Mode::CAPTURE && target.hpFraction() <= CompanionRules::CAPTURE_STOP_HP) continue;
-            const float dx = target.body.position.x - player.body.position.x, dz = target.body.position.z - player.body.position.z;
+        for (CaptureTarget* target : wild.loaded()) {
+            if (!target->hittable() || target->speciesIndex() < 0) continue;
+            if (mode == CompanionRules::Mode::CAPTURE && target->hpFraction() <= CompanionRules::CAPTURE_STOP_HP) continue;
+            const float dx = target->body.position.x - player.body.position.x, dz = target->body.position.z - player.body.position.z;
             if (dx * dx + dz * dz < bestDistance) {
                 bestDistance = dx * dx + dz * dz;
-                best = &target;
+                best = target;
             }
         }
         return best;
@@ -566,64 +577,61 @@ struct Scene {
     }
 
     // Objetivos disponibles para fijar (vivos, dentro del alcance y a la vista).
-    std::vector<int> lockCandidates(int exclude) const {
-        std::vector<int> result;
-        for (int i = 0; i < TARGET_COUNT; ++i) {
-            if (i != exclude && targets[i].hittable() && distanceXZ(targets[i]) <= RANGE && visible(targets[i])) result.push_back(i);
+    std::vector<CaptureTarget*> lockCandidates(const CaptureTarget* exclude) const {
+        std::vector<CaptureTarget*> result;
+        for (CaptureTarget* target : wild.loaded()) {
+            if (target != exclude && target->hittable() && distanceXZ(*target) <= RANGE && visible(*target)) result.push_back(target);
         }
         return result;
     }
 
-    int closestToCenter(const std::vector<int>& candidates) const {
-        int best = candidates.front();
-        for (const int i : candidates) {
-            if (std::fabs(relativeAngle(targets[i])) < std::fabs(relativeAngle(targets[best]))) best = i;
-        }
-        return best;
+    CaptureTarget* closestToCenter(const std::vector<CaptureTarget*>& candidates) const {
+        return *std::min_element(candidates.begin(), candidates.end(),
+            [this](const CaptureTarget* a, const CaptureTarget* b) { return std::fabs(relativeAngle(*a)) < std::fabs(relativeAngle(*b)); });
     }
 
     // Una pulsación: fija el objetivo más cercano al centro; si ya hay uno, pasa al siguiente (hacia la derecha).
     void cycleLock() {
-        std::vector<int> candidates = lockCandidates(-1);
+        std::vector<CaptureTarget*> candidates = lockCandidates(nullptr);
         if (candidates.empty()) return;
-        if (lockedIndex < 0) {
-            lockedIndex = closestToCenter(candidates);
+        if (!lockedTarget) {
+            lockedTarget = closestToCenter(candidates);
             return;
         }
 
         std::sort(candidates.begin(), candidates.end(),
-            [this](int a, int b) { return relativeAngle(targets[a]) < relativeAngle(targets[b]); });
-        const auto it = std::find(candidates.begin(), candidates.end(), lockedIndex);
-        if (it == candidates.end()) lockedIndex = closestToCenter(candidates);
-        else lockedIndex = (it + 1 == candidates.end()) ? candidates.front() : *(it + 1);
+            [this](const CaptureTarget* a, const CaptureTarget* b) { return relativeAngle(*a) < relativeAngle(*b); });
+        const auto it = std::find(candidates.begin(), candidates.end(), lockedTarget);
+        if (it == candidates.end()) lockedTarget = closestToCenter(candidates);
+        else lockedTarget = (it + 1 == candidates.end()) ? candidates.front() : *(it + 1);
     }
 
     // Si el objetivo fijado se captura, queda fuera de alcance o lleva un rato tapado, salta a otro visible; si no hay, se suelta.
     void validateLock(float dt) {
-        if (lockedIndex < 0) return;
-        const CaptureTarget& t = targets[lockedIndex];
+        if (!lockedTarget) return;
+        const CaptureTarget& t = *lockedTarget;
         if (t.hittable() && distanceXZ(t) <= RANGE + LOCK_RELEASE_MARGIN) {
             m_lockHidden = visible(t) ? 0.0f : m_lockHidden + dt;
             if (m_lockHidden < LOCK_HIDDEN_GRACE) return;
         }
         m_lockHidden = 0.0f;
 
-        const std::vector<int> candidates = lockCandidates(lockedIndex);
-        lockedIndex = candidates.empty() ? -1 : closestToCenter(candidates);
+        const std::vector<CaptureTarget*> candidates = lockCandidates(lockedTarget);
+        lockedTarget = candidates.empty() ? nullptr : closestToCenter(candidates);
     }
 
     // --- Apuntado ---
-    // Pokémon más cercano que atraviesa el rayo. Devuelve su índice (-1 si ninguno) y la distancia al impacto.
-    int nearestHit(const DirectX::XMFLOAT3& eye, const DirectX::XMFLOAT3& dir, float& distance, bool inRangeOnly) const {
-        int best = -1;
+    // Pokémon más cercano que atraviesa el rayo (nullptr si ninguno) y la distancia al impacto.
+    CaptureTarget* nearestHit(const DirectX::XMFLOAT3& eye, const DirectX::XMFLOAT3& dir, float& distance, bool inRangeOnly) const {
+        CaptureTarget* best = nullptr;
         distance = 1.0e9f;
-        for (int i = 0; i < TARGET_COUNT; ++i) {
+        for (CaptureTarget* target : wild.loaded()) {
             float t = 0.0f;
-            if (inRangeOnly && distanceXZ(targets[i]) > RANGE) continue;
-            if (world.blocked(eye, targets[i].center())) continue; // tapado por un obstáculo
-            if (targets[i].raycast(eye, dir, t) && t < distance) {
+            if (inRangeOnly && distanceXZ(*target) > RANGE) continue;
+            if (world.blocked(eye, target->center())) continue; // tapado por un obstáculo
+            if (target->raycast(eye, dir, t) && t < distance) {
                 distance = t;
-                best = i;
+                best = target;
             }
         }
         return best;
@@ -631,7 +639,7 @@ struct Scene {
 
     // Pokémon al que apunta ahora la cruceta (para mostrar su porcentaje).
     void updateAimInfo() {
-        m_aimTarget = -1;
+        m_aimTarget = nullptr;
         if (!m_aiming) return;
         float distance;
         m_aimTarget = nearestHit(camera.eye(player.body.position), camera.forward(), distance, true);
@@ -654,7 +662,7 @@ struct Scene {
         const float ground = world.groundHeight(eye.x, eye.z);
         if (dir.y < -1.0e-4f) distance = (std::min)(distance, (std::max)((ground - eye.y) / dir.y, 0.0f));
         float hit = 0.0f;
-        if (nearestHit(eye, dir, hit, false) >= 0) distance = (std::min)(distance, hit);
+        if (nearestHit(eye, dir, hit, false)) distance = (std::min)(distance, hit);
         const XMFLOAT3 aim = { eye.x + dir.x * distance, eye.y + dir.y * distance, eye.z + dir.z * distance };
 
         float sinYaw, cosYaw;
@@ -712,9 +720,9 @@ struct Scene {
 
                 world.step(ball.body, h);
                 ball.age += h;
-                for (CaptureTarget& target : targets) {
-                    if (!target.hitBy(ball.body.position, Pokeball::RADIUS + Pokeball::CONTACT_MARGIN)) continue;
-                    target.beginCapture(ball, CaptureRules::roll(chancePercent(target, ball.captureMultiplier)));
+                for (CaptureTarget* target : wild.loaded()) {
+                    if (!target->hitBy(ball.body.position, Pokeball::RADIUS + Pokeball::CONTACT_MARGIN)) continue;
+                    target->beginCapture(ball, CaptureRules::roll(chancePercent(*target, ball.captureMultiplier)));
                     ball.spent = true;
                     ball.age = Pokeball::LIFETIME; // la bola pasa a ser la de la animación de captura
                     break;
@@ -740,7 +748,7 @@ struct Scene {
 
     // Hay algún pokémon al alcance al que fijar la cámara (o ya hay uno fijado).
     bool anyLockable() const {
-        return lockedIndex >= 0 || !lockCandidates(-1).empty();
+        return lockedTarget || !lockCandidates(nullptr).empty();
     }
 
     static constexpr const char* CHEST_VERB = "Abrir";
@@ -758,5 +766,5 @@ struct Scene {
     Interaction m_interaction; // lo que el jugador puede usar ahora mismo (cofre o recurso cercano)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
     float m_lockHidden = 0.0f; // segundos que lleva tapado el pokémon fijado
-    int m_aimTarget = -1;  // pokémon al que apunta la cruceta dentro del alcance
+    CaptureTarget* m_aimTarget = nullptr;  // pokémon al que apunta la cruceta dentro del alcance
 };

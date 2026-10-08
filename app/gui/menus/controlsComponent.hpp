@@ -11,7 +11,7 @@
 namespace ControlsComponent {
     namespace detail {
         inline constexpr float PANEL_WIDTH = 760.0f;
-        inline constexpr float PANEL_HEIGHT = 320.0f;
+        inline constexpr float PANEL_HEIGHT = 372.0f;
 
         // Posiciones (en el panel) de los elementos que cambian entre mandos.
         struct PadLayout {
@@ -52,6 +52,7 @@ namespace ControlsComponent {
             keyRow(dl, offset(o, 420.0f, 150.0f), { "TAB" }, "Fijar objetivo (mantener: soltar)", 60.0f);
             keyRow(dl, offset(o, 420.0f, 264.0f), { "F" }, "Interactuar");
             keyRow(dl, offset(o, 600.0f, 264.0f), { "I" }, "Inventario");
+            keyRow(dl, offset(o, 420.0f, 318.0f), { "R" }, "Cambiar modo del pokémon");
             mouse(dl, offset(o, 440.0f, 204.0f));
             label(dl, o.x + 504.0f, o.y + 206.0f, "Mover la cámara");
             label(dl, o.x + 504.0f, o.y + 228.0f, "Der.: apuntar · Izq.: lanzar");
@@ -114,9 +115,9 @@ namespace ControlsComponent {
                 dl->AddCircleFilled(P(stick.x, stick.y), 15.0f, ACCENT);
             }
 
-            // Botones frontales: se usan el inferior (saltar) y el derecho (agacharse).
+            // Botones frontales: se usan todos (saltar, agacharse, interactuar y cambiar de modo).
             const float fx = layout.faceX, fy = layout.faceY;
-            faceButton(dl, P(fx, fy - 17.0f), Face::NORTH, xbox, false);
+            faceButton(dl, P(fx, fy - 17.0f), Face::NORTH, xbox, true);
             faceButton(dl, P(fx + 17.0f, fy), Face::EAST,  xbox, true);
             faceButton(dl, P(fx, fy + 17.0f), Face::SOUTH, xbox, true);
             faceButton(dl, P(fx - 17.0f, fy), Face::WEST,  xbox, true);
@@ -138,6 +139,7 @@ namespace ControlsComponent {
             callout(fx + 27.0f, fy, fy, 550.0f, "Agacharse / Deslizarse");
             callout(fx, fy + 27.0f, fy + 58.0f, 550.0f, "Saltar");
             callout(fx - 17.0f, fy, fy + 103.0f, 550.0f, "Interactuar");
+            callout(fx, fy - 17.0f, fy - 17.0f, 550.0f, "Modo del pokémon");
             callout(350.0f, xbox ? 102.0f : 98.0f, 22.0f, 210.0f, "Inventario");
             callout(pauseX, pauseY, 14.0f, 550.0f, "Pausa");
         }

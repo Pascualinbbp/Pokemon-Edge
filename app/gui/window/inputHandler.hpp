@@ -23,6 +23,7 @@ namespace InputHandler {
             bool up = false, down = false, left = false, right = false; // mantenidas
             bool jump = false, crouch = false, sprint = false;          // eventos de un frame
             bool interact = false;                                      // F
+            bool modeSwitch = false;                                    // R (solo mientras se juega)
             bool inventory = false;                                     // I (solo mientras se juega)
             bool throwBall = false;                                     // clic izquierdo
             bool aimToggle = false;                                     // clic derecho
@@ -55,7 +56,7 @@ namespace InputHandler {
         // Descarta lo que no debe arrastrarse entre frames o entre estados (pausa, carga...).
         inline void clearEvents() {
             mouseDX = mouseDY = 0.0f;
-            keys.jump = keys.crouch = keys.sprint = keys.throwBall = keys.interact = keys.inventory = false;
+            keys.jump = keys.crouch = keys.sprint = keys.throwBall = keys.interact = keys.inventory = keys.modeSwitch = false;
             keys.aimToggle = keys.escape = keys.lockTap = false;
             keys.ballSwitch = 0;
             keys.teamSelect = 0;
@@ -146,6 +147,9 @@ namespace InputHandler {
                 break;
             case 'F':
                 if (newPress) k.interact = true;
+                break;
+            case 'R':
+                if (newPress && detail::captured) k.modeSwitch = true;
                 break;
             case 'I':
                 if (newPress && detail::captured) k.inventory = true;
@@ -291,6 +295,7 @@ namespace InputHandler {
             input.pause = (pressed & InputBindings::PAD_PAUSE) != 0;
             input.interact = (pressed & InputBindings::PAD_INTERACT) != 0;
             input.inventory = (pressed & InputBindings::PAD_INVENTORY) != 0;
+            input.modeSwitch = (pressed & InputBindings::PAD_MODE) != 0;
             input.aimHold = pad.lt > InputBindings::TRIGGER_THRESHOLD;
             input.throwBall = triggerDown && !detail::padPrevTriggerDown;
             if (pressed & InputBindings::PAD_BALL_PREV) input.ballSwitch = -1;
@@ -323,6 +328,7 @@ namespace InputHandler {
             input.sprint = k.sprint;
             input.interact = k.interact;
             input.inventory = k.inventory;
+            input.modeSwitch = k.modeSwitch;
             input.throwBall = k.throwBall;
             input.aimToggle = k.aimToggle;
             input.escape = k.escape;

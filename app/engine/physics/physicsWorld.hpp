@@ -9,7 +9,7 @@ namespace Physics {
     class World {
         public:
         static constexpr float GRAVITY = 20.0f;
-        static constexpr float HALF_SIZE = 40.0f; // el mundo va de -HALF_SIZE a +HALF_SIZE en X y Z
+        static constexpr float HALF_SIZE = 64.0f; // el mundo va de -HALF_SIZE a +HALF_SIZE en X y Z
         static constexpr float STEP_HEIGHT = 0.3f; // desnivel que se sube andando; por debajo de la cara superior menos esto, el sólido bloquea
         static constexpr float SLIDE_SPEED = 5.0f; // velocidad con la que se resbala de lo que no admite quedarse encima
 

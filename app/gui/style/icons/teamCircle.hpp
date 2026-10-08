@@ -1,4 +1,5 @@
 #pragma once
+#include <cfloat>
 #include <cstdio>
 #include "imgui.h"
 #include "../guiCards.hpp"
@@ -20,12 +21,17 @@ namespace TeamCircle {
         dl->AddCircle(c, radius, fade(shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, emphasis ? 255 : 90)), 40, emphasis ? 3.5f : 1.5f);
         ItemIcon::creature(dl, ImVec2(c.x, c.y - radius * 0.13f), radius * 0.5f, species.id, (emphasis ? 1.0f : 0.8f) * alpha);
 
+        // "Nivel x": etiqueta pequeña sobre el borde superior, oscura y con el filo del color del tipo.
         char text[24];
         std::snprintf(text, sizeof(text), "Nivel %d", level);
-        const float w = ImGui::CalcTextSize(text).x + 14.0f;
-        const ImVec2 pill(c.x - w * 0.5f, c.y - radius - 7.0f);
-        dl->AddRectFilled(pill, ImVec2(pill.x + w, pill.y + 18.0f), fade(IM_COL32(20, 20, 30, 230)), 9.0f);
-        dl->AddText(ImVec2(pill.x + 7.0f, pill.y + 2.0f), fade(IM_COL32(255, 255, 255, 255)), text);
+        ImFont* font = ImGui::GetFont();
+        const float fontSize = ImGui::GetFontSize() * 0.68f;
+        const ImVec2 size = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
+        const float w = size.x + radius * 0.4f, h = size.y + 3.0f;
+        const ImVec2 pill(c.x - w * 0.5f, c.y - radius - h * 0.5f);
+        dl->AddRectFilled(pill, ImVec2(pill.x + w, pill.y + h), fade(IM_COL32(14, 16, 26, 225)), h * 0.5f);
+        dl->AddRect(pill, ImVec2(pill.x + w, pill.y + h), fade(GuiCards::withAlpha(tone, 210)), h * 0.5f, 0, 1.0f);
+        dl->AddText(font, fontSize, ImVec2(c.x - size.x * 0.5f, pill.y + (h - size.y) * 0.5f), fade(IM_COL32(240, 242, 250, 255)), text);
 
         float typeX = c.x - radius * 0.75f;
         for (const int id : species.types) {

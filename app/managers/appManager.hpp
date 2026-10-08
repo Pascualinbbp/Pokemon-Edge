@@ -8,7 +8,7 @@
 class AppManager {
     public:
     void start() {
-        UpdateManager::checkAndHandleUpdate();
+        UpdateManager::startInBackground();
         DatabaseManager::init();
         SaveManager::init();
 

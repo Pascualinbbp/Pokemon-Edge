@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include "imgui.h"
+#include "minimapComponent.hpp"
 #include "../style/guiPrompts.hpp"
 #include "../style/icons/itemIcon.hpp"
 #include "../style/icons/teamCircle.hpp"
@@ -169,7 +170,7 @@ namespace HudComponent {
                 Action action;
                 char text[64];
             };
-            Hint hints[8];
+            Hint hints[9];
             int count = 0;
             const auto add = [&](Action action, const char* text) {
                 hints[count].action = action;
@@ -188,6 +189,7 @@ namespace HudComponent {
                 add(Action::SPRINT, "Correr");
                 add(Action::AIM, "Modo captura");
                 if (status.team.size() > 1) add(Action::BALL_SWITCH, "Cambiar de pokémon");
+                if (!status.team.empty()) add(Action::MODE, "Modo del pokémon");
                 add(Action::INVENTORY, "Mochila");
                 add(Action::PAUSE, "Pausa");
             }
@@ -203,7 +205,7 @@ namespace HudComponent {
 
         // Hábitat y clima de donde está el jugador y modo del pokémon que lo acompaña (arriba a la izquierda).
         inline void drawLocation(ImDrawList* dl, const GameStatus& status) {
-            const ImVec2 at(24.0f, 14.0f);
+            const ImVec2 at(MinimapComponent::center().x - 84.0f, MinimapComponent::bottom() + 4.0f);
             if (!status.locationText.empty()) dl->AddText(at, IM_COL32(255, 255, 255, 235), status.locationText.c_str());
             if (status.companionMode) {
                 const float y = at.y + (status.locationText.empty() ? 0.0f : ImGui::GetFontSize() + 4.0f);
@@ -295,6 +297,7 @@ namespace HudComponent {
 
         detail::drawNameTags(dl, status);
         detail::drawLevel(dl, status);
+        MinimapComponent::draw(dl, status);
         detail::drawLocation(dl, status);
         detail::drawTeam(dl, status);
         detail::drawHints(dl, status, device);

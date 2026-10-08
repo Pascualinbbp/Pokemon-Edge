@@ -47,10 +47,10 @@ namespace {
     // Mapa de sombras: una proyección ortográfica fija que cubre todo el mundo (así las sombras no "nadan"
     // al moverse el jugador) vista desde la dirección de la luz activa.
     constexpr UINT kShadowMapSize = 3072;
-    constexpr float kShadowHalfExtent = 58.0f; // cubre la diagonal del mundo (80 x 80)
-    constexpr float kLightDistance = 90.0f;
+    constexpr float kShadowHalfExtent = 92.0f; // cubre la diagonal del mundo (128 x 128)
+    constexpr float kLightDistance = 140.0f;
     constexpr float kLightNear = 20.0f;
-    constexpr float kLightFar = 160.0f;
+    constexpr float kLightFar = 260.0f;
     constexpr float kShadowNormalOffset = 0.05f; // evita el moteado en superficies casi paralelas a la luz
     constexpr float kShadowDepthBias = 0.0004f;
 
@@ -508,7 +508,8 @@ void Renderer3D::collect(const Scene& scene) {
     const XMFLOAT3& p = scene.player.body.position;
     add(m_player, XMMatrixScaling(1.0f, scene.player.heightScale(), 1.0f) * XMMatrixTranslation(p.x, p.y, p.z), kWhite);
 
-    for (const CaptureTarget& target : scene.targets) {
+    for (const CaptureTarget* wild : scene.wild.loaded()) {
+        const CaptureTarget& target = *wild;
         const float size = target.scale();
         if (size > 0.001f) addCreature(target.drawCenter(), size, target.yaw(), target.speciesId(), target.shiny());
 

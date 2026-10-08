@@ -32,6 +32,7 @@ class PathsUtil {
     inline static const fs::path DB_PATH = DB_DIR / "pokemonEdge.db";
     inline static const fs::path LOG_FILE_PATH = LOG_DIR / "app.log";
     inline static const fs::path TEMP_ZIP_PATH = DOWNLOAD_FOLDER / "update.zip";
+    inline static const fs::path EXTRACT_PROGRESS_PATH = DOWNLOAD_FOLDER / "extract.progress";
 
     // Carpetas con datos del usuario que la actualización no debe borrar.
     inline static const std::vector<fs::path> USER_DATA_DIRS = { LOG_DIR, SAVE_DIR };

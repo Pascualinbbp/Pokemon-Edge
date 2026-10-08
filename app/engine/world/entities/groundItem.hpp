@@ -8,7 +8,7 @@
 // Qué da se sortea al recogerla (tabla ground_item).
 class GroundItem {
     public:
-    static constexpr float RADIUS = 0.2f;         // radio de la semiesfera
+    static constexpr float RADIUS = 0.09f;        // radio de la semiesfera
     static constexpr float INTERACT_RANGE = 1.8f; // distancia del jugador para recogerla
     static constexpr float FADE_TIME = 0.35f;
 
@@ -27,8 +27,8 @@ class GroundItem {
         if (m_taken) m_fade += dt;
     }
 
-    // Brillo de la semiesfera (0..1), que late despacio.
-    float glow() const { return 0.3f + 0.25f * pulse(0.0f); }
+    // Luz propia de la semiesfera (muy poca), que late despacio.
+    float glow() const { return 0.06f + 0.05f * pulse(0.0f); }
 
     float scale() const { return m_taken ? (std::max)(0.0f, 1.0f - m_fade / FADE_TIME) : 1.0f; }
 
