@@ -31,6 +31,18 @@ class CaptureTarget {
     }
 
     bool hittable() const { return m_state == State::IDLE; }
+
+    // Vida restante (1 = entera). La reducen los golpes del acompañante; al llegar a 0 queda derrotado y reaparece más tarde.
+    float hpFraction() const { return m_hp; }
+    // Quita una fracción de vida. Devuelve true si lo deja derrotado.
+    bool damage(float fraction) {
+        if (!hittable()) return false;
+        m_hp = (std::max)(0.0f, m_hp - fraction);
+        if (m_hp > 0.0f) return false;
+        m_state = State::HIDDEN;
+        m_timer = 0.0f;
+        return true;
+    }
     float yaw() const { return m_yaw; }
 
     // Especie de este pokémon salvaje (índice en GameData::species y su id). -1 = aún sin asignar: la escena la
@@ -185,6 +197,7 @@ class CaptureTarget {
         m_timer = 0.0f;
         m_speciesIndex = m_speciesId = -1;
         m_shiny = false;
+        m_hp = 1.0f;
     }
 
     State m_state = State::IDLE;
@@ -195,6 +208,7 @@ class CaptureTarget {
     float m_heading = 0.0f;   // hacia dónde quiere caminar
     float m_wanderTimer = 0.0f;
     bool m_walking = false;
+    float m_hp = 1.0f;
     int m_speciesIndex = -1;
     int m_speciesId = -1;
     int m_level = 1;

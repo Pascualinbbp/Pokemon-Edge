@@ -422,7 +422,7 @@ namespace PokemonComponent {
             const OwnedPokemon owned = *found;
 
             // Cabecera con el color de su tipo.
-            const float headerHeight = 112.0f;
+            const float headerHeight = 142.0f;
             dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + headerHeight), tone(*species), GuiCards::ROUNDING, ImDrawFlags_RoundCornersTop);
             ItemIcon::creature(dl, ImVec2(pos.x + 56.0f, pos.y + 54.0f), 34.0f, species->id);
             GuiCards::text(dl, ImVec2(pos.x + 108.0f, pos.y + 12.0f), IM_COL32(255, 255, 255, 255), title(*species, owned).c_str(), 1.4f);
@@ -452,6 +452,13 @@ namespace PokemonComponent {
                     const PokemonSpecies* after = ownedAt(storage, selection) ? data.speciesById(ownedAt(storage, selection)->speciesId) : nullptr;
                     message = result == PokemonStorage::LevelResult::EVOLVED && after ? "¡" + before + " ha evolucionado a " + after->name + "!" : "";
                 }
+            }
+
+            // Modo del acompañante (solo para los del equipo): recolección, captura o combate.
+            if (selection.inTeam) {
+                std::snprintf(text, sizeof(text), "MODO: %s", CompanionRules::label(owned.mode));
+                ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + 106.0f));
+                if (GuiCards::button("##mode", text, ImVec2(200.0f, 28.0f), true, IM_COL32(70, 90, 150, 255))) storage.cycleMode(true, selection.index);
             }
 
             const float left = pos.x + 16.0f, width = size.x - 32.0f;

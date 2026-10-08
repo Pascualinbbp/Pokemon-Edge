@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "spawnProfile.hpp"
 
 // Estadísticas base de un pokémon, en el orden de la base de datos.
 struct BaseStats {
@@ -36,7 +37,8 @@ struct PokemonSpecies {
     int passiveId = -1;     // habilidad pasiva (-1 = no tiene)
     std::vector<int> types; // uno o dos id de la tabla type
     BaseStats stats;
-    float spawnWeight = 1.0f; // cuanto menor, más raro
+    SpawnProfile spawn;       // en qué hábitats y con qué condiciones aparece salvaje
+    float spawnWeight = 1.0f; // rareza: suma de sus pesos en los hábitats (cuanto menor, más raro); la rellena el DAO
     int catchRate = 45;       // ratio de captura fijo de la especie (1..255)
     int minLevel = 1;         // nivel al aparecer salvaje
     int maxLevel = 1;

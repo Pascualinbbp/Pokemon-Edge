@@ -35,6 +35,7 @@ class DayCycle {
     }
 
     float time() const { return m_time; }
+    bool isNight() const { return m_time >= DAY_SECONDS; }
 
     // Restaura la hora de una partida guardada (un valor no válido deja la hora de inicio).
     void setTime(float seconds) {

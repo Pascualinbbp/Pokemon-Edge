@@ -28,7 +28,7 @@ class GameEngine {
     }
 
     void applySave(const SaveData& save) {
-        m_scene = Scene(m_data);
+        m_scene = save.worldSeed != 0 ? Scene(m_data, save.worldSeed) : Scene(m_data);
         m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
         m_scene.dayCycle.setTime(save.worldTime);
         m_scene.inventory.restore(save.items, save.selectedBall, save.money);
@@ -41,6 +41,7 @@ class GameEngine {
         SaveData save;
         save.playerPosition = { p.x, p.y, p.z };
         save.worldTime = m_scene.dayCycle.time();
+        save.worldSeed = m_scene.habitats.seed();
         m_scene.inventory.store(save.items, save.selectedBall, save.money);
         m_scene.storage.store(save.team, save.pc);
         save.autoReleaseRank = m_scene.storage.autoRankIndex();

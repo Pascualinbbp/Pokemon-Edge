@@ -64,6 +64,10 @@ namespace CaptureRules {
         return { false, RandomUtil::integer(0, MAX_FAIL_WOBBLES), Throw::NORMAL };
     }
 
+    // Un pokémon debilitado se captura mejor: sin vida llega a multiplicar su porcentaje por 1 + HP_BONUS.
+    inline constexpr float HP_BONUS = 1.5f;
+    inline float hpFactor(float hpFraction) { return 1.0f + (1.0f - hpFraction) * HP_BONUS; }
+
     inline float basePercent(int catchRate, int wildLevel, int playerLevel) {
         const float factor = (std::clamp)(1.0f - static_cast<float>(wildLevel - playerLevel) * LEVEL_STEP, MIN_LEVEL_FACTOR, MAX_LEVEL_FACTOR);
         return static_cast<float>(catchRate) / 255.0f * 100.0f * RATE_SCALE * factor;

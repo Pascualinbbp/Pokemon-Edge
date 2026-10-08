@@ -12,6 +12,7 @@
 #include "../daos/pokemonSpeciesDao.hpp"
 #include "../daos/groundItemDao.hpp"
 #include "../daos/trainingItemDao.hpp"
+#include "../daos/habitatDao.hpp"
 
 class DatabaseManager {
     private:
@@ -25,6 +26,7 @@ class DatabaseManager {
     inline static PokemonSpeciesDao speciesDaoInstance;
     inline static GroundItemDao groundItemDaoInstance;
     inline static TrainingItemDao trainingItemDaoInstance;
+    inline static HabitatDao habitatDaoInstance;
 
     public:
     static void init() {
@@ -80,10 +82,13 @@ class DatabaseManager {
         data.types = typeDaoInstance.findAll();
         data.groundItems = groundItemDaoInstance.findAll();
         data.trainingItems = trainingItemDaoInstance.findAll();
+        data.habitats = habitatDaoInstance.findHabitats();
+        data.weathers = habitatDaoInstance.findWeathers();
+        data.fusions = habitatDaoInstance.findFusions();
         Logger::logInfo("DB_MANAGER", "Datos de juego: " + std::to_string(data.items.size()) + " objetos, " +
             std::to_string(data.balls.size()) + " pokéballs, " + std::to_string(data.materials.size()) + " materiales, " +
             std::to_string(data.chests.size()) + " cofres, " + std::to_string(data.nodes.size()) + " nodos de recolección, " + std::to_string(data.skills.size()) + " habilidades, " +
-            std::to_string(data.tools.size()) + " herramientas, " + std::to_string(data.species.size()) + " pokémon, " + std::to_string(data.abilities.size()) + " habilidades de combate.");
+            std::to_string(data.tools.size()) + " herramientas, " + std::to_string(data.species.size()) + " pokémon, " + std::to_string(data.abilities.size()) + " habilidades de combate, " + std::to_string(data.habitats.size()) + " hábitats, " + std::to_string(data.weathers.size()) + " climas.");
         return data;
     }
 };

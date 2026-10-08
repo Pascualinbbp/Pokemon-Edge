@@ -39,6 +39,8 @@ struct GameStatus {
     int missingLevel = 0;                        // nivel que exige ese recurso
     DirectX::XMFLOAT3 interactPos = {};          // dónde se dibuja la ayuda de interacción (sobre lo que se usa)
     DirectX::XMFLOAT3 missingPos = {};           // y el aviso de lo que falta (sobre el recurso)
+    std::string locationText;                    // hábitat y clima donde está el jugador
+    const char* companionMode = nullptr;         // modo del pokémon que acompaña (nullptr = no hay)
     std::vector<NameTag> nameTags;               // nombres sobre los pokémon visibles
     std::vector<TeamEntry> team;                 // el equipo, para la lista lateral
     int playerLevel = 1;                         // nivel del jugador, su experiencia (0..1) y su límite de nivel

@@ -4,6 +4,8 @@
 #include "pokemon/ability.hpp"
 #include "world/chestType.hpp"
 #include "world/groundItemType.hpp"
+#include "world/habitat.hpp"
+#include "world/weather.hpp"
 #include "items/item.hpp"
 #include "items/itemCategoryInfo.hpp"
 #include "items/material.hpp"
@@ -30,6 +32,9 @@ struct GameData {
     std::vector<TrainingItem> trainingItems;
     std::vector<ChestType> chests;
     std::vector<ResourceNodeType> nodes;
+    std::vector<Habitat> habitats;
+    std::vector<Weather> weathers;
+    std::vector<WeatherFusion> fusions;
 
     static const GameData& empty() {
         static const GameData data;
@@ -45,6 +50,19 @@ struct GameData {
     const Ability* ability(int id) const { return find(abilities, id); }
     const PokemonType* type(int id) const { return find(types, id); }
     const PokemonSpecies* speciesById(int id) const { return find(species, id); }
+    const Habitat* habitat(int id) const { return find(habitats, id); }
+    const Weather* weather(int id) const { return find(weathers, id); }
+
+    int habitatIndex(int id) const {
+        for (size_t i = 0; i < habitats.size(); ++i) if (habitats[i].id == id) return static_cast<int>(i);
+        return -1;
+    }
+
+    // Clima que resulta de juntar dos (-1 si no se fusionan); el orden no importa.
+    int fusionOf(int a, int b) const {
+        for (const WeatherFusion& fusion : fusions) if ((fusion.a == a && fusion.b == b) || (fusion.a == b && fusion.b == a)) return fusion.result;
+        return -1;
+    }
 
     // Pokéball exclusiva del pokémon inicial (la que no existe como objeto). nullptr si no hay.
     const PokeballType* starterBall() const {

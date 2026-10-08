@@ -8,7 +8,7 @@
 #include "../../../models/gameData.hpp"
 
 // Casilla circular de un pokémon del equipo (la del juego y la de la gestión de pokémon): su icono sobre el color de su
-// tipo, el nivel abajo, sus tipos abajo a la izquierda, su pokéball abajo a la derecha y, si se pide, su número arriba.
+// tipo, "Nivel x" arriba en el centro, sus tipos abajo a la izquierda, su pokéball abajo a la derecha y, si se pide, su número.
 namespace TeamCircle {
     // 'emphasis' resalta el pokémon que acompaña al jugador.
     inline void draw(ImDrawList* dl, const ImVec2& c, float radius, const GameData& data, const PokemonSpecies& species, int level,
@@ -20,10 +20,10 @@ namespace TeamCircle {
         dl->AddCircle(c, radius, fade(shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, emphasis ? 255 : 90)), 40, emphasis ? 3.5f : 1.5f);
         ItemIcon::creature(dl, ImVec2(c.x, c.y - radius * 0.13f), radius * 0.5f, species.id, (emphasis ? 1.0f : 0.8f) * alpha);
 
-        char text[16];
-        std::snprintf(text, sizeof(text), "%d", level);
+        char text[24];
+        std::snprintf(text, sizeof(text), "Nivel %d", level);
         const float w = ImGui::CalcTextSize(text).x + 14.0f;
-        const ImVec2 pill(c.x - w * 0.5f, c.y + radius - 11.0f);
+        const ImVec2 pill(c.x - w * 0.5f, c.y - radius - 7.0f);
         dl->AddRectFilled(pill, ImVec2(pill.x + w, pill.y + 18.0f), fade(IM_COL32(20, 20, 30, 230)), 9.0f);
         dl->AddText(ImVec2(pill.x + 7.0f, pill.y + 2.0f), fade(IM_COL32(255, 255, 255, 255)), text);
 
@@ -39,7 +39,7 @@ namespace TeamCircle {
 
         if (number <= 0) return;
         std::snprintf(text, sizeof(text), "%d", number);
-        const ImVec2 badge(c.x + radius * 0.72f, c.y - radius * 0.72f);
+        const ImVec2 badge(c.x - radius * 0.86f, c.y - radius * 0.3f);
         dl->AddCircleFilled(badge, 9.0f, fade(IM_COL32(20, 20, 30, 230)), 16);
         dl->AddText(ImVec2(badge.x - ImGui::CalcTextSize(text).x * 0.5f, badge.y - ImGui::GetFontSize() * 0.5f), fade(IM_COL32(255, 255, 255, 255)), text);
     }

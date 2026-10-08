@@ -201,6 +201,18 @@ namespace HudComponent {
             }
         }
 
+        // Hábitat y clima de donde está el jugador y modo del pokémon que lo acompaña (arriba a la izquierda).
+        inline void drawLocation(ImDrawList* dl, const GameStatus& status) {
+            const ImVec2 at(24.0f, 14.0f);
+            if (!status.locationText.empty()) dl->AddText(at, IM_COL32(255, 255, 255, 235), status.locationText.c_str());
+            if (status.companionMode) {
+                const float y = at.y + (status.locationText.empty() ? 0.0f : ImGui::GetFontSize() + 4.0f);
+                char text[48];
+                std::snprintf(text, sizeof(text), "Modo: %s", status.companionMode);
+                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 215, 90, 235), text);
+            }
+        }
+
         // Nivel del jugador y su experiencia (arriba a la derecha).
         inline void drawLevel(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
@@ -283,6 +295,7 @@ namespace HudComponent {
 
         detail::drawNameTags(dl, status);
         detail::drawLevel(dl, status);
+        detail::drawLocation(dl, status);
         detail::drawTeam(dl, status);
         detail::drawHints(dl, status, device);
 

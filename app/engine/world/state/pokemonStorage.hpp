@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 #include "../../../models/gameData.hpp"
+#include "../rules/companionRules.hpp"
 #include "../rules/evRules.hpp"
+#include "../rules/pokemonRules.hpp"
 #include "../rules/researchRules.hpp"
 
 // Un pokémon del jugador. Su potencial (rango, EVs máximos) está oculto hasta analizarlo en la máquina de investigación.
@@ -17,6 +19,8 @@ struct OwnedPokemon {
     bool analyzed = false;          // ya pasó por la máquina de investigación
     EvRules::Evs evs = {};          // EVs actuales: empiezan en 0 y suben entrenándolo
     EvRules::Evs evCaps = {};       // EVs máximos con los que salió (su potencial)
+    int xp = 0;                     // experiencia hacia el siguiente nivel (no se guarda)
+    CompanionRules::Mode mode = CompanionRules::Mode::COLLECT; // qué hace cuando acompaña al jugador (no se guarda)
 };
 
 // Resultado de un análisis de la máquina de investigación.
@@ -162,6 +166,29 @@ class PokemonStorage {
             return LevelResult::EVOLVED;
         }
         return LevelResult::LEVELED;
+    }
+
+    // Experiencia de combate: sube de nivel (y evoluciona) sin pasar de 'cap'. Devuelve niveles ganados y si evolucionó.
+    struct XpResult { int levels = 0; bool evolved = false; };
+    XpResult addXp(int teamIndex, int amount, int cap) {
+        XpResult result;
+        OwnedPokemon* owned = at(true, teamIndex);
+        if (!owned) return result;
+        owned->xp += (std::max)(amount, 0);
+        while (owned->level < cap && owned->xp >= PokemonRules::xpToNext(owned->level)) {
+            owned->xp -= PokemonRules::xpToNext(owned->level);
+            const LevelResult step = levelUp(true, teamIndex, cap);
+            if (step == LevelResult::NONE) break;
+            ++result.levels;
+            result.evolved = result.evolved || step == LevelResult::EVOLVED;
+        }
+        if (owned->level >= cap) owned->xp = 0;
+        return result;
+    }
+
+    // Modo del pokémon (qué hace cuando acompaña al jugador).
+    void cycleMode(bool inTeam, int index) {
+        if (OwnedPokemon* owned = at(inTeam, index)) owned->mode = CompanionRules::next(owned->mode);
     }
 
     // Suma hasta 'amount' EVs en una estadística (sin pasar de su máximo). Devuelve false si no cambia nada.

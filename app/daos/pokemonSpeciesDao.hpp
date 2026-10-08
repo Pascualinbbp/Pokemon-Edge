@@ -22,7 +22,6 @@ class PokemonSpeciesDao {
             if (DaoRow::integer(row, "type2_id") > 0) entry.types.push_back(DaoRow::integer(row, "type2_id"));
             entry.stats = { DaoRow::integer(row, "hp"), DaoRow::integer(row, "attack"), DaoRow::integer(row, "sp_attack"),
                             DaoRow::integer(row, "defense"), DaoRow::integer(row, "sp_defense"), DaoRow::integer(row, "speed") };
-            entry.spawnWeight = DaoRow::real(row, "spawn_weight");
             entry.catchRate = DaoRow::integer(row, "catch_rate");
             entry.minLevel = DaoRow::integer(row, "min_level");
             entry.maxLevel = DaoRow::integer(row, "max_level");
@@ -32,6 +31,7 @@ class PokemonSpeciesDao {
             species.push_back(std::move(entry));
         }
         if (species.empty()) Logger::logError("POKEMON_DAO", "La tabla pokemon no existe o está vacía (falta aplicar testing/sql/pokemon.sql).");
+        loadSpawnProfiles(species);
         return species;
     }
 
@@ -45,7 +45,36 @@ class PokemonSpeciesDao {
     }
 
     private:
+    // Dónde y cuándo aparece cada pokémon (testing/sql/habitat.sql). Su rareza es la suma de sus pesos en los hábitats.
+    static void loadSpawnProfiles(std::vector<PokemonSpecies>& species) {
+        const auto find = [&](const SqliteUtil::Row& row) -> PokemonSpecies* {
+            for (PokemonSpecies& entry : species) if (entry.id == DaoRow::integer(row, "pokemon_id")) return &entry;
+            return nullptr;
+        };
+        for (PokemonSpecies& entry : species) entry.spawnWeight = 0.0f;
+        for (const auto& row : SqliteUtil::executeSelect("SELECT pokemon_id, habitat_id, base_weight FROM pokemon_habitat;")) {
+            if (PokemonSpecies* entry = find(row)) {
+                entry->spawn.habitats.push_back({ DaoRow::integer(row, "habitat_id"), DaoRow::real(row, "base_weight") });
+                entry->spawnWeight += DaoRow::real(row, "base_weight");
+            }
+        }
+        for (const auto& row : SqliteUtil::executeSelect("SELECT pokemon_id, habitat_a_id, habitat_b_id, base_weight FROM pokemon_ecotone;")) {
+            if (PokemonSpecies* entry = find(row)) {
+                entry->spawn.ecotones.push_back({ DaoRow::integer(row, "habitat_a_id"), DaoRow::integer(row, "habitat_b_id"), DaoRow::real(row, "base_weight") });
+            }
+        }
+        for (const auto& row : SqliteUtil::executeSelect("SELECT pokemon_id, kind, weather_id, multiplier FROM pokemon_condition;")) {
+            PokemonSpecies* entry = find(row);
+            if (!entry) continue;
+            const std::string& kind = DaoRow::text(row, "kind");
+            const SpawnCondition::Kind type = kind == "day" ? SpawnCondition::Kind::DAY : kind == "night" ? SpawnCondition::Kind::NIGHT : SpawnCondition::Kind::WEATHER;
+            entry->spawn.conditions.push_back({ type, DaoRow::integer(row, "weather_id"), DaoRow::real(row, "multiplier") });
+        }
+        // Sin tablas de hábitats (base de datos antigua) todos aparecen con la misma frecuencia.
+        for (PokemonSpecies& entry : species) if (entry.spawnWeight <= 0.0f) entry.spawnWeight = 1.0f;
+    }
+
     static constexpr const char* SELECT_POKEMON =
         "SELECT id, name, description, skill_id, skill_level, ability_id, passive_id, type1_id, type2_id, "
-        "hp, attack, sp_attack, defense, sp_defense, speed, spawn_weight, catch_rate, min_level, max_level, evolves_to_id, evolve_level, starter FROM pokemon ORDER BY id;";
+        "hp, attack, sp_attack, defense, sp_defense, speed, catch_rate, min_level, max_level, evolves_to_id, evolve_level, starter FROM pokemon ORDER BY id;";
 };

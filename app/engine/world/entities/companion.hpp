@@ -17,6 +17,9 @@ class Companion {
     static constexpr float JUMP_SPEED = 8.0f;
     static constexpr float WORK_RANGE = 3.0f;     // distancia al borde de un recurso para trabajarlo
     static constexpr float SEARCH_RANGE = 12.0f;  // radio alrededor del jugador donde busca cosas que recoger o trabajar
+    static constexpr float AVOID_PROBE = 1.6f;    // a qué distancia por delante mira si hay un obstáculo
+    static constexpr float AVOID_MIN_GOAL = 5.0f; // no esquiva cuando ya está junto a su objetivo (el obstáculo puede ser él mismo)
+    static constexpr float PROBE_HEIGHT = 0.35f;  // altura sobre el suelo a la que mira
     static constexpr float APPROACH = 1.5f;       // se acerca hasta esta distancia de su objetivo
     static constexpr float WORK_INTERVAL = 1.4f;  // segundos por golpe con power 1
     static constexpr float LEVEL_SPEEDUP = 0.25f; // cada nivel de recolección por encima del 1 trabaja un 25 % más rápido
@@ -98,15 +101,17 @@ class Companion {
         const float dx = spot.x - body.position.x, dz = spot.y - body.position.z;
         const float distance = std::sqrt(dx * dx + dz * dz);
         const float stop = goal ? APPROACH : 0.3f;
+        float heading = std::atan2(dx, dz);
+        if (goal && distance > AVOID_MIN_GOAL) heading = avoid(world, heading);
         if (!goal && distance > TELEPORT_DISTANCE) {
             body.position = { spot.x, playerPosition.y, spot.y };
             body.velocity = { 0.0f, 0.0f, 0.0f };
             body.onGround = false;
         } else if (distance > stop) {
             const float speed = (std::min)(SPEED, (distance - stop + 0.3f) * 3.0f);
-            body.velocity.x = dx / distance * speed;
-            body.velocity.z = dz / distance * speed;
-            m_yaw = std::atan2(dx, dz);
+            body.velocity.x = std::sin(heading) * speed;
+            body.velocity.z = std::cos(heading) * speed;
+            m_yaw = heading;
             // Si el jugador está más alto (sobre una roca...), salta tras él.
             if (!m_floats && body.onGround && playerPosition.y - body.position.y > 0.3f && distance < 3.0f) world.jump(body, JUMP_SPEED);
         } else {
@@ -166,6 +171,29 @@ class Companion {
         if (m_phaseTime >= THROW_TIME + APPEAR_TIME) m_phase = Phase::NONE;
     }
 
+    // Rumbo libre de obstáculos más cercano al deseado: si hay algo delante, prueba cada vez más a los lados (primero hacia el
+    // lado que ya usaba, para no vacilar) y sigue por el primero que está despejado.
+    float avoid(const Physics::World& world, float heading) {
+        const DirectX::XMFLOAT3 from = { body.position.x, body.position.y + PROBE_HEIGHT, body.position.z };
+        const auto clear = [&](float angle) {
+            const DirectX::XMFLOAT3 to = { from.x + std::sin(angle) * AVOID_PROBE, from.y, from.z + std::cos(angle) * AVOID_PROBE };
+            return !world.blocked(from, to);
+        };
+        if (clear(heading)) {
+            m_avoidSide = 0;
+            return heading;
+        }
+        const int first = m_avoidSide != 0 ? m_avoidSide : 1;
+        for (const float offset : { 0.5f, 1.0f, 1.5f, 2.0f }) {
+            for (const int side : { first, -first }) {
+                if (!clear(heading + side * offset)) continue;
+                m_avoidSide = side;
+                return heading + side * offset;
+            }
+        }
+        return heading;
+    }
+
     // Punto donde se coloca: detrás y a la derecha del jugador respecto a la cámara.
     static DirectX::XMFLOAT2 followSpot(const DirectX::XMFLOAT3& player, float cameraYaw) {
         const float s = std::sin(cameraYaw), c = std::cos(cameraYaw);
@@ -175,6 +203,7 @@ class Companion {
     int m_speciesId = -1;
     bool m_floats = false;
     float m_yaw = 0.0f;
+    int m_avoidSide = 0;      // lado (±1) por el que rodea un obstáculo; 0 = camino libre
     float m_time = 0.0f;
     float m_workTimer = 0.0f;
     bool m_working = false;

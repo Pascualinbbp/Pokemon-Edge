@@ -44,6 +44,7 @@ class SaveManager {
         j["savedAt"] = static_cast<long long>(now);
         j["player"]["position"] = data.playerPosition;
         j["world"]["time"] = data.worldTime;
+        j["world"]["seed"] = data.worldSeed;
         j["inventory"]["items"] = data.items;
         j["inventory"]["selected"] = data.selectedBall;
         j["inventory"]["money"] = data.money;
@@ -73,6 +74,7 @@ class SaveManager {
         SaveData data;
         data.playerPosition = *position;
         data.worldTime = JsonUtil::find<float>(j, { "world", "time" }).value_or(-1.0f); // partidas antiguas: sin dato
+        data.worldSeed = JsonUtil::find<unsigned>(j, { "world", "seed" }).value_or(0u);
         data.items = JsonUtil::find<std::map<std::string, int>>(j, { "inventory", "items" }).value_or(std::map<std::string, int>{});
         data.selectedBall = JsonUtil::find<std::string>(j, { "inventory", "selected" }).value_or(std::string{});
         data.money = JsonUtil::find<int>(j, { "inventory", "money" }).value_or(0);

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <random>
 #include <string>
 #include <vector>
 #include <DirectXMath.h>
@@ -14,6 +15,7 @@
 #include "entities/companion.hpp"
 #include "spawn/chestSpawn.hpp"
 #include "rules/captureRules.hpp"
+#include "rules/companionRules.hpp"
 #include "entities/captureTarget.hpp"
 #include "rules/chestRules.hpp"
 #include "rules/evRules.hpp"
@@ -22,6 +24,9 @@
 #include "state/researchMachine.hpp"
 #include "spawn/groundSpawn.hpp"
 #include "dayCycle.hpp"
+#include "habitat/habitatMap.hpp"
+#include "habitat/weatherSystem.hpp"
+#include "spawn/wildSpawn.hpp"
 #include "state/inventory.hpp"
 #include "entities/player.hpp"
 #include "entities/pokeball.hpp"
@@ -47,6 +52,7 @@ struct Scene {
     static constexpr size_t MAX_BALLS = 12;
     static constexpr float MAX_SUBSTEP = 1.0f / 120.0f; // paso máximo de la física de los proyectiles
     static constexpr float NOTICE_TIME = 2.0f;
+    static constexpr const char* CLEAR_SKY = "Despejado";
 
     Physics::World world;
     Player player;
@@ -54,6 +60,8 @@ struct Scene {
     std::array<CaptureTarget, TARGET_COUNT> targets = { CaptureTarget(0), CaptureTarget(1), CaptureTarget(2), CaptureTarget(3) };
     std::vector<Pokeball> balls;
     DayCycle dayCycle;
+    HabitatMap habitats;      // zonas de cada hábitat, generadas al empezar la partida
+    WeatherSystem weather;    // clima de cada hábitat
     Inventory inventory;
     SpawnField<Chest> chests;
     SpawnField<ResourceNode> nodes;
@@ -72,7 +80,9 @@ struct Scene {
     int lockedIndex = -1;     // objetivo al que está fijada la cámara (-1 = ninguno)
 
     // Dos paredes sencillas, más altas que el personaje: bloquean el paso, las pokéballs y la luz.
-    explicit Scene(const GameData& gameData = GameData::empty()) : m_data(&gameData) {
+    explicit Scene(const GameData& gameData = GameData::empty(), unsigned worldSeed = std::random_device{}()) : m_data(&gameData) {
+        habitats.generate(gameData, worldSeed);
+        weather.setup(gameData);
         inventory.setData(gameData);
         storage.setData(gameData);
         chests.setup(ChestSpawn::COUNT);
@@ -118,6 +128,7 @@ struct Scene {
         player.aiming = m_aiming;
         player.update(dt, input, camera.yaw(), world);
 
+        weather.update(dt);
         throwCooldown = (std::max)(0.0f, throwCooldown - dt);
         noticeTime = (std::max)(0.0f, noticeTime - dt);
         if (m_aiming && input.throwBall && throwCooldown <= 0.0f) throwBall();
@@ -187,6 +198,8 @@ struct Scene {
             s.missingPos = m_missingPos;
         }
         s.interactPos = interactionAnchor();
+        s.locationText = locationText();
+        if (const OwnedPokemon* lead = storage.active()) s.companionMode = CompanionRules::label(lead->mode);
         addNameTags(s);
         for (size_t i = 0; i < storage.team().size(); ++i) {
             const OwnedPokemon& owned = storage.team()[i];
@@ -222,19 +235,29 @@ struct Scene {
     }
 
     private:
+    // "Pradera · Arcoíris": hábitat que más pesa donde está el jugador y el clima más fuerte.
+    std::string locationText() const {
+        const WildSpawn::Context context = spawnContext(player.body.position.x, player.body.position.z);
+        if (context.habitats.empty()) return {};
+        const int habitat = static_cast<int>(std::max_element(context.habitats.begin(), context.habitats.end()) - context.habitats.begin());
+        const Weather* current = context.weather.empty() ? nullptr : m_data->weather(context.weather.front().weatherId);
+        return m_data->habitats[habitat].name + " · " + (current ? current->name : CLEAR_SKY);
+    }
+
     // Nombre y nivel sobre cada pokémon visible (los salvajes y el acompañante).
     void addNameTags(GameStatus& s) const {
         constexpr float TAG_RANGE = 30.0f;
         constexpr float TAG_LIFT = 0.35f;
-        const auto add = [&](int speciesId, int level, bool shiny, const DirectX::XMFLOAT3& head) {
+        const auto add = [&](int speciesId, int level, bool shiny, const DirectX::XMFLOAT3& head, float hp = 1.0f) {
             const PokemonSpecies* species = m_data->speciesById(speciesId);
             const float dx = head.x - player.body.position.x, dz = head.z - player.body.position.z;
             if (species && dx * dx + dz * dz <= TAG_RANGE * TAG_RANGE) {
-                s.nameTags.push_back({ { head.x, head.y + TAG_LIFT, head.z }, (shiny ? "* " : "") + species->name + "  Nv. " + std::to_string(level), shiny });
+                s.nameTags.push_back({ { head.x, head.y + TAG_LIFT, head.z }, (shiny ? "* " : "") + species->name + "  Nv. " + std::to_string(level) +
+                    (hp < 1.0f ? "  PS " + std::to_string(static_cast<int>(std::ceil(hp * 100.0f))) + "%" : std::string()), shiny });
             }
         };
         for (const CaptureTarget& target : targets) {
-            if (target.hittable()) add(target.speciesId(), target.level(), target.shiny(), { target.body.position.x, target.body.position.y + CaptureTarget::SIZE, target.body.position.z });
+            if (target.hittable()) add(target.speciesId(), target.level(), target.shiny(), { target.body.position.x, target.body.position.y + CaptureTarget::SIZE, target.body.position.z }, target.hpFraction());
         }
         if (companion.active() && !companion.changing() && storage.active()) {
             const OwnedPokemon& lead = *storage.active();
@@ -266,7 +289,7 @@ struct Scene {
 
     float chancePercent(const CaptureTarget& t, float ballMultiplier) const {
         const PokemonSpecies* species = m_data->speciesById(t.speciesId());
-        const float base = species ? CaptureRules::basePercent(species->catchRate, t.level(), progress.level()) : 0.0f;
+        const float base = species ? CaptureRules::basePercent(species->catchRate, t.level(), progress.level()) * CaptureRules::hpFactor(t.hpFraction()) : 0.0f;
         return CaptureRules::percent(base, isBehind(t), player.crouched(), ballMultiplier);
     }
 
@@ -305,9 +328,18 @@ struct Scene {
         }
     }
 
-    // Especie de un pokémon salvaje que acaba de aparecer, según el peso de cada una.
+    // Hábitat, clima y hora de un punto del mundo: lo que decide qué pokémon aparecen ahí.
+    WildSpawn::Context spawnContext(float x, float z) const {
+        WildSpawn::Context context;
+        habitats.weights(x, z, context.habitats);
+        context.weather = weather.at(context.habitats);
+        context.night = dayCycle.isNight();
+        return context;
+    }
+
+    // Especie de un pokémon salvaje que acaba de aparecer, según el hábitat, el clima y la hora de donde sale.
     void assignSpecies(CaptureTarget& target) const {
-        const int index = RandomUtil::weightedIndex(m_data->species, [](const PokemonSpecies& s) { return s.spawnWeight; });
+        const int index = WildSpawn::pick(*m_data, spawnContext(target.body.position.x, target.body.position.z));
         if (index >= 0) target.setSpecies(index, m_data->species[index].id, PokemonRules::rollLevel(m_data->species[index]), PokemonRules::rollShiny());
     }
 
@@ -338,7 +370,8 @@ struct Scene {
             const float dx = at.x - player.body.position.x, dz = at.z - player.body.position.z;
             return dx * dx + dz * dz <= Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
         };
-        if (species) {
+        const CompanionRules::Mode mode = lead ? lead->mode : CompanionRules::Mode::COLLECT;
+        if (species && mode == CompanionRules::Mode::COLLECT) {
             for (ResourceNode& node : nodes.entities) {
                 if (node.depleted() || !inRange(node.body.position)) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -365,15 +398,55 @@ struct Scene {
                 }
             }
         }
-        const DirectX::XMFLOAT3* goal = nodeTarget ? &nodeTarget->body.position : groundTarget ? &groundTarget->body.position : nullptr;
-        const float reach = nodeTarget ? Companion::WORK_RANGE + ResourceStyle::look(nodeTarget->typeId()).half : Companion::WORK_RANGE;
+        CaptureTarget* fightTarget = species && mode != CompanionRules::Mode::COLLECT ? fightTargetFor(mode) : nullptr;
+        if (fightTarget) best = distance2(fightTarget->body.position);
+        const DirectX::XMFLOAT3* goal = nodeTarget ? &nodeTarget->body.position : groundTarget ? &groundTarget->body.position :
+                                        fightTarget ? &fightTarget->body.position : nullptr;
+        const float reach = nodeTarget ? Companion::WORK_RANGE + ResourceStyle::look(nodeTarget->typeId()).half :
+                            fightTarget ? CompanionRules::ATTACK_RANGE : Companion::WORK_RANGE;
         const bool arrived = goal && best <= reach * reach;
         if (nodeTarget && arrived) nodeTarget->companionWorking();
         const float teamBonus = nodeTarget && arrived ? nodeTarget->teamBonus(false) : 1.0f;
-        const float power = arrived ? Companion::workPower(level, teamBonus) : 0.0f;
+        const float power = arrived ? Companion::workPower(fightTarget ? 1 : level, teamBonus) : 0.0f;
         if (!companion.update(dt, world, player.body.position, camera.yaw(), power, goal)) return;
         if (nodeTarget) workNode(*nodeTarget, false);
         else if (groundTarget) collect(*groundTarget);
+        else if (fightTarget) strike(*fightTarget);
+    }
+
+    // El salvaje más cercano al jugador (dentro del radio de búsqueda) al que el acompañante debe atacar según su modo: en captura
+    // solo mientras le quede más vida que el límite; en combate, cualquiera.
+    CaptureTarget* fightTargetFor(CompanionRules::Mode mode) {
+        CaptureTarget* best = nullptr;
+        float bestDistance = Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
+        for (CaptureTarget& target : targets) {
+            if (!target.hittable() || target.speciesIndex() < 0) continue;
+            if (mode == CompanionRules::Mode::CAPTURE && target.hpFraction() <= CompanionRules::CAPTURE_STOP_HP) continue;
+            const float dx = target.body.position.x - player.body.position.x, dz = target.body.position.z - player.body.position.z;
+            if (dx * dx + dz * dz < bestDistance) {
+                bestDistance = dx * dx + dz * dz;
+                best = &target;
+            }
+        }
+        return best;
+    }
+
+    // Un golpe del acompañante. Si derrota al salvaje, este gana experiencia (y puede subir de nivel o evolucionar).
+    void strike(CaptureTarget& target) {
+        const OwnedPokemon* lead = storage.active();
+        const PokemonSpecies* attacker = lead ? m_data->speciesById(lead->speciesId) : nullptr;
+        const PokemonSpecies* defender = m_data->speciesById(target.speciesId());
+        if (!attacker || !defender) return;
+
+        const std::string name = attacker->name;
+        const int level = lead->level;
+        if (!target.damage(CompanionRules::damageFraction(level, attacker->stats.attack, target.level(), defender->stats.defense))) return;
+
+        const int xp = PokemonRules::battleXp(target.level());
+        const PokemonStorage::XpResult result = storage.addXp(storage.activeIndex(), xp, progress.levelCap());
+        std::string text = name + "  +" + std::to_string(xp) + " PX";
+        if (result.levels > 0) text += "   ¡Nivel " + std::to_string(storage.active()->level) + "!";
+        showNotice(Notice::REWARD, std::move(text));
     }
 
     // --- Interacción (cofres y recursos) ---

@@ -1,5 +1,6 @@
 #include "renderer3D.hpp"
 #include "../../utils/graphics/d3dUtil.hpp"
+#include "../world/style/habitatStyle.hpp"
 #include "../world/style/itemStyle.hpp"
 #include "../world/style/pokemonStyle.hpp"
 #include <algorithm>
@@ -194,13 +195,29 @@ Renderer3D::Mesh Renderer3D::createMesh(ID3D11Device* device, const void* vertic
 }
 
 // Suelo en tablero: 4 vértices y 6 índices por baldosa, generado una sola vez.
-Renderer3D::Mesh Renderer3D::createFloor(ID3D11Device* device) {
+Renderer3D::Mesh Renderer3D::createFloor(ID3D11Device* device, const HabitatMap& habitats, const GameData& data) {
     constexpr float tile = 2.0f;
     constexpr int tiles = static_cast<int>(2.0f * Scene::HALF_SIZE / tile);
     static_assert(tiles * tiles * 4 <= 65535, "El suelo no cabe en índices de 16 bits");
 
     const XMFLOAT3 up = { 0.0f, 1.0f, 0.0f };
-    const XMFLOAT4 colors[2] = { { 0.25f, 0.70f, 0.25f, 1.0f }, { 0.18f, 0.55f, 0.20f, 1.0f } };
+    constexpr float CHECKER_SHADE = 0.88f; // las baldosas alternas son algo más oscuras
+    constexpr XMFLOAT3 DEFAULT_GROUND = { 0.22f, 0.62f, 0.23f };
+
+    // Color del suelo en una esquina: mezcla de los colores de los hábitats según su peso allí.
+    std::vector<XMFLOAT3> habitatColors;
+    for (const Habitat& habitat : data.habitats) habitatColors.push_back(HabitatStyle::color(habitat.name));
+    std::vector<float> weights;
+    const auto groundAt = [&](float x, float z, float shade) {
+        XMFLOAT3 color = habitatColors.empty() ? DEFAULT_GROUND : XMFLOAT3{ 0.0f, 0.0f, 0.0f };
+        habitats.weights(x, z, weights);
+        for (size_t i = 0; i < weights.size() && i < habitatColors.size(); ++i) {
+            color.x += weights[i] * habitatColors[i].x;
+            color.y += weights[i] * habitatColors[i].y;
+            color.z += weights[i] * habitatColors[i].z;
+        }
+        return XMFLOAT4{ color.x * shade, color.y * shade, color.z * shade, 1.0f };
+    };
 
     std::vector<Vertex> vertices;
     std::vector<uint16_t> indices;
@@ -213,13 +230,13 @@ Renderer3D::Mesh Renderer3D::createFloor(ID3D11Device* device) {
             const float z0 = -Scene::HALF_SIZE + row * tile;
             const float x1 = x0 + tile;
             const float z1 = z0 + tile;
-            const XMFLOAT4& color = colors[(row + col) & 1];
+            const float shade = ((row + col) & 1) ? CHECKER_SHADE : 1.0f;
 
             const int first = static_cast<int>(vertices.size());
-            vertices.push_back({ { x0, 0.0f, z0 }, up, color });
-            vertices.push_back({ { x0, 0.0f, z1 }, up, color });
-            vertices.push_back({ { x1, 0.0f, z0 }, up, color });
-            vertices.push_back({ { x1, 0.0f, z1 }, up, color });
+            vertices.push_back({ { x0, 0.0f, z0 }, up, groundAt(x0, z0, shade) });
+            vertices.push_back({ { x0, 0.0f, z1 }, up, groundAt(x0, z1, shade) });
+            vertices.push_back({ { x1, 0.0f, z0 }, up, groundAt(x1, z0, shade) });
+            vertices.push_back({ { x1, 0.0f, z1 }, up, groundAt(x1, z1, shade) });
             for (const int i : { 0, 1, 2, 2, 1, 3 }) indices.push_back(static_cast<uint16_t>(first + i));
         }
     }
@@ -459,7 +476,7 @@ void Renderer3D::init(ID3D11Device* device) {
     D3dUtil::check(device->CreateRasterizerState(&raster, &m_shadowRaster), "CreateRasterizerState (shadow)");
 
     // 5. Geometría
-    m_floor = createFloor(device);
+    m_device = device;
     m_player = createPlayer(device);
     m_cube = createCube(device);
     m_sphere = createSphere(device);
@@ -585,7 +602,7 @@ void Renderer3D::addNode(const ResourceNode& node) {
     }
 }
 
-// Objeto suelto: semiesfera blanca que brilla y late, con destellos en forma de estrella alrededor. No proyecta sombra.
+// Objeto suelto: semiesfera blanca que brilla y late. No proyecta sombra.
 void Renderer3D::addGroundItem(const GroundItem& item) {
     const XMFLOAT3& p = item.body.position;
     const float k = item.scale();
@@ -593,14 +610,6 @@ void Renderer3D::addGroundItem(const GroundItem& item) {
 
     const float r = GroundItem::RADIUS * k;
     add(m_dome, XMMatrixScaling(r, r, r) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, item.glow() }, false);
-
-    for (int i = 0; i < GroundItem::SPARKLES; ++i) {
-        XMFLOAT3 position;
-        float size, spin;
-        item.sparkle(i, position, size, spin);
-        add(m_star, XMMatrixScaling(size, size, size) * XMMatrixRotationY(spin) * XMMatrixTranslation(position.x, position.y, position.z),
-            { 1.0f, 0.97f, 0.8f, 1.0f }, false);
-    }
 }
 
 // Máquina de investigación: cuerpo metálico con una pantalla que brilla, un panel y una antena.
@@ -736,6 +745,12 @@ void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Light
 void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int width, int height) {
     if (width <= 0 || height <= 0) return;
 
+    if (!m_floorBuilt || m_floorSeed != scene.habitats.seed()) {
+        m_floor = createFloor(m_device, scene.habitats, scene.data());
+        m_floorSeed = scene.habitats.seed();
+        m_floorBuilt = true;
+    }
+
     const float aspect = static_cast<float>(width) / height;
     const float fov = scene.camera.fov();
     if (aspect != m_aspect || fov != m_fov) {
@@ -802,4 +817,5 @@ void Renderer3D::cleanup() {
     m_cube = {};
     m_player = {};
     m_floor = {};
+    m_floorBuilt = false;
 }

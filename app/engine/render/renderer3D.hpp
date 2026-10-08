@@ -69,7 +69,7 @@ class Renderer3D {
 
     static Mesh createMesh(ID3D11Device* device, const void* vertices, UINT vertexCount, UINT stride,
         const std::vector<uint16_t>& indices);
-    static Mesh createFloor(ID3D11Device* device);
+    static Mesh createFloor(ID3D11Device* device, const HabitatMap& habitats, const GameData& data);
     static Mesh createPlayer(ID3D11Device* device);
     static Mesh createCube(ID3D11Device* device);
     static Mesh createSphere(ID3D11Device* device, bool dome = false); // pokéball o, con dome, la semiesfera superior blanca
@@ -106,7 +106,10 @@ class Renderer3D {
     ComPtr<ID3D11SamplerState> m_shadowSampler;     // comparación con filtrado: bordes suaves
     ComPtr<ID3D11RasterizerState> m_shadowRaster;   // con sesgo según la pendiente
 
-    Mesh m_floor;
+    Mesh m_floor;                // suelo coloreado según los hábitats; se rehace cuando cambia el mapa
+    ID3D11Device* m_device = nullptr;
+    bool m_floorBuilt = false;
+    unsigned m_floorSeed = 0;
     Mesh m_player;
     Mesh m_cube;   // cubo unitario blanco centrado en el origen: paredes, pokémon y su morro (se tiñe al dibujar)
     Mesh m_sphere; // pokéball: mitad tintada con el color del tipo, banda oscura y mitad blanca
