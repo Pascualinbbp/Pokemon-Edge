@@ -18,7 +18,6 @@ namespace UpdateComponent {
 
         inline const char* phaseText(UpdateManager::Phase phase) {
             switch (phase) {
-                case UpdateManager::Phase::CHECKING:    return "Buscando actualizaciones...";
                 case UpdateManager::Phase::DOWNLOADING: return "Descargando actualización...";
                 case UpdateManager::Phase::EXTRACTING:  return "Descomprimiendo archivos...";
                 case UpdateManager::Phase::INSTALLING:  return "Instalando...";

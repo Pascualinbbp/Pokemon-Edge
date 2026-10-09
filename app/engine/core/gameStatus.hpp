@@ -4,6 +4,7 @@
 #include <DirectXMath.h>
 #include "../../models/gameData.hpp"
 #include "../world/habitat/habitatMap.hpp"
+#include "../world/state/exploration.hpp"
 #include "../world/state/inventory.hpp"
 
 // Avisos grandes en pantalla.
@@ -40,10 +41,10 @@ struct GameStatus {
     int missingLevel = 0;                        // nivel que exige ese recurso
     DirectX::XMFLOAT3 interactPos = {};          // dónde se dibuja la ayuda de interacción (sobre lo que se usa)
     DirectX::XMFLOAT3 missingPos = {};           // y el aviso de lo que falta (sobre el recurso)
-    std::string locationText;                    // hábitat y clima donde está el jugador
     const HabitatMap* habitatMap = nullptr;      // mapa de hábitats (para el minimapa)
     float playerX = 0.0f, playerZ = 0.0f, playerYaw = 0.0f;
-    std::vector<DirectX::XMFLOAT2> wildDots;     // pokémon salvajes cercanos (x, z) para el minimapa
+    const Exploration* exploration = nullptr;    // lo explorado (mapa grande)
+    std::vector<DirectX::XMFLOAT4> mapBlocks;    // construcciones fijas (x, z, semilado x, semilado z) para los mapas
     const std::string* habitatName = nullptr;    // hábitat dominante donde está el jugador
     const std::string* weatherName = nullptr;    // clima más fuerte donde está el jugador (nullptr = despejado)
     float dayAngle = 0.0f;                       // posición del sol: 0..π de día, π..2π de noche

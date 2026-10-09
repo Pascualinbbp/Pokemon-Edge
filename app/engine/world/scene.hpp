@@ -28,6 +28,7 @@
 #include "habitat/weatherSystem.hpp"
 #include "spawn/wildSpawn.hpp"
 #include "spawn/wildField.hpp"
+#include "state/exploration.hpp"
 #include "state/inventory.hpp"
 #include "entities/player.hpp"
 #include "entities/pokeball.hpp"
@@ -52,7 +53,7 @@ struct Scene {
     static constexpr size_t MAX_BALLS = 12;
     static constexpr float MAX_SUBSTEP = 1.0f / 120.0f; // paso máximo de la física de los proyectiles
     static constexpr float NOTICE_TIME = 2.0f;
-    static constexpr const char* CLEAR_SKY = "Despejado";
+    static constexpr float PROP_RANGE = 40.0f;         // solo los nodos tan cerca del jugador cuentan como sólidos
 
     Physics::World world;
     Player player;
@@ -64,7 +65,8 @@ struct Scene {
     WeatherSystem weather;    // clima de cada hábitat
     Inventory inventory;
     SpawnField<Chest> chests;
-    SpawnField<ResourceNode> nodes;
+    std::vector<ResourceNode> nodes; // materiales de recolección, colocados al generar el mundo
+    Exploration exploration;  // lo que el jugador ha explorado (el mapa grande lo muestra)
     SpawnField<GroundItem> groundItems;
     PokemonStorage storage;   // equipo (6) y PC
     PlayerProgress progress;  // nivel, experiencia y medallas del jugador
@@ -86,12 +88,12 @@ struct Scene {
         inventory.setData(gameData);
         storage.setData(gameData);
         chests.setup(ChestSpawn::COUNT);
-        nodes.setup(ResourceSpawn::COUNT);
         groundItems.setup(GroundSpawn::COUNT);
         world.obstacles = {
             { {  6.0f, 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
             { { -7.0f, 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
         };
+        nodes = ResourceSpawn::generate(gameData, habitats, worldSeed, world.obstacles);
     }
 
     // Devuelve true si hay que pausar el juego (ESC fuera del modo lanzamiento).
@@ -128,7 +130,7 @@ struct Scene {
         for (const CaptureTarget* target : wild.loaded()) if (target->hittable()) world.creatures.push_back(target->solid());
         world.props.clear();
         for (const Chest& chest : chests.entities) if (chest.closed()) world.props.push_back(chest.solid());
-        for (const ResourceNode& node : nodes.entities) if (!node.depleted()) world.props.push_back(node.solid());
+        for (const ResourceNode& node : nodes) if (!node.depleted() && nearPlayer(node.body.position, PROP_RANGE)) world.props.push_back(node.solid());
         world.props.push_back(machine.solid());
 
         player.aiming = m_aiming;
@@ -144,9 +146,8 @@ struct Scene {
         chests.update(dt, ChestSpawn::DELAY,
             [&](Chest& chest) { world.step(chest.body, dt); chest.update(dt); },
             [&](int spot) { return ChestSpawn::make(*m_data, spot); });
-        nodes.update(dt, ResourceSpawn::DELAY,
-            [&](ResourceNode& node) { world.step(node.body, dt); node.update(dt); },
-            [&](int spot) { return ResourceSpawn::make(*m_data, spot); });
+        for (ResourceNode& node : nodes) node.update(dt);
+        exploration.reveal(player.body.position.x, player.body.position.z);
         groundItems.update(dt, GroundSpawn::DELAY,
             [&](GroundItem& item) { world.step(item.body, dt); item.update(dt); },
             [&](int spot) { return GroundSpawn::make(*m_data, spot); });
@@ -203,11 +204,13 @@ struct Scene {
         s.interactPos = interactionAnchor();
         fillLocation(s);
         s.habitatMap = &habitats;
+        s.exploration = &exploration;
+        for (const Physics::World::Box& wall : world.obstacles) s.mapBlocks.push_back({ wall.center.x, wall.center.z, wall.half.x, wall.half.z });
+        s.mapBlocks.push_back({ ResearchMachine::POSITION.x, ResearchMachine::POSITION.z, ResearchMachine::WIDTH * 0.5f, ResearchMachine::DEPTH * 0.5f });
         s.playerX = player.body.position.x;
         s.playerZ = player.body.position.z;
         s.playerYaw = camera.yaw();
         s.dayAngle = dayCycle.sunAngle();
-        for (const CaptureTarget* target : wild.loaded()) if (target->hittable()) s.wildDots.push_back({ target->body.position.x, target->body.position.z });
         if (const OwnedPokemon* lead = storage.active()) s.companionMode = CompanionRules::label(lead->mode);
         addNameTags(s);
         for (size_t i = 0; i < storage.team().size(); ++i) {
@@ -221,7 +224,7 @@ struct Scene {
             s.interactVerb = CHEST_VERB;
             s.interactTarget = &m_data->chests[chests.entities[m_interaction.index].typeIndex()].name;
         } else if (m_interaction.kind == Interaction::NODE) {
-            const ResourceNode& node = nodes.entities[m_interaction.index];
+            const ResourceNode& node = nodes[m_interaction.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
             const Skill* skill = node.growing() ? m_data->skill(type.skillId) : nullptr;
             s.interactVerb = skill ? skill->name.c_str() : type.action.c_str();
@@ -252,7 +255,6 @@ struct Scene {
         const Weather* current = context.weather.empty() ? nullptr : m_data->weather(context.weather.front().weatherId);
         s.habitatName = &m_data->habitats[habitat].name;
         s.weatherName = current ? &current->name : nullptr;
-        s.locationText = *s.habitatName + " · " + (current ? current->name : CLEAR_SKY);
     }
 
     // Nombre y nivel sobre cada pokémon visible (los salvajes y el acompañante).
@@ -276,12 +278,17 @@ struct Scene {
         }
     }
 
+    bool nearPlayer(const DirectX::XMFLOAT3& at, float range) const {
+        const float dx = at.x - player.body.position.x, dz = at.z - player.body.position.z;
+        return dx * dx + dz * dz <= range * range;
+    }
+
     // Punto del mundo sobre lo que se interactúa, donde se dibuja la ayuda de cómo hacerlo.
     DirectX::XMFLOAT3 interactionAnchor() const {
         const auto above = [](const Physics::Body& body, float height) { return DirectX::XMFLOAT3{ body.position.x, body.position.y + height, body.position.z }; };
         switch (m_interaction.kind) {
             case Interaction::CHEST:   return above(chests.entities[m_interaction.index].body, Chest::HEIGHT + 0.5f);
-            case Interaction::NODE:    return nodeAnchor(nodes.entities[m_interaction.index]);
+            case Interaction::NODE:    return nodeAnchor(nodes[m_interaction.index]);
             case Interaction::GROUND:  return above(groundItems.entities[m_interaction.index].body, 0.9f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
             default:                   return {};
@@ -383,7 +390,7 @@ struct Scene {
         };
         const CompanionRules::Mode mode = lead ? lead->mode : CompanionRules::Mode::COLLECT;
         if (species && mode == CompanionRules::Mode::COLLECT) {
-            for (ResourceNode& node : nodes.entities) {
+            for (ResourceNode& node : nodes) {
                 if (node.depleted() || !inRange(node.body.position)) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
                 const int skillLevel = species->levelIn(type.skillId);
@@ -496,8 +503,8 @@ struct Scene {
             best = d2;
             m_interaction = { Interaction::MACHINE, 0 };
         }
-        if (const int i = nearestIn(nodes.entities, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) {
-            const ResourceNode& node = nodes.entities[i];
+        if (const int i = nearestIn(nodes, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) {
+            const ResourceNode& node = nodes[i];
             if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
             else {
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -513,7 +520,7 @@ struct Scene {
         else if (m_interaction.kind == Interaction::GROUND) collect(groundItems.entities[m_interaction.index]);
         else if (m_interaction.kind == Interaction::MACHINE) researchRequested = true;
         else if (m_interaction.kind == Interaction::NODE) {
-            ResourceNode& node = nodes.entities[m_interaction.index];
+            ResourceNode& node = nodes[m_interaction.index];
             const bool tool = node.growing() || !node.plant();
             workNode(node, true, tool ? inventory.skillSpeed(m_data->nodes[node.typeIndex()].skillId) : 1.0f);
         }
@@ -537,7 +544,7 @@ struct Scene {
 
     // Un paso de trabajo en el nodo (riego o golpe); al agotarlo da su material.
     void workNode(ResourceNode& node, bool byPlayer, float speed = 1.0f) {
-        if (!node.work(byPlayer, speed) || !node.depleted()) return;
+        if (!node.work(byPlayer, speed) || !node.takeHarvest()) return;
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
         if (const Item* item = m_data->materialItem(type.materialId)) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
         gainXp(Xp::GATHER);

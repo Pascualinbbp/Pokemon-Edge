@@ -46,6 +46,7 @@ namespace {
 
     // Mapa de sombras: una proyección ortográfica fija que cubre todo el mundo (así las sombras no "nadan"
     // al moverse el jugador) vista desde la dirección de la luz activa.
+    constexpr float kNodeDrawRange = 90.0f; // los materiales de recolección más lejos no se dibujan
     constexpr UINT kShadowMapSize = 3072;
     constexpr float kShadowHalfExtent = 92.0f; // cubre la diagonal del mundo (128 x 128)
     constexpr float kLightDistance = 140.0f;
@@ -541,7 +542,10 @@ void Renderer3D::collect(const Scene& scene) {
     }
 
     for (const Chest& chest : scene.chests.entities) addChest(chest);
-    for (const ResourceNode& node : scene.nodes.entities) addNode(node);
+    for (const ResourceNode& node : scene.nodes) {
+        const float dx = node.body.position.x - p.x, dz = node.body.position.z - p.z;
+        if (dx * dx + dz * dz <= kNodeDrawRange * kNodeDrawRange) addNode(node);
+    }
     for (const GroundItem& item : scene.groundItems.entities) addGroundItem(item);
     addMachine();
 
@@ -559,47 +563,78 @@ void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, int speci
         XMMatrixTranslation(c.x + std::sin(yaw) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(yaw) * size * 0.5f), kNoseTint);
 }
 
-// Nodo de recolección: árbol (tronco y copa) o roca (bloques irregulares, con vetas si es mena). Se sacude al golpearlo.
+// Nodo de recolección: árbol (tronco y copa), roca (bloques irregulares, con vetas si es mena) o arbusto. Se sacude al golpearlo.
+// Nunca desaparece: un árbol talado deja el tocón y vuelve a crecer, una roca o mena regenera su mineral y un arbusto
+// recogido se queda sin frutos hasta que le vuelven a crecer.
 void Renderer3D::addNode(const ResourceNode& node) {
     const ResourceStyle::Look look = ResourceStyle::look(node.typeId());
     const XMFLOAT3& p = node.body.position;
-    const float s = node.scale();
-    const XMMATRIX place = XMMatrixTranslation(node.shakeOffset(), 0.0f, 0.0f) * XMMatrixScaling(s, s, s) *
-                           XMMatrixRotationY(node.yaw()) * XMMatrixTranslation(p.x, p.y, p.z);
+    const float g = node.growth();
+    const XMMATRIX base = XMMatrixTranslation(node.shakeOffset(), 0.0f, 0.0f) * XMMatrixRotationY(node.yaw()) * XMMatrixTranslation(p.x, p.y, p.z);
 
-    // Bloque (tamaño, giro, posición local, color, brillo).
-    const auto part = [&](const XMFLOAT3& size, float yaw, const XMFLOAT3& at, const XMFLOAT3& color, float glow) {
-        add(m_cube, XMMatrixScaling(size.x, size.y, size.z) * XMMatrixRotationY(yaw) * XMMatrixTranslation(at.x, at.y, at.z) * place,
+    // Bloque (tamaño, giro, posición local, color, brillo) bajo una transformación de grupo.
+    const auto draw = [&](const XMMATRIX& group, const XMFLOAT3& size, float yaw, const XMFLOAT3& at, const XMFLOAT3& color, float glow) {
+        add(m_cube, XMMatrixScaling(size.x, size.y, size.z) * XMMatrixRotationY(yaw) * XMMatrixTranslation(at.x, at.y, at.z) * group,
             { color.x, color.y, color.z, glow });
     };
+    const auto part = [&](const XMFLOAT3& size, float yaw, const XMFLOAT3& at, const XMFLOAT3& color, float glow) { draw(base, size, yaw, at, color, glow); };
 
-    if (look.shape == ResourceStyle::Shape::TREE) {
-        part({ 0.5f, 1.9f, 0.5f }, 0.0f, { 0.0f, 0.95f, 0.0f }, look.body, 0.0f);
-        part({ 2.3f, 1.5f, 2.3f }, 0.0f, { 0.0f, 2.65f, 0.0f }, look.accent, 0.0f);
-        part({ 1.5f, 1.2f, 1.5f }, 0.785f, { 0.0f, 3.65f, 0.0f }, look.accent, 0.0f);
-        return;
-    }
-
-    if (look.shape == ResourceStyle::Shape::BUSH) {
-        part({ 1.0f, 0.6f, 1.0f }, 0.3f, { 0.0f, 0.3f, 0.0f }, look.body, 0.0f);
-        part({ 0.7f, 0.5f, 0.7f }, 0.9f, { 0.15f, 0.65f, -0.1f }, look.body, 0.0f);
-        if (!node.growing()) { // los frutos solo salen cuando está crecido
-            part({ 0.2f, 0.2f, 0.2f }, 0.4f, { 0.45f, 0.45f, 0.2f }, look.accent, 0.3f);
-            part({ 0.2f, 0.2f, 0.2f }, 0.2f, { -0.3f, 0.5f, 0.4f }, look.accent, 0.3f);
-            part({ 0.2f, 0.2f, 0.2f }, 0.7f, { 0.2f, 0.85f, 0.3f }, look.accent, 0.3f);
-            part({ 0.2f, 0.2f, 0.2f }, 0.1f, { -0.4f, 0.35f, -0.3f }, look.accent, 0.3f);
+    using Shape = ResourceStyle::Shape;
+    if (look.shape == Shape::TREE || look.shape == Shape::CONIFER || look.shape == Shape::PALM) {
+        constexpr float STUMP_UNTIL = 0.2f;  // hasta este avance solo se ve el tocón
+        constexpr float STUMP_HEIGHT = 0.4f;
+        if (g < STUMP_UNTIL) {
+            part({ 0.55f, STUMP_HEIGHT, 0.55f }, 0.0f, { 0.0f, STUMP_HEIGHT * 0.5f, 0.0f }, look.body, 0.0f);
+            part({ 0.4f, 0.03f, 0.4f }, 0.0f, { 0.0f, STUMP_HEIGHT + 0.01f, 0.0f }, { look.body.x * 1.35f, look.body.y * 1.3f, look.body.z * 1.2f }, 0.0f);
+            return;
+        }
+        const float k = 0.25f + 0.75f * (g - STUMP_UNTIL) / (1.0f - STUMP_UNTIL); // el árbol joven crece entero desde el tocón
+        const XMMATRIX tree = XMMatrixScaling(k, k, k) * base;
+        if (look.shape == Shape::CONIFER) {
+            draw(tree, { 0.45f, 1.5f, 0.45f }, 0.0f, { 0.0f, 0.75f, 0.0f }, look.body, 0.0f);
+            draw(tree, { 2.4f, 1.0f, 2.4f }, 0.0f, { 0.0f, 1.7f, 0.0f }, look.accent, 0.0f);
+            draw(tree, { 1.7f, 1.0f, 1.7f }, 0.4f, { 0.0f, 2.55f, 0.0f }, look.accent, 0.0f);
+            draw(tree, { 1.0f, 1.0f, 1.0f }, 0.8f, { 0.0f, 3.4f, 0.0f }, look.accent, 0.0f);
+        } else if (look.shape == Shape::PALM) {
+            draw(tree, { 0.35f, 2.9f, 0.35f }, 0.0f, { 0.0f, 1.45f, 0.0f }, look.body, 0.0f);
+            draw(tree, { 2.6f, 0.2f, 0.6f }, 0.0f, { 0.0f, 3.0f, 0.0f }, look.accent, 0.0f);
+            draw(tree, { 0.6f, 0.2f, 2.6f }, 0.0f, { 0.0f, 3.05f, 0.0f }, look.accent, 0.0f);
+            draw(tree, { 2.2f, 0.2f, 0.5f }, 0.785f, { 0.0f, 3.1f, 0.0f }, look.accent, 0.0f);
+            draw(tree, { 0.5f, 0.2f, 2.2f }, 0.785f, { 0.0f, 3.15f, 0.0f }, look.accent, 0.0f);
+        } else {
+            draw(tree, { 0.5f, 1.9f, 0.5f }, 0.0f, { 0.0f, 0.95f, 0.0f }, look.body, 0.0f);
+            draw(tree, { 2.3f, 1.5f, 2.3f }, 0.0f, { 0.0f, 2.65f, 0.0f }, look.accent, 0.0f);
+            draw(tree, { 1.5f, 1.2f, 1.5f }, 0.785f, { 0.0f, 3.65f, 0.0f }, look.accent, 0.0f);
         }
         return;
     }
 
-    part({ 1.6f, 0.95f, 1.4f }, 0.4f, { 0.0f, 0.475f, 0.0f }, look.body, 0.0f);
-    part({ 0.9f, 0.75f, 0.9f }, 1.1f, { 0.5f, 0.375f, -0.3f }, look.body, 0.0f);
-    part({ 0.7f, 0.6f, 0.7f }, 0.3f, { -0.55f, 0.3f, 0.4f }, look.body, 0.0f);
-    if (look.specks) {
-        part({ 0.3f, 0.3f, 0.3f }, 0.6f, { 0.2f, 0.95f, 0.1f }, look.accent, 0.35f);
-        part({ 0.28f, 0.28f, 0.28f }, 0.2f, { 0.85f, 0.45f, 0.1f }, look.accent, 0.35f);
-        part({ 0.3f, 0.3f, 0.3f }, 0.9f, { -0.15f, 0.5f, 0.7f }, look.accent, 0.35f);
-        part({ 0.26f, 0.26f, 0.26f }, 0.4f, { 0.5f, 0.75f, -0.3f }, look.accent, 0.35f);
+    if (look.shape == Shape::BUSH) {
+        part({ 1.0f, 0.6f, 1.0f }, 0.3f, { 0.0f, 0.3f, 0.0f }, look.body, 0.0f);
+        part({ 0.7f, 0.5f, 0.7f }, 0.9f, { 0.15f, 0.65f, -0.1f }, look.body, 0.0f);
+        const float fruit = std::clamp((g - 0.35f) / 0.65f, 0.0f, 1.0f); // los frutos van saliendo y creciendo
+        if (fruit > 0.0f) {
+            const float f = 0.2f * fruit;
+            part({ f, f, f }, 0.4f, { 0.45f, 0.45f, 0.2f }, look.accent, 0.3f);
+            part({ f, f, f }, 0.2f, { -0.3f, 0.5f, 0.4f }, look.accent, 0.3f);
+            part({ f, f, f }, 0.7f, { 0.2f, 0.85f, 0.3f }, look.accent, 0.3f);
+            part({ f, f, f }, 0.1f, { -0.4f, 0.35f, -0.3f }, look.accent, 0.3f);
+        }
+        return;
+    }
+
+    // Roca: el cuerpo es una roca común (que se regenera entera) o la base de una mena (que regenera sus vetas).
+    const float body = look.specks ? 1.0f : 0.3f + 0.7f * g;
+    const XMMATRIX rock = XMMatrixScaling(body, body, body) * base;
+    draw(rock, { 1.6f, 0.95f, 1.4f }, 0.4f, { 0.0f, 0.475f, 0.0f }, look.body, 0.0f);
+    draw(rock, { 0.9f, 0.75f, 0.9f }, 1.1f, { 0.5f, 0.375f, -0.3f }, look.body, 0.0f);
+    draw(rock, { 0.7f, 0.6f, 0.7f }, 0.3f, { -0.55f, 0.3f, 0.4f }, look.body, 0.0f);
+    if (look.specks && g > 0.05f) {
+        const float v = g; // vetas: crecen con el avance
+        part({ 0.3f * v, 0.3f * v, 0.3f * v }, 0.6f, { 0.2f, 0.95f, 0.1f }, look.accent, 0.35f);
+        part({ 0.28f * v, 0.28f * v, 0.28f * v }, 0.2f, { 0.85f, 0.45f, 0.1f }, look.accent, 0.35f);
+        part({ 0.3f * v, 0.3f * v, 0.3f * v }, 0.9f, { -0.15f, 0.5f, 0.7f }, look.accent, 0.35f);
+        part({ 0.26f * v, 0.26f * v, 0.26f * v }, 0.4f, { 0.5f, 0.75f, -0.3f }, look.accent, 0.35f);
     }
 }
 

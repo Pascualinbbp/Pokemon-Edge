@@ -18,9 +18,9 @@ class GameEngine {
     }
 
     // Datos de juego de la base de datos (pokéballs, objetos, cofres...): con ellos se crea cada partida.
+    // El mundo no se genera aquí sino al empezar o cargar una partida (newGame / applySave).
     void setData(GameData data) {
         m_data = std::move(data);
-        m_scene = Scene(m_data);
     }
 
     void newGame() {
@@ -31,6 +31,7 @@ class GameEngine {
         m_scene = save.worldSeed != 0 ? Scene(m_data, save.worldSeed) : Scene(m_data);
         m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
         m_scene.dayCycle.setTime(save.worldTime);
+        m_scene.exploration.restore(save.explored);
         m_scene.inventory.restore(save.items, save.selectedBall, save.money);
         m_scene.storage.restore(save.team, save.pc, save.autoReleaseRank, save.activeIndex);
         m_scene.progress.restore(save.playerLevel, save.playerXp, save.badges);
@@ -42,6 +43,7 @@ class GameEngine {
         save.playerPosition = { p.x, p.y, p.z };
         save.worldTime = m_scene.dayCycle.time();
         save.worldSeed = m_scene.habitats.seed();
+        save.explored = m_scene.exploration.store();
         m_scene.inventory.store(save.items, save.selectedBall, save.money);
         m_scene.storage.store(save.team, save.pc);
         save.autoReleaseRank = m_scene.storage.autoRankIndex();

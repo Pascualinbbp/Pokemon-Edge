@@ -205,10 +205,17 @@ namespace HudComponent {
 
         // Hábitat y clima de donde está el jugador y modo del pokémon que lo acompaña (arriba a la izquierda).
         inline void drawLocation(ImDrawList* dl, const GameStatus& status) {
-            const ImVec2 at(MinimapComponent::center().x - 84.0f, MinimapComponent::bottom() + 4.0f);
-            if (!status.locationText.empty()) dl->AddText(at, IM_COL32(255, 255, 255, 235), status.locationText.c_str());
+            const ImVec2 at(MinimapComponent::center().x - 84.0f, MinimapComponent::bottom() + 2.0f);
+            float y = at.y;
+            if (status.habitatName) {
+                const float size = ImGui::GetFontSize() * 1.2f;
+                dl->AddText(ImGui::GetFont(), size, ImVec2(at.x + 1.0f, y + 1.0f), IM_COL32(0, 0, 0, 160), status.habitatName->c_str());
+                dl->AddText(ImGui::GetFont(), size, ImVec2(at.x, y), IM_COL32(255, 255, 255, 240), status.habitatName->c_str());
+                y += size + 2.0f;
+                dl->AddText(ImVec2(at.x, y), IM_COL32(190, 205, 230, 230), status.weatherName ? status.weatherName->c_str() : "Despejado");
+                y += ImGui::GetFontSize() + 2.0f;
+            }
             if (status.companionMode) {
-                const float y = at.y + (status.locationText.empty() ? 0.0f : ImGui::GetFontSize() + 4.0f);
                 char text[48];
                 std::snprintf(text, sizeof(text), "Modo: %s", status.companionMode);
                 dl->AddText(ImVec2(at.x, y), IM_COL32(255, 215, 90, 235), text);
@@ -283,7 +290,7 @@ namespace HudComponent {
     // La pausa con ESC la gestiona la escena (ESC sale primero del modo lanzamiento).
     // saving: opacidad del aviso de autoguardado (0 = oculto, 1 = totalmente visible).
     inline void render(InputDevice device, const GameStatus& status, float saving) {
-        ImGui::SetCursorPos(ImVec2(10.0f, 10.0f));
+        ImGui::SetCursorPos(ImVec2(10.0f, ImGui::GetIO().DisplaySize.y - 28.0f));
         ImGui::Text("FPS: %.0f", ImGui::GetIO().Framerate);
 
         ImDrawList* dl = ImGui::GetWindowDrawList();

@@ -8,7 +8,7 @@
 class AppManager {
     public:
     void start() {
-        UpdateManager::startInBackground();
+        UpdateManager::startIfAvailable(); // lo primero: si hay una versión nueva, la ventana solo mostrará la actualización
         DatabaseManager::init();
         SaveManager::init();
 

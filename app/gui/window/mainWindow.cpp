@@ -12,6 +12,7 @@
 #include "../game/hudComponent.hpp"
 #include "../menus/pauseComponent.hpp"
 #include "../menus/controlsComponent.hpp"
+#include "../menus/mapComponent.hpp"
 #include "../game/inventoryComponent.hpp"
 #include "../game/pokemonComponent.hpp"
 #include "../game/researchComponent.hpp"
@@ -214,6 +215,7 @@ void MainWindow::run() {
     TimeUtil::FrameTimer timer;
     int redrawFrames = 2; // frames pendientes de dibujar cuando no hay animación continua
     bool wasPlaying = false;
+    if (UpdateManager::active()) g_state = GameState::UPDATING; // con una actualización pendiente, es lo único que se muestra
     InputDevice shownDevice = InputHandler::activeDevice();
 
     const ImTextureID logoId = (ImTextureID)(intptr_t)g_logo.srv.Get();
@@ -229,12 +231,6 @@ void MainWindow::run() {
         if (done) break;
 
         InputHandler::refreshDevices();
-
-        // Una actualización en curso (fuera de la partida) toma la pantalla hasta que termine.
-        if ((g_state == GameState::TITLE_SCREEN || g_state == GameState::MAIN_MENU) && UpdateManager::active()) {
-            g_state = GameState::UPDATING;
-            redrawFrames = 2;
-        }
 
         // Al entrar/salir del juego cambia quién lee el mando: el juego (InputHandler) o la interfaz (GuiInput).
         const bool playing = g_state == GameState::PLAYING;
@@ -352,6 +348,9 @@ void MainWindow::run() {
                 break;
             case GameState::PAUSED:
                 PauseComponent::render(g_state);
+                break;
+            case GameState::MAP:
+                MapComponent::render(g_state, engine.status());
                 break;
             case GameState::CONTROLS:
                 ControlsComponent::render(g_state, InputHandler::activeDevice());

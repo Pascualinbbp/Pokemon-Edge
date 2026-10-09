@@ -14,7 +14,7 @@ namespace PauseComponent {
         inline constexpr float ROW_HEIGHT = 84.0f;
         inline constexpr float ROW_GAP = 12.0f;
 
-        enum class Icon { BAG, POKEBALL, CONTROLS, EXIT };
+        enum class Icon { BAG, POKEBALL, MAP, CONTROLS, EXIT };
 
         inline void drawIcon(ImDrawList* dl, const ImVec2& c, float r, Icon icon) {
             const ImU32 white = IM_COL32(255, 255, 255, 255);
@@ -25,6 +25,12 @@ namespace PauseComponent {
                     break;
                 case Icon::POKEBALL:
                     ItemIcon::ball(dl, c, r * 0.9f, { 0.90f, 0.20f, 0.20f });
+                    break;
+                case Icon::MAP:
+                    dl->AddRectFilled(ImVec2(c.x - r * 0.8f, c.y - r * 0.7f), ImVec2(c.x + r * 0.8f, c.y + r * 0.7f), white, r * 0.15f);
+                    dl->AddLine(ImVec2(c.x - r * 0.27f, c.y - r * 0.7f), ImVec2(c.x - r * 0.27f, c.y + r * 0.7f), IM_COL32(40, 40, 55, 255), 2.0f);
+                    dl->AddLine(ImVec2(c.x + r * 0.27f, c.y - r * 0.7f), ImVec2(c.x + r * 0.27f, c.y + r * 0.7f), IM_COL32(40, 40, 55, 255), 2.0f);
+                    dl->AddCircleFilled(ImVec2(c.x + r * 0.5f, c.y + r * 0.1f), r * 0.14f, IM_COL32(230, 70, 60, 255));
                     break;
                 case Icon::CONTROLS:
                     dl->AddRectFilled(ImVec2(c.x - r * 0.9f, c.y - r * 0.5f), ImVec2(c.x + r * 0.9f, c.y + r * 0.5f), white, r * 0.4f);
@@ -83,9 +89,11 @@ namespace PauseComponent {
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
         if (option(1, Icon::POKEBALL, "Pokémon", "Equipo y PC", width)) state = GameState::POKEMON;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
-        if (option(2, Icon::CONTROLS, "Controles", "Teclado y mando", width)) state = GameState::CONTROLS;
+        if (option(2, Icon::MAP, "Mapa", "Zonas exploradas y sus hábitats", width)) state = GameState::MAP;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
-        if (option(3, Icon::EXIT, "Menú principal", "Guarda la partida y sale", width)) state = GameState::MAIN_MENU;
+        if (option(3, Icon::CONTROLS, "Controles", "Teclado y mando", width)) state = GameState::CONTROLS;
+        ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
+        if (option(4, Icon::EXIT, "Menú principal", "Guarda la partida y sale", width)) state = GameState::MAIN_MENU;
 
         if (GuiInput::backPressed() || GuiInput::startPressed()) state = GameState::PLAYING;
     }

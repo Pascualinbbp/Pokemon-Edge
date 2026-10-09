@@ -7,7 +7,7 @@
 #include "imgui.h"
 #include "assetTexture.hpp"
 
-// Logos del HUD (assets/hud/): uno por clima (weather/<nombre>.png) y por hábitat (habitat/<nombre>.png), donde el nombre
+// Logos del HUD (assets/hud/): uno por clima (weather/<nombre>.png), donde el nombre
 // es el de la base de datos en minúsculas, sin tildes y con '_' en vez de espacios; y el disco de día y noche (daynight.png).
 // Se cargan la primera vez que se piden. Un nombre sin logo devuelve 0 y quien dibuja usa un círculo de reserva.
 namespace HudIcons {
@@ -46,6 +46,5 @@ namespace HudIcons {
     }
 
     inline ImTextureID weather(const std::string& name) { return detail::texture("hud/weather/" + detail::slug(name) + ".png"); }
-    inline ImTextureID habitat(const std::string& name) { return detail::texture("hud/habitat/" + detail::slug(name) + ".png"); }
     inline ImTextureID dayNight() { return detail::texture("hud/daynight.png"); }
 }

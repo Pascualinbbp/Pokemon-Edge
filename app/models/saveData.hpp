@@ -18,6 +18,7 @@ struct SaveData {
     int playerXp = 0;
     int badges = 0;
     int activeIndex = 0;              // pokémon del equipo que acompaña al jugador
+    std::string explored;             // zonas exploradas del mundo (Exploration::store); vacío = nada explorado
     int autoReleaseRank = 0;          // potencial mínimo que conserva la máquina de investigación (índice de EvRules::RANKS)
 };
 

@@ -8,6 +8,11 @@ struct WeatherChance {
     float probability = 0.0f;
 };
 
+struct ResourceChance {
+    int nodeId = -1;
+    float weight = 0.0f;
+};
+
 struct Habitat {
     int id = -1;
     std::string name;
@@ -18,7 +23,10 @@ struct Habitat {
     float maxRadius = 10.0f;
     int minWild = 2;   // pokémon salvajes por chunk
     int maxWild = 5;
+    int minNodes = 3;  // materiales de recolección por chunk
+    int maxNodes = 6;
     float minWeatherWait = 60.0f;
     float maxWeatherWait = 120.0f;
     std::vector<WeatherChance> weather;
+    std::vector<ResourceChance> resources; // qué nodos de recolección hay y con qué peso
 };

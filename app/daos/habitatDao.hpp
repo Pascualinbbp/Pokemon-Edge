@@ -10,7 +10,7 @@ class HabitatDao {
     public:
     std::vector<Habitat> findHabitats() const {
         std::vector<Habitat> habitats;
-        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, min_zones, max_zones, min_radius, max_radius, min_wild, max_wild, "
+        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, min_zones, max_zones, min_radius, max_radius, min_wild, max_wild, min_nodes, max_nodes, "
                                                          "min_weather_wait, max_weather_wait FROM habitat ORDER BY id;")) {
             Habitat habitat;
             habitat.id = DaoRow::integer(row, "id");
@@ -22,6 +22,8 @@ class HabitatDao {
             habitat.maxRadius = DaoRow::real(row, "max_radius");
             habitat.minWild = DaoRow::integer(row, "min_wild");
             habitat.maxWild = DaoRow::integer(row, "max_wild");
+            habitat.minNodes = DaoRow::integer(row, "min_nodes");
+            habitat.maxNodes = DaoRow::integer(row, "max_nodes");
             habitat.minWeatherWait = DaoRow::real(row, "min_weather_wait");
             habitat.maxWeatherWait = DaoRow::real(row, "max_weather_wait");
             habitats.push_back(std::move(habitat));
@@ -29,6 +31,11 @@ class HabitatDao {
         for (const auto& row : SqliteUtil::executeSelect("SELECT habitat_id, weather_id, probability FROM habitat_weather ORDER BY habitat_id;")) {
             for (Habitat& habitat : habitats) {
                 if (habitat.id == DaoRow::integer(row, "habitat_id")) habitat.weather.push_back({ DaoRow::integer(row, "weather_id"), DaoRow::real(row, "probability") });
+            }
+        }
+        for (const auto& row : SqliteUtil::executeSelect("SELECT habitat_id, node_id, weight FROM habitat_resource ORDER BY habitat_id;")) {
+            for (Habitat& habitat : habitats) {
+                if (habitat.id == DaoRow::integer(row, "habitat_id")) habitat.resources.push_back({ DaoRow::integer(row, "node_id"), DaoRow::real(row, "weight") });
             }
         }
         if (habitats.empty()) Logger::logError("HABITAT_DAO", "La tabla habitat no existe o está vacía (falta aplicar testing/sql/habitat.sql).");
