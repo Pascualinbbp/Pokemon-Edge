@@ -17,6 +17,10 @@ class CaptureTarget {
     static constexpr float SIZE          = 1.2f;  // arista del cubo
     static constexpr float HALF          = SIZE * 0.5f;
     static constexpr float REFILL_DELAY  = 90.0f; // segundos fuera de juego antes de que el chunk lo renueve
+    static constexpr float LEAVE_TIME    = 7.0f;  // segundos que tarda en desaparecer al agotársele el tiempo en el mundo (se aleja mientras tanto)
+    static constexpr float LEAVE_REFILL  = 20.0f; // segundos tras desaparecer hasta que su sitio puede recibir otro
+    static constexpr float LIFETIME_MIN  = 480.0f; // tiempo en el mundo (a la vista) antes de marcharse
+    static constexpr float LIFETIME_MAX  = 840.0f;
     static constexpr float APPEAR_TIME   = 1.4f;  // segundos que tarda en aparecer o desaparecer al entrar/salir del alcance
     static constexpr float SOLID_APPEAR  = 0.6f;  // a partir de este avance de aparición ya se puede golpear y es sólido
     static constexpr float WALK_SPEED    = 1.8f;  // m/s al vagar
@@ -46,6 +50,9 @@ class CaptureTarget {
         m_speciesIndex = m_speciesId = -1;
         m_shiny = false;
         m_hp = 1.0f;
+        m_leaving = false;
+        m_age = 0.0f;
+        m_lifetime = RandomUtil::range(LIFETIME_MIN, LIFETIME_MAX);
     }
 
     bool hittable() const { return m_state == State::IDLE && m_appear >= SOLID_APPEAR; }
@@ -55,8 +62,26 @@ class CaptureTarget {
 
     // Hace aparecer (show) o desaparecer el modelo poco a poco.
     void fade(float dt, bool show) {
-        m_appear = std::clamp(m_appear + (show ? dt : -dt) / APPEAR_TIME, 0.0f, 1.0f);
+        m_appear = std::clamp(m_appear + (show ? dt / APPEAR_TIME : -dt / (m_leaving ? LEAVE_TIME : APPEAR_TIME)), 0.0f, 1.0f);
+        if (m_leaving && m_appear <= 0.0f && m_state == State::IDLE) { // se ha ido del todo: su sitio queda libre para otro
+            m_state = State::HIDDEN;
+            m_timer = REFILL_DELAY - LEAVE_REFILL;
+            m_leaving = false;
+        }
     }
+
+    // Cuenta el tiempo que lleva en el mundo a la vista; true cuando ya le toca marcharse.
+    bool lifetimeOver(float dt) {
+        m_age += dt;
+        return !m_leaving && m_age >= m_lifetime;
+    }
+
+    // Se marcha andando en sentido contrario al jugador mientras se desvanece poco a poco.
+    void leave(float fromX, float fromZ) {
+        m_leaving = true;
+        m_heading = std::atan2(body.position.x - fromX, body.position.z - fromZ);
+    }
+    bool leaving() const { return m_leaving; }
 
     // Cuenta el tiempo fuera de juego; true cuando el chunk ya puede renovarlo.
     bool refillDue(float dt) {
@@ -192,6 +217,10 @@ class CaptureTarget {
 
     // Alterna paradas y paseos en una dirección al azar; si se aleja demasiado de su punto, vuelve hacia él.
     void wander(float dt) {
+        if (m_leaving) { // se aleja sin pararse
+            m_walking = true;
+            m_wanderTimer = 1.0f;
+        }
         m_wanderTimer -= dt;
         if (m_wanderTimer <= 0.0f) {
             const float homeDx = m_home.x - body.position.x, homeDz = m_home.y - body.position.z;
@@ -204,14 +233,18 @@ class CaptureTarget {
         const float delta = DirectX::XMScalarModAngle(m_heading - m_yaw);
         if (m_walking) m_yaw += (std::clamp)(delta, -TURN_SPEED * dt, TURN_SPEED * dt);
         const bool go = m_walking && std::fabs(delta) < 0.5f;
-        body.velocity.x = go ? std::sin(m_yaw) * WALK_SPEED : 0.0f;
-        body.velocity.z = go ? std::cos(m_yaw) * WALK_SPEED : 0.0f;
+        const float speed = m_leaving ? WALK_SPEED * 1.3f : WALK_SPEED;
+        body.velocity.x = go ? std::sin(m_yaw) * speed : 0.0f;
+        body.velocity.z = go ? std::cos(m_yaw) * speed : 0.0f;
     }
 
     State m_state = State::IDLE;
     CaptureSequence m_sequence;
     float m_timer = 0.0f;
     DirectX::XMFLOAT2 m_home = {};  // punto de aparición (x, z)
+    bool m_leaving = false;
+    float m_age = 0.0f;
+    float m_lifetime = LIFETIME_MIN;
     float m_appear = 0.0f;          // 0 = no se ve, 1 = del todo presente
     float m_yaw = 0.0f;
     float m_heading = 0.0f;   // hacia dónde quiere caminar

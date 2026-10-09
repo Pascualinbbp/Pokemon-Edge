@@ -21,6 +21,11 @@ struct Habitat {
     int maxZones = 1;
     float minRadius = 10.0f;
     float maxRadius = 10.0f;
+    float minStretch = 0.7f; // alargamiento de sus zonas (1 = redondas)
+    float maxStretch = 1.5f;
+    int minChests = 0;       // cofres a la vez por zona (se sortea cada día)
+    int maxChests = 2;
+    int dailyChests = 2;     // tope de cofres que genera por día
     int minWild = 2;   // pokémon salvajes por chunk
     int maxWild = 5;
     int minNodes = 3;  // materiales de recolección por chunk

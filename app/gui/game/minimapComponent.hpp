@@ -8,16 +8,18 @@
 #include "../../engine/core/gameStatus.hpp"
 
 // Minimapa redondo arriba a la izquierda, centrado en el jugador (norte arriba): solo el terreno, las construcciones y una
-// flecha hacia donde mira. En el borde: el clima (arriba a la izquierda) y, arriba a la derecha, el disco de día y noche
+// flecha hacia donde mira. En el borde: el clima (a la izquierda) y, arriba a la derecha, el disco de día y noche
 // como una oreja: su mitad exterior asoma del círculo y el disco gira con el sol.
 namespace MinimapComponent {
     namespace detail {
-        inline constexpr float MARGIN = 14.0f;       // separación a los bordes de la pantalla
+        inline constexpr float MARGIN = 14.0f;       // separación al borde izquierdo de la pantalla
+        inline constexpr float TOP = 36.0f;          // separación arriba (deja sitio a los FPS)
         inline constexpr float RADIUS = 84.0f;       // mayor que los círculos del equipo
         inline constexpr float VIEW = 36.0f;         // metros que se ven desde el centro hasta el borde
         inline constexpr float BADGE = 20.0f;        // radio del logo del clima
         inline constexpr float EAR = 26.0f;          // radio del disco de día y noche
         inline constexpr float PI = 3.14159265f;
+        inline constexpr float EAR_ANGLE = PI * 0.25f;
         inline constexpr int ARC_STEPS = 24;
 
         // Insignia redonda con su logo (o un círculo de reserva si no hay imagen).
@@ -79,8 +81,7 @@ namespace MinimapComponent {
 
     // Centro del minimapa en pantalla (otros elementos del HUD cuelgan de él).
     inline ImVec2 center() {
-        const float reach = detail::MARGIN + detail::RADIUS + 6.0f;
-        return ImVec2(reach, reach);
+        return ImVec2(detail::RADIUS + detail::BADGE * 2.0f + detail::MARGIN, detail::TOP + detail::RADIUS + 4.0f);
     }
     inline float bottom() { return center().y + detail::RADIUS + 10.0f; }
 
@@ -93,6 +94,10 @@ namespace MinimapComponent {
         const float scale = RADIUS / VIEW;
         const float cell = Exploration::CELL * scale;
         const auto toScreen = [&](float x, float z) { return ImVec2(mid.x + (x - status.playerX) * scale, mid.y - (z - status.playerZ) * scale); };
+
+        // Disco de día y noche: su base es una cuerda cuyos extremos tocan el círculo del mapa, así que parece parte de él.
+        const float earReach = std::sqrt((RADIUS + 4.0f) * (RADIUS + 4.0f) - EAR * EAR);
+        dayNightEar(dl, ImVec2(mid.x + std::sin(EAR_ANGLE) * earReach, mid.y - std::cos(EAR_ANGLE) * earReach), EAR, EAR_ANGLE, status.dayAngle);
 
         // Fondo y terreno dentro del círculo.
         dl->AddCircleFilled(mid, RADIUS + 4.0f, IM_COL32(14, 16, 26, 235), 64);
@@ -128,10 +133,7 @@ namespace MinimapComponent {
         dl->AddTriangleFilled(tip, left, right, IM_COL32(255, 255, 255, 255));
         dl->AddTriangle(tip, left, right, IM_COL32(0, 0, 0, 200), 1.5f);
 
-        // Clima arriba a la izquierda y disco de día y noche arriba a la derecha, sobre el borde del círculo.
-        constexpr float DIAGONAL = 0.7071f;
-        const float edge = RADIUS + 6.0f;
-        badge(dl, ImVec2(mid.x - edge * DIAGONAL, mid.y - edge * DIAGONAL), BADGE, HudIcons::weather(status.weatherName ? *status.weatherName : "Sol"));
-        dayNightEar(dl, ImVec2(mid.x + (RADIUS + 3.0f) * DIAGONAL, mid.y - (RADIUS + 3.0f) * DIAGONAL), EAR, PI * 0.25f, status.dayAngle);
+        // Clima a la izquierda, pegado al borde del círculo.
+        badge(dl, ImVec2(mid.x - RADIUS - 4.0f - BADGE + 6.0f, mid.y), BADGE, HudIcons::weather(status.weatherName ? *status.weatherName : "Sol"));
     }
 }

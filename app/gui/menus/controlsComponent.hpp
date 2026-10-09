@@ -53,6 +53,7 @@ namespace ControlsComponent {
             keyRow(dl, offset(o, 420.0f, 264.0f), { "F" }, "Interactuar");
             keyRow(dl, offset(o, 600.0f, 264.0f), { "I" }, "Inventario");
             keyRow(dl, offset(o, 420.0f, 318.0f), { "R" }, "Cambiar modo del pokémon");
+            keyRow(dl, offset(o, 600.0f, 318.0f), { "M" }, "Mapa");
             mouse(dl, offset(o, 440.0f, 204.0f));
             label(dl, o.x + 504.0f, o.y + 206.0f, "Mover la cámara");
             label(dl, o.x + 504.0f, o.y + 228.0f, "Der.: apuntar · Izq.: lanzar");

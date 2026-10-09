@@ -31,10 +31,14 @@ class DayCycle {
 
     void update(float dt) {
         m_time += dt;
-        if (m_time >= CYCLE_SECONDS) m_time = std::fmod(m_time, CYCLE_SECONDS);
+        if (m_time >= CYCLE_SECONDS) {
+            m_time = std::fmod(m_time, CYCLE_SECONDS);
+            ++m_day;
+        }
     }
 
     float time() const { return m_time; }
+    int day() const { return m_day; } // días completos desde que empezó la sesión
     float sunAngle() const { return angle(); } // 0..π de día, π..2π de noche
     bool isNight() const { return m_time >= DAY_SECONDS; }
 
@@ -107,4 +111,5 @@ class DayCycle {
     static DirectX::XMFLOAT3 scale(const DirectX::XMFLOAT3& v, float s) { return { v.x * s, v.y * s, v.z * s }; }
 
     float m_time = START_TIME;
+    int m_day = 0;
 };

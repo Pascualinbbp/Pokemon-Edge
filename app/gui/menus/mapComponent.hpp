@@ -88,16 +88,16 @@ namespace MapComponent {
         inline int g_selected = -1; // hábitat elegido en la lista
     }
 
-    // ESC o el botón de volver devuelven a la pausa.
-    inline void render(GameState& state, const GameStatus& status) {
+    // ESC o el botón de volver devuelven a donde se abrió (juego o pausa).
+    inline void render(GameState& state, GameState back, const GameStatus& status) {
         using namespace detail;
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, 185));
         const ImVec2 screen = ImGui::GetIO().DisplaySize;
         ImDrawList* dl = ImGui::GetWindowDrawList();
 
-        if (GuiCards::backButton(ImVec2(MARGIN, MARGIN - 8.0f))) state = GameState::PAUSED;
+        if (GuiCards::backButton(ImVec2(MARGIN, MARGIN - 8.0f))) state = back;
         GuiCards::text(dl, ImVec2(MARGIN + 140.0f, MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), "MAPA", 1.6f);
-        if (GuiInput::backPressed()) state = GameState::PAUSED;
+        if (GuiInput::backPressed()) state = back;
         if (!status.habitatMap || !status.data || !status.exploration) return;
 
         const MapTerrain::Data& terrain = MapTerrain::get(status);

@@ -42,7 +42,7 @@ class HabitatMap {
                 Zone zone;
                 zone.habitat = h;
                 zone.radius = between(habitat.minRadius, habitat.maxRadius);
-                zone.stretch = between(0.65f, 1.55f);
+                zone.stretch = between(habitat.minStretch, (std::max)(habitat.minStretch, habitat.maxStretch));
                 const float angle = between(0.0f, 6.2831853f);
                 zone.cosA = std::cos(angle);
                 zone.sinA = std::sin(angle);

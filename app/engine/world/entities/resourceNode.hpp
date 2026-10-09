@@ -31,6 +31,35 @@ namespace ResourceStyle {
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca
         }
     }
+
+    // Cómo crece cada forma al regenerarse (growth 0..1): el árbol es un tocón hasta STUMP_UNTIL y luego crece entero; la roca
+    // común se regenera entera y la mena conserva su base (solo regenera las vetas).
+    inline constexpr float STUMP_UNTIL = 0.2f;
+    inline constexpr float STUMP_HEIGHT = 0.4f;
+    inline constexpr float STUMP_HALF = 0.3f;
+
+    inline bool isTree(Shape shape) { return shape == Shape::TREE || shape == Shape::CONIFER || shape == Shape::PALM; }
+    inline bool stump(const Look& look, float growth) { return isTree(look.shape) && growth < STUMP_UNTIL; }
+    inline float treeScale(float growth) { return 0.25f + 0.75f * (growth - STUMP_UNTIL) / (1.0f - STUMP_UNTIL); }
+    inline float rockScale(const Look& look, float growth) { return look.specks ? 1.0f : 0.3f + 0.7f * growth; }
+
+    // Semilado y altura de la hitbox según su estado: el tocón y la roca pequeña también estorban.
+    inline void hitbox(const Look& look, float growth, float& half, float& height) {
+        half = look.half;
+        height = look.height;
+        if (stump(look, growth)) {
+            half = STUMP_HALF;
+            height = STUMP_HEIGHT;
+        } else if (isTree(look.shape)) {
+            const float k = treeScale(growth);
+            half *= k;
+            height *= k;
+        } else if (look.shape == Shape::ROCK) {
+            const float k = rockScale(look, growth);
+            half *= k;
+            height *= k;
+        }
+    }
 }
 
 // Nodo de recolección del mundo. Nunca desaparece: al agotarse vuelve a estar listo con el tiempo.
@@ -111,10 +140,11 @@ class ResourceNode {
     // Sacudida lateral tras un golpe (con amortiguación).
     float shakeOffset() const { return std::sin(m_shake * 55.0f) * SHAKE_AMOUNT * (m_shake / SHAKE_TIME); }
 
-    // Sólido mientras esté entero (un tocón o una roca agotada se pisan).
+    // Siempre sólido, también el tocón o la roca que se está regenerando (con el tamaño que tienen en ese momento).
     Physics::World::Box solid() const {
-        const ResourceStyle::Look look = ResourceStyle::look(m_typeId);
-        return { { body.position.x, body.position.y + look.height * 0.5f, body.position.z }, { look.half, look.height * 0.5f, look.half } };
+        float half, height;
+        ResourceStyle::hitbox(ResourceStyle::look(m_typeId), m_growth, half, height);
+        return { { body.position.x, body.position.y + height * 0.5f, body.position.z }, { half, height * 0.5f, half } };
     }
 
     private:

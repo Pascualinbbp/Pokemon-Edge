@@ -581,14 +581,13 @@ void Renderer3D::addNode(const ResourceNode& node) {
 
     using Shape = ResourceStyle::Shape;
     if (look.shape == Shape::TREE || look.shape == Shape::CONIFER || look.shape == Shape::PALM) {
-        constexpr float STUMP_UNTIL = 0.2f;  // hasta este avance solo se ve el tocón
-        constexpr float STUMP_HEIGHT = 0.4f;
-        if (g < STUMP_UNTIL) {
+        using ResourceStyle::STUMP_HEIGHT;
+        if (ResourceStyle::stump(look, g)) {
             part({ 0.55f, STUMP_HEIGHT, 0.55f }, 0.0f, { 0.0f, STUMP_HEIGHT * 0.5f, 0.0f }, look.body, 0.0f);
             part({ 0.4f, 0.03f, 0.4f }, 0.0f, { 0.0f, STUMP_HEIGHT + 0.01f, 0.0f }, { look.body.x * 1.35f, look.body.y * 1.3f, look.body.z * 1.2f }, 0.0f);
             return;
         }
-        const float k = 0.25f + 0.75f * (g - STUMP_UNTIL) / (1.0f - STUMP_UNTIL); // el árbol joven crece entero desde el tocón
+        const float k = ResourceStyle::treeScale(g); // el árbol joven crece entero desde el tocón
         const XMMATRIX tree = XMMatrixScaling(k, k, k) * base;
         if (look.shape == Shape::CONIFER) {
             draw(tree, { 0.45f, 1.5f, 0.45f }, 0.0f, { 0.0f, 0.75f, 0.0f }, look.body, 0.0f);
@@ -624,7 +623,7 @@ void Renderer3D::addNode(const ResourceNode& node) {
     }
 
     // Roca: el cuerpo es una roca común (que se regenera entera) o la base de una mena (que regenera sus vetas).
-    const float body = look.specks ? 1.0f : 0.3f + 0.7f * g;
+    const float body = ResourceStyle::rockScale(look, g);
     const XMMATRIX rock = XMMatrixScaling(body, body, body) * base;
     draw(rock, { 1.6f, 0.95f, 1.4f }, 0.4f, { 0.0f, 0.475f, 0.0f }, look.body, 0.0f);
     draw(rock, { 0.9f, 0.75f, 0.9f }, 1.1f, { 0.5f, 0.375f, -0.3f }, look.body, 0.0f);

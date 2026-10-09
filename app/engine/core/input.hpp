@@ -24,6 +24,7 @@ struct InputState {
     bool lockTap = false;     // TAB / R3 (pulsación corta): fijar la cámara o cambiar de objetivo
     bool lockCancel = false;  // TAB / R3 mantenido: soltar el objetivo
     bool inventory = false;   // I / Select (View en Xbox): abrir el inventario
+    bool map = false;         // M / cruceta arriba: abrir el mapa
     bool modeSwitch = false;  // R / triángulo (Y en Xbox): cambiar el modo del pokémon que acompaña
     bool interact = false;    // F / cuadrado (X en Xbox): abrir un cofre cercano
     int ballSwitch = 0;       // Q / E / rueda del ratón / L1 / R1: -1 pokéball (o pokémon) anterior, +1 siguiente

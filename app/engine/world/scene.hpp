@@ -13,7 +13,7 @@
 #include "../../utils/core/randomUtil.hpp"
 #include "camera.hpp"
 #include "entities/companion.hpp"
-#include "spawn/chestSpawn.hpp"
+#include "spawn/chestField.hpp"
 #include "rules/captureRules.hpp"
 #include "rules/companionRules.hpp"
 #include "entities/captureTarget.hpp"
@@ -64,7 +64,7 @@ struct Scene {
     HabitatMap habitats;      // zonas de cada hábitat, generadas al empezar la partida
     WeatherSystem weather;    // clima de cada hábitat
     Inventory inventory;
-    SpawnField<Chest> chests;
+    ChestField chests;        // cofres: aparecen dinámicamente según el hábitat
     std::vector<ResourceNode> nodes; // materiales de recolección, colocados al generar el mundo
     Exploration exploration;  // lo que el jugador ha explorado (el mapa grande lo muestra)
     SpawnField<GroundItem> groundItems;
@@ -87,7 +87,6 @@ struct Scene {
         weather.setup(gameData);
         inventory.setData(gameData);
         storage.setData(gameData);
-        chests.setup(ChestSpawn::COUNT);
         groundItems.setup(GroundSpawn::COUNT);
         world.obstacles = {
             { {  6.0f, 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
@@ -130,7 +129,7 @@ struct Scene {
         for (const CaptureTarget* target : wild.loaded()) if (target->hittable()) world.creatures.push_back(target->solid());
         world.props.clear();
         for (const Chest& chest : chests.entities) if (chest.closed()) world.props.push_back(chest.solid());
-        for (const ResourceNode& node : nodes) if (!node.depleted() && nearPlayer(node.body.position, PROP_RANGE)) world.props.push_back(node.solid());
+        for (const ResourceNode& node : nodes) if (nearPlayer(node.body.position, PROP_RANGE)) world.props.push_back(node.solid());
         world.props.push_back(machine.solid());
 
         player.aiming = m_aiming;
@@ -143,9 +142,7 @@ struct Scene {
 
         for (CaptureTarget* target : wild.loaded()) handleCaptureEvent(*target, target->update(dt, world));
         updateBalls(dt);
-        chests.update(dt, ChestSpawn::DELAY,
-            [&](Chest& chest) { world.step(chest.body, dt); chest.update(dt); },
-            [&](int spot) { return ChestSpawn::make(*m_data, spot); });
+        chests.update(dt, dayCycle.day(), player.body.position.x, player.body.position.z, *m_data, habitats, world.obstacles);
         for (ResourceNode& node : nodes) node.update(dt);
         exploration.reveal(player.body.position.x, player.body.position.z);
         groundItems.update(dt, GroundSpawn::DELAY,
