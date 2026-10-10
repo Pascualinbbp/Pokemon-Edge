@@ -559,7 +559,10 @@ struct Scene {
 
     // Experiencia del jugador por una acción en el mundo. Si sube de nivel lo avisa (salvo que ya haya un aviso de recompensa).
     void gainXp(int amount) {
-        if (progress.addXp(amount) > 0) showNotice(Notice::LEVEL_UP, "Nivel " + std::to_string(progress.level()));
+        if (progress.addXp(amount) <= 0) return;
+        const std::string level = "Nivel " + std::to_string(progress.level());
+        if (noticeTime > 0.0f && notice == Notice::REWARD) noticeText += "   ¡" + level + "!"; // no tapa el aviso de la recompensa
+        else showNotice(Notice::LEVEL_UP, level);
     }
 
     // --- Fijado de cámara ---

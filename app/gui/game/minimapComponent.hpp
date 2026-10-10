@@ -4,6 +4,7 @@
 #include <vector>
 #include "imgui.h"
 #include "mapTerrain.hpp"
+#include "../style/guiPrompts.hpp"
 #include "../style/icons/hudIcons.hpp"
 #include "../../engine/core/gameStatus.hpp"
 
@@ -85,7 +86,7 @@ namespace MinimapComponent {
     }
     inline float bottom() { return center().y + detail::RADIUS + 10.0f; }
 
-    inline void draw(ImDrawList* dl, const GameStatus& status) {
+    inline void draw(ImDrawList* dl, const GameStatus& status, InputDevice device) {
         using namespace detail;
         if (!status.habitatMap || !status.data) return;
         const MapTerrain::Data& terrain = MapTerrain::get(status);
@@ -132,6 +133,9 @@ namespace MinimapComponent {
         const ImVec2 right(mid.x + dirY * 5.5f - dirX * 5.0f, mid.y - dirX * 5.5f - dirY * 5.0f);
         dl->AddTriangleFilled(tip, left, right, IM_COL32(255, 255, 255, 255));
         dl->AddTriangle(tip, left, right, IM_COL32(0, 0, 0, 200), 1.5f);
+
+        // Ayuda del mapa: a la derecha del círculo, a media altura.
+        GuiPrompts::draw(dl, ImVec2(mid.x + RADIUS + 12.0f, mid.y - 12.0f), GuiPrompts::Action::MAP, "Mapa", device);
 
         // Clima a la izquierda, pegado al borde del círculo.
         badge(dl, ImVec2(mid.x - RADIUS - 4.0f - BADGE + 6.0f, mid.y), BADGE, HudIcons::weather(status.weatherName ? *status.weatherName : "Sol"));

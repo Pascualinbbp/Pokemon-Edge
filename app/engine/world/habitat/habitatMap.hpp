@@ -16,6 +16,9 @@ class HabitatMap {
     static constexpr float FALLOFF = 2.2f;     // cuanto mayor, más corta la transición entre zonas
     static constexpr float SPACING = 0.55f;     // separación mínima entre centros, en fracción de la suma de radios
     static constexpr int PLACE_TRIES = 40;
+    static constexpr int LOBES = 4;            // ondulaciones del contorno de cada zona: lóbulos, entrantes, pliegues
+    static constexpr float LOBE_AMPLITUDE[LOBES] = { 0.22f, 0.16f, 0.11f, 0.07f };
+    static constexpr int LOBE_HARMONIC[LOBES] = { 2, 3, 5, 8 };
 
     struct Zone {
         int habitat = 0; // índice en GameData::habitats
@@ -25,6 +28,7 @@ class HabitatMap {
         float stretch = 1.0f; // alargamiento de la zona (elipse) y hacia dónde apunta
         float cosA = 1.0f;
         float sinA = 0.0f;
+        float lobe[LOBES] = {}; // fase de cada ondulación del contorno (cada zona tiene la suya)
     };
 
     void generate(const GameData& data, unsigned seed) {
@@ -46,6 +50,7 @@ class HabitatMap {
                 const float angle = between(0.0f, 6.2831853f);
                 zone.cosA = std::cos(angle);
                 zone.sinA = std::sin(angle);
+                for (float& phase : zone.lobe) phase = between(0.0f, 6.2831853f);
                 for (int attempt = 0; attempt < PLACE_TRIES; ++attempt) {
                     zone.x = between(-reach, reach);
                     zone.z = between(-reach, reach);
@@ -56,8 +61,8 @@ class HabitatMap {
         }
         // Ondulación de las fronteras: el mismo desplazamiento en todo el mundo, distinto en cada semilla.
         for (float& value : m_warp) value = between(0.0f, 6.2831853f);
-        m_warpSize = between(3.0f, 6.0f);
-        m_warpFrequency = between(0.07f, 0.13f);
+        m_warpSize = between(5.0f, 9.0f);
+        m_warpFrequency = between(0.06f, 0.11f);
     }
 
     unsigned seed() const { return m_seed; }
@@ -66,8 +71,10 @@ class HabitatMap {
 
     // Peso de cada hábitat en (x, z): suman 1. Vacío si no hay hábitats.
     void weights(float x, float z, std::vector<float>& out) const {
-        const float wx = x + m_warpSize * std::sin(z * m_warpFrequency + m_warp[0]) + 0.5f * m_warpSize * std::sin(z * m_warpFrequency * 2.3f + m_warp[2]);
-        const float wz = z + m_warpSize * std::sin(x * m_warpFrequency + m_warp[1]) + 0.5f * m_warpSize * std::sin(x * m_warpFrequency * 2.3f + m_warp[3]);
+        // Tres octavas de ondulación (curvas amplias, pliegues medianos y dientes pequeños), cada una con la anterior ya aplicada.
+        const float f = m_warpFrequency;
+        const float wx = x + m_warpSize * std::sin(z * f + m_warp[0]) + 0.5f * m_warpSize * std::sin(z * f * 2.3f + m_warp[2] + x * f * 0.7f) + 0.25f * m_warpSize * std::sin(z * f * 5.1f + m_warp[1]);
+        const float wz = z + m_warpSize * std::sin(x * f + m_warp[1]) + 0.5f * m_warpSize * std::sin(x * f * 2.3f + m_warp[3] + z * f * 0.7f) + 0.25f * m_warpSize * std::sin(x * f * 5.1f + m_warp[0]);
         x = wx;
         z = wz;
         out.assign(m_habitats, 0.0f);
@@ -97,7 +104,10 @@ class HabitatMap {
         const float dx = x - zone.x, dz = z - zone.z;
         const float u = (dx * zone.cosA + dz * zone.sinA) / (zone.radius * zone.stretch);
         const float v = (dz * zone.cosA - dx * zone.sinA) * zone.stretch / zone.radius;
-        return u * u + v * v;
+        float lobes = 1.0f; // el radio varía con el ángulo: el contorno deja de ser una elipse perfecta
+        const float angle = std::atan2(v, u);
+        for (int k = 0; k < LOBES; ++k) lobes += LOBE_AMPLITUDE[k] * std::sin(static_cast<float>(LOBE_HARMONIC[k]) * angle + zone.lobe[k]);
+        return (u * u + v * v) / (lobes * lobes);
     }
 
     bool separated(const Zone& candidate) const {

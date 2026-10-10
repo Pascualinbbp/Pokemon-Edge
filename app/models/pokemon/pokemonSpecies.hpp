@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <string>
 #include <vector>
 #include "spawnProfile.hpp"
@@ -26,6 +27,19 @@ struct BaseStats {
     }
 };
 
+// Cómo evoluciona un pokémon (tabla evolution).
+struct Evolution {
+    enum class Method { LEVEL, STONE, FAINT, WATERFALL };
+    int toId = -1;
+    Method method = Method::LEVEL;
+    int level = 0;       // LEVEL: nivel que hay que alcanzar; FAINT: nivel mínimo al ser derrotado
+    int materialId = -1; // STONE: mineral que se usa
+
+    static Method parse(const std::string& text) {
+        return text == "STONE" ? Method::STONE : text == "FAINT" ? Method::FAINT : text == "WATERFALL" ? Method::WATERFALL : Method::LEVEL;
+    }
+};
+
 // Pokémon (tabla pokemon): todos sus datos en una fila.
 struct PokemonSpecies {
     int id = -1;
@@ -42,9 +56,21 @@ struct PokemonSpecies {
     int catchRate = 45;       // ratio de captura fijo de la especie (1..255)
     int minLevel = 1;         // nivel al aparecer salvaje
     int maxLevel = 1;
-    int evolvesToId = -1;     // -1 = no evoluciona
-    int evolveLevel = 0;      // nivel que hay que alcanzar al subir de nivel para evolucionar
+    int generationId = -1;    // generación (tabla generation)
+    std::vector<Evolution> evolutions; // vacío = no evoluciona
     bool starter = false;     // se puede elegir como pokémon inicial
+
+    // Evolución por nivel que corresponde a 'level'; si hay varias posibles, elige una según 'roll' (0..1). nullptr si no toca.
+    const Evolution* levelEvolution(int level, float roll) const {
+        int count = 0;
+        for (const Evolution& evolution : evolutions) if (evolution.method == Evolution::Method::LEVEL && level >= evolution.level) ++count;
+        if (count == 0) return nullptr;
+        int pick = (std::min)(static_cast<int>(roll * static_cast<float>(count)), count - 1);
+        for (const Evolution& evolution : evolutions) {
+            if (evolution.method == Evolution::Method::LEVEL && level >= evolution.level && pick-- == 0) return &evolution;
+        }
+        return nullptr;
+    }
 
     // Nivel que tiene en una habilidad del mundo (0 = no la tiene).
     int levelIn(int skill) const { return skill == skillId ? skillLevel : 0; }

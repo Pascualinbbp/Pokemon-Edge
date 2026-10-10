@@ -16,7 +16,8 @@ class PokemonSpeciesDao {
             entry.description = DaoRow::text(row, "description");
             entry.skillId = DaoRow::integer(row, "skill_id");
             entry.skillLevel = DaoRow::integer(row, "skill_level");
-            entry.abilityId = DaoRow::integer(row, "ability_id");
+            entry.abilityId = DaoRow::integer(row, "ability_id") > 0 ? DaoRow::integer(row, "ability_id") : -1; // NULL = sin habilidad activa
+            entry.generationId = DaoRow::integer(row, "generation_id");
             entry.passiveId = DaoRow::integer(row, "passive_id") > 0 ? DaoRow::integer(row, "passive_id") : -1; // NULL = sin pasiva
             entry.types.push_back(DaoRow::integer(row, "type1_id"));
             if (DaoRow::integer(row, "type2_id") > 0) entry.types.push_back(DaoRow::integer(row, "type2_id"));
@@ -25,12 +26,11 @@ class PokemonSpeciesDao {
             entry.catchRate = DaoRow::integer(row, "catch_rate");
             entry.minLevel = DaoRow::integer(row, "min_level");
             entry.maxLevel = DaoRow::integer(row, "max_level");
-            entry.evolvesToId = DaoRow::integer(row, "evolves_to_id") > 0 ? DaoRow::integer(row, "evolves_to_id") : -1;
-            entry.evolveLevel = DaoRow::integer(row, "evolve_level");
             entry.starter = DaoRow::integer(row, "starter") != 0;
             species.push_back(std::move(entry));
         }
         if (species.empty()) Logger::logError("POKEMON_DAO", "La tabla pokemon no existe o está vacía (falta aplicar testing/sql/pokemon.sql).");
+        loadEvolutions(species);
         loadSpawnProfiles(species);
         return species;
     }
@@ -45,6 +45,17 @@ class PokemonSpeciesDao {
     }
 
     private:
+    static void loadEvolutions(std::vector<PokemonSpecies>& species) {
+        for (const auto& row : SqliteUtil::executeSelect("SELECT from_id, to_id, method, level, material_id FROM evolution ORDER BY rowid;")) {
+            for (PokemonSpecies& entry : species) {
+                if (entry.id != DaoRow::integer(row, "from_id")) continue;
+                entry.evolutions.push_back({ DaoRow::integer(row, "to_id"), Evolution::parse(DaoRow::text(row, "method")),
+                                             DaoRow::integer(row, "level"), DaoRow::integer(row, "material_id") > 0 ? DaoRow::integer(row, "material_id") : -1 });
+                break;
+            }
+        }
+    }
+
     // Dónde y cuándo aparece cada pokémon (testing/sql/habitat.sql). Su rareza es la suma de sus pesos en los hábitats.
     static void loadSpawnProfiles(std::vector<PokemonSpecies>& species) {
         const auto find = [&](const SqliteUtil::Row& row) -> PokemonSpecies* {
@@ -76,5 +87,5 @@ class PokemonSpeciesDao {
 
     static constexpr const char* SELECT_POKEMON =
         "SELECT id, name, description, skill_id, skill_level, ability_id, passive_id, type1_id, type2_id, "
-        "hp, attack, sp_attack, defense, sp_defense, speed, catch_rate, min_level, max_level, evolves_to_id, evolve_level, starter FROM pokemon ORDER BY id;";
+        "hp, attack, sp_attack, defense, sp_defense, speed, catch_rate, min_level, max_level, generation_id, starter FROM pokemon ORDER BY id;";
 };

@@ -78,8 +78,8 @@ struct GameData {
     // Última forma de la línea evolutiva de una especie (ella misma si no evoluciona).
     const PokemonSpecies* finalForm(const PokemonSpecies& from) const {
         const PokemonSpecies* current = &from;
-        for (int guard = 0; guard < 8 && current->evolvesToId > 0; ++guard) {
-            const PokemonSpecies* next = speciesById(current->evolvesToId);
+        for (int guard = 0; guard < 8 && !current->evolutions.empty(); ++guard) {
+            const PokemonSpecies* next = speciesById(current->evolutions.front().toId);
             if (!next) break;
             current = next;
         }

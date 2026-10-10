@@ -170,7 +170,7 @@ namespace HudComponent {
                 Action action;
                 char text[64];
             };
-            Hint hints[10];
+            Hint hints[9];
             int count = 0;
             const auto add = [&](Action action, const char* text) {
                 hints[count].action = action;
@@ -191,7 +191,6 @@ namespace HudComponent {
                 if (status.team.size() > 1) add(Action::BALL_SWITCH, "Cambiar de pokémon");
                 if (!status.team.empty()) add(Action::MODE, "Modo del pokémon");
                 add(Action::INVENTORY, "Mochila");
-                add(Action::MAP, "Mapa");
                 add(Action::PAUSE, "Pausa");
             }
 
@@ -302,7 +301,7 @@ namespace HudComponent {
 
         detail::drawNameTags(dl, status);
         detail::drawLevel(dl, status);
-        MinimapComponent::draw(dl, status);
+        MinimapComponent::draw(dl, status, device);
         detail::drawLocation(dl, status);
         detail::drawTeam(dl, status);
         detail::drawHints(dl, status, device);

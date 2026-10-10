@@ -18,13 +18,14 @@ class WildField {
     static constexpr float CHUNK = 16.0f;
     static constexpr int CHUNKS = static_cast<int>(2.0f * Physics::World::HALF_SIZE / CHUNK);
     static constexpr int MAX_PER_CHUNK = 12;        // capacidad fija de cada chunk (las direcciones de sus pokémon no cambian)
-    static constexpr float SPAWN_RADIUS = 76.0f;    // zona de aparición, centrada en el jugador (invisible)
-    static constexpr float EXCLUSION_RADIUS = 14.0f; // zona pegada al jugador donde nunca nace nada
-    static constexpr int MAX_IN_ZONE = 90;          // máximo de pokémon vivos dentro de la zona de aparición
-    static constexpr float LOAD_RADIUS = 52.0f;     // dentro de este radio un pokémon aparece
-    static constexpr float UNLOAD_RADIUS = 60.0f;   // fuera de este, desaparece (el margen evita parpadeos)
+    static constexpr float SPAWN_RADIUS = 100.0f;   // zona de aparición, centrada en el jugador (invisible)
+    static constexpr float EXCLUSION_RADIUS = 30.0f; // zona pegada al jugador donde nunca nace nada
+    static constexpr float SPACING = 10.0f;         // distancia mínima entre dos pokémon al nacer (menor que CHUNK)
+    static constexpr int MAX_IN_ZONE = 70;          // máximo de pokémon vivos dentro de la zona de aparición
+    static constexpr float LOAD_RADIUS = 85.0f;     // dentro de este radio un pokémon aparece
+    static constexpr float UNLOAD_RADIUS = 95.0f;   // fuera de este, desaparece (el margen evita parpadeos)
     static constexpr float EDGE = 1.5f;             // separación de los pokémon al borde de su chunk
-    static constexpr int POINT_TRIES = 6;
+    static constexpr int POINT_TRIES = 10;
 
     // Elige especie, nivel y brillo de un pokémon recién colocado.
     template <typename Assign>
@@ -49,7 +50,7 @@ class WildField {
         for (const auto& entry : m_pending) {
             const int count = countFor(entry.second % CHUNKS, entry.second / CHUNKS, data, habitats);
             if (alive + count > MAX_IN_ZONE) break;
-            alive += populate(m_chunks[entry.second], entry.second % CHUNKS, entry.second / CHUNKS, count, playerX, playerZ, assign);
+            alive += populate(entry.second % CHUNKS, entry.second / CHUNKS, count, playerX, playerZ, assign);
         }
 
         for (int row = 0; row < CHUNKS; ++row) {
@@ -62,7 +63,7 @@ class WildField {
                     if (wild.gone()) {
                         if (wild.refillDue(dt) && chunk.distance <= SPAWN_RADIUS && alive < MAX_IN_ZONE) {
                             DirectX::XMFLOAT2 at;
-                            if (pointIn(col, row, playerX, playerZ, at)) {
+                            if (pointIn(col, row, playerX, playerZ, at, &wild)) {
                                 wild.place(at.x, at.y, RandomUtil::range(-3.14159265f, 3.14159265f));
                                 assign(wild);
                                 ++alive;
@@ -106,13 +107,27 @@ class WildField {
         return std::sqrt(dx * dx + dz * dz);
     }
 
-    // Punto del chunk fuera de la zona de exclusión del jugador. false si no se encuentra.
-    static bool pointIn(int col, int row, float px, float pz, DirectX::XMFLOAT2& out) {
+    // ¿Hay otro pokémon (vivo y no 'ignore') a menos de SPACING de ese punto? Basta mirar los chunks vecinos.
+    bool crowded(int col, int row, const DirectX::XMFLOAT2& at, const CaptureTarget* ignore) const {
+        for (int r = (std::max)(row - 1, 0); r <= (std::min)(row + 1, CHUNKS - 1); ++r) {
+            for (int c = (std::max)(col - 1, 0); c <= (std::min)(col + 1, CHUNKS - 1); ++c) {
+                for (const CaptureTarget& other : m_chunks[r * CHUNKS + c].wilds) {
+                    if (&other == ignore || other.gone()) continue;
+                    const float dx = other.body.position.x - at.x, dz = other.body.position.z - at.y;
+                    if (dx * dx + dz * dz < SPACING * SPACING) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Punto del chunk fuera de la zona de exclusión del jugador y de otros pokémon. false si no se encuentra.
+    bool pointIn(int col, int row, float px, float pz, DirectX::XMFLOAT2& out, const CaptureTarget* ignore = nullptr) const {
         for (int i = 0; i < POINT_TRIES; ++i) {
             out = { -Physics::World::HALF_SIZE + col * CHUNK + RandomUtil::range(EDGE, CHUNK - EDGE),
                     -Physics::World::HALF_SIZE + row * CHUNK + RandomUtil::range(EDGE, CHUNK - EDGE) };
             const float dx = out.x - px, dz = out.y - pz;
-            if (dx * dx + dz * dz > EXCLUSION_RADIUS * EXCLUSION_RADIUS) return true;
+            if (dx * dx + dz * dz > EXCLUSION_RADIUS * EXCLUSION_RADIUS && !crowded(col, row, out, ignore)) return true;
         }
         return false;
     }
@@ -131,7 +146,8 @@ class WildField {
     }
 
     template <typename Assign>
-    static int populate(Chunk& chunk, int col, int row, int count, float px, float pz, Assign& assign) {
+    int populate(int col, int row, int count, float px, float pz, Assign& assign) {
+        Chunk& chunk = m_chunks[row * CHUNKS + col];
         chunk.populated = true;
         chunk.wilds.reserve(MAX_PER_CHUNK); // sin realojar: Scene guarda punteros a estos pokémon
         int placed = 0;

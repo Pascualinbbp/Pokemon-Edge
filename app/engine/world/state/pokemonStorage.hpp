@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include "../../../models/gameData.hpp"
+#include "../../../utils/core/randomUtil.hpp"
 #include "../rules/companionRules.hpp"
 #include "../rules/evRules.hpp"
 #include "../rules/pokemonRules.hpp"
@@ -161,8 +162,9 @@ class PokemonStorage {
         if (!owned || owned->level >= cap) return LevelResult::NONE;
         ++owned->level;
         const PokemonSpecies* species = m_data->speciesById(owned->speciesId);
-        if (species && species->evolvesToId > 0 && owned->level >= species->evolveLevel && m_data->speciesById(species->evolvesToId)) {
-            owned->speciesId = species->evolvesToId;
+        const Evolution* evolution = species ? species->levelEvolution(owned->level, RandomUtil::range(0.0f, 1.0f)) : nullptr;
+        if (evolution && m_data->speciesById(evolution->toId)) {
+            owned->speciesId = evolution->toId;
             return LevelResult::EVOLVED;
         }
         return LevelResult::LEVELED;
