@@ -9,7 +9,7 @@
 #include "../../engine/core/gameStatus.hpp"
 
 // Minimapa redondo arriba a la izquierda, centrado en el jugador (norte arriba): solo el terreno, las construcciones y una
-// flecha hacia donde mira. En el borde: el clima (a la izquierda) y, arriba a la derecha, el disco de día y noche
+// flecha hacia donde mira. En el borde: el clima (arriba a la izquierda) y, arriba a la derecha, el disco de día y noche
 // como una oreja: su mitad exterior asoma del círculo y el disco gira con el sol.
 namespace MinimapComponent {
     namespace detail {
@@ -82,7 +82,7 @@ namespace MinimapComponent {
 
     // Centro del minimapa en pantalla (otros elementos del HUD cuelgan de él).
     inline ImVec2 center() {
-        return ImVec2(detail::RADIUS + detail::BADGE * 2.0f + detail::MARGIN, detail::TOP + detail::RADIUS + 4.0f);
+        return ImVec2(detail::RADIUS + 12.0f + detail::MARGIN, detail::TOP + detail::RADIUS + 4.0f);
     }
     inline float bottom() { return center().y + detail::RADIUS + 10.0f; }
 
@@ -137,7 +137,8 @@ namespace MinimapComponent {
         // Ayuda del mapa: a la derecha del círculo, a media altura.
         GuiPrompts::draw(dl, ImVec2(mid.x + RADIUS + 12.0f, mid.y - 12.0f), GuiPrompts::Action::MAP, "Mapa", device);
 
-        // Clima a la izquierda, pegado al borde del círculo.
-        badge(dl, ImVec2(mid.x - RADIUS - 4.0f - BADGE + 6.0f, mid.y), BADGE, HudIcons::weather(status.weatherName ? *status.weatherName : "Sol"));
+        // Clima arriba a la izquierda (en diagonal, simétrico al disco de día y noche), pegado al borde del círculo.
+        const float badgeReach = RADIUS + 4.0f + BADGE - 6.0f;
+        badge(dl, ImVec2(mid.x - std::sin(EAR_ANGLE) * badgeReach, mid.y - std::cos(EAR_ANGLE) * badgeReach), BADGE, HudIcons::weather(status.weatherName ? *status.weatherName : "Sol"));
     }
 }

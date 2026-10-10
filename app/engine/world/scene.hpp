@@ -88,11 +88,13 @@ struct Scene {
         inventory.setData(gameData);
         storage.setData(gameData);
         groundItems.setup(GroundSpawn::COUNT);
+        world.terrain.build(HALF_SIZE, [this](float x, float z) { return habitats.height(x, z); });
+        constexpr float BASE = Physics::World::START_HEIGHT; // el inicio es llano: las paredes se apoyan en él
         world.obstacles = {
-            { {  6.0f, 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
-            { { -7.0f, 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
+            { {  6.0f, BASE + 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
+            { { -7.0f, BASE + 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
         };
-        nodes = ResourceSpawn::generate(gameData, habitats, worldSeed, world.obstacles);
+        nodes = ResourceSpawn::generate(gameData, habitats, worldSeed, world);
     }
 
     // Devuelve true si hay que pausar el juego (ESC fuera del modo lanzamiento).
@@ -108,13 +110,17 @@ struct Scene {
             if (m_aiming) inventory.cycle(input.ballSwitch);
             else storage.cycleActive(input.ballSwitch); // fuera del modo captura cambia el pokémon que acompaña
         }
-        if (input.modeSwitch && storage.active()) {
-            storage.cycleMode(true, storage.activeIndex());
-            showNotice(Notice::REWARD, std::string("Modo: ") + CompanionRules::label(storage.active()->mode));
+        if (input.modeSwitch) {
+            storage.cycleMode();
+            showNotice(Notice::REWARD, std::string("Modo: ") + CompanionRules::label(storage.mode));
         }
         if (input.teamSelect > 0) storage.setActive(input.teamSelect - 1); // la misma tecla que el que ya está fuera no cambia nada
 
-        wild.update(dt, player.body.position.x, player.body.position.z, *m_data, habitats, [this](CaptureTarget& target) { assignSpecies(target); });
+        wild.update(dt, player.body.position.x, player.body.position.z, camera.yaw(), *m_data, habitats, [this](CaptureTarget& target) { return assignSpecies(target); });
+
+        for (const CaptureTarget* target : wild.loaded()) { // lo que se ve de cerca queda registrado en la Pokédex
+            if (target->hittable() && target->speciesIndex() >= 0 && nearPlayer(target->body.position, SEEN_RANGE) && visible(*target)) storage.markSeen(target->speciesId());
+        }
 
         if (input.lockCancel) lockedTarget = nullptr;
         else if (input.lockTap) cycleLock();
@@ -142,7 +148,7 @@ struct Scene {
 
         for (CaptureTarget* target : wild.loaded()) handleCaptureEvent(*target, target->update(dt, world));
         updateBalls(dt);
-        chests.update(dt, dayCycle.day(), player.body.position.x, player.body.position.z, *m_data, habitats, world.obstacles);
+        chests.update(dt, dayCycle.day(), player.body.position.x, player.body.position.z, *m_data, habitats, world);
         for (ResourceNode& node : nodes) node.update(dt);
         exploration.reveal(player.body.position.x, player.body.position.z);
         groundItems.update(dt, GroundSpawn::DELAY,
@@ -150,7 +156,12 @@ struct Scene {
             [&](int spot) { return GroundSpawn::make(*m_data, spot); });
         updateCompanion(dt);
         updateInteraction();
-        if (input.interact) interact();
+        m_holdClock = (std::max)(0.0f, m_holdClock - dt);
+        const bool hold = input.interactHeld && m_interaction.kind == Interaction::NODE && m_holdClock <= 0.0f; // mantener sigue trabajando el recurso
+        if (input.interact || hold) {
+            interact();
+            m_holdClock = HOLD_REPEAT;
+        }
         updateAimInfo();
         return pause;
     }
@@ -178,7 +189,8 @@ struct Scene {
     }
 
     DirectX::XMMATRIX getViewMatrix() const {
-        return camera.viewMatrix(player.body.position);
+        const DirectX::XMFLOAT3 eye = camera.eye(player.body.position);
+        return camera.viewMatrix(player.body.position, world.surfaceHeight(eye.x, eye.z) + 0.35f); // la cámara no se hunde en el terreno
     }
 
     GameStatus status() const {
@@ -208,7 +220,7 @@ struct Scene {
         s.playerZ = player.body.position.z;
         s.playerYaw = camera.yaw();
         s.dayAngle = dayCycle.sunAngle();
-        if (const OwnedPokemon* lead = storage.active()) s.companionMode = CompanionRules::label(lead->mode);
+        if (storage.active()) s.companionMode = CompanionRules::label(storage.mode);
         addNameTags(s);
         for (size_t i = 0; i < storage.team().size(); ++i) {
             const OwnedPokemon& owned = storage.team()[i];
@@ -226,9 +238,15 @@ struct Scene {
             const Skill* skill = node.growing() ? m_data->skill(type.skillId) : nullptr;
             s.interactVerb = skill ? skill->name.c_str() : type.action.c_str();
             s.interactTarget = &type.name;
+            const Material* material = m_data->material(type.materialId);
+            if (!skill && material && type.action == PICK_VERB) s.interactTarget = &material->name; // "Recoger Baya"; los árboles siguen en "Talar Roble"
         } else if (m_interaction.kind == Interaction::GROUND) {
             s.interactVerb = PICK_VERB;
             s.interactTarget = &GROUND_NAME;
+            const GroundItem& item = groundItems.entities[m_interaction.index];
+            if (const GroundItemType* reward = item.reward() >= 0 ? &m_data->groundItems[item.reward()] : nullptr) {
+                if (const Item* found = m_data->item(reward->itemId)) s.interactTarget = &m_data->itemName(*found);
+            }
         } else if (m_interaction.kind == Interaction::MACHINE) {
             s.interactVerb = USE_VERB;
             s.interactTarget = &MACHINE_NAME;
@@ -349,13 +367,18 @@ struct Scene {
         habitats.weights(x, z, context.habitats);
         context.weather = weather.at(context.habitats);
         context.night = dayCycle.isNight();
+        context.depth = world.waterDepth(x, z);
         return context;
     }
 
     // Especie de un pokémon salvaje que acaba de aparecer, según el hábitat, el clima y la hora de donde sale.
-    void assignSpecies(CaptureTarget& target) const {
+    // false si ahí no puede vivir ninguno (el sitio se descarta).
+    bool assignSpecies(CaptureTarget& target) const {
         const int index = WildSpawn::pick(*m_data, spawnContext(target.body.position.x, target.body.position.z));
-        if (index >= 0) target.setSpecies(index, m_data->species[index].id, PokemonRules::rollLevel(m_data->species[index]), PokemonRules::rollShiny());
+        if (index < 0) return false;
+        target.setSpecies(index, m_data->species[index].id, PokemonRules::rollLevel(m_data->species[index]), PokemonRules::rollShiny());
+        target.setSwims(m_data->species[index].swims);
+        return true;
     }
 
     // El líder del equipo acompaña al jugador y trabaja solo lo cercano: recoge plantas crecidas y objetos sueltos (cualquier
@@ -385,8 +408,9 @@ struct Scene {
             const float dx = at.x - player.body.position.x, dz = at.z - player.body.position.z;
             return dx * dx + dz * dz <= Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
         };
-        const CompanionRules::Mode mode = lead ? lead->mode : CompanionRules::Mode::COLLECT;
-        if (species && mode == CompanionRules::Mode::COLLECT) {
+        const CompanionRules::Mode mode = storage.mode;
+        tickCollectWindow(dt);
+        if (species && mode == CompanionRules::Mode::COLLECT && m_collecting) {
             for (ResourceNode& node : nodes) {
                 if (node.depleted() || !inRange(node.body.position)) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -427,6 +451,14 @@ struct Scene {
         if (nodeTarget) workNode(*nodeTarget, false);
         else if (groundTarget) collect(*groundTarget);
         else if (fightTarget) strike(*fightTarget);
+    }
+
+    // En modo recolección el acompañante solo recoge un rato cada cierto tiempo; el resto sigue al jugador.
+    void tickCollectWindow(float dt) {
+        m_collectClock -= dt;
+        if (m_collectClock > 0.0f) return;
+        m_collecting = !m_collecting;
+        m_collectClock = m_collecting ? COLLECT_WINDOW : RandomUtil::range(COLLECT_WAIT_MIN, COLLECT_WAIT_MAX);
     }
 
     // El salvaje más cercano al jugador (dentro del radio de búsqueda) al que el acompañante debe atacar según su modo: en captura
@@ -550,7 +582,8 @@ struct Scene {
     // Recoge un objeto suelto del mundo.
     void collect(GroundItem& item) {
         if (!item.available()) return;
-        if (const GroundItemType* reward = GroundSpawn::pickReward(*m_data)) {
+        if (item.reward() >= 0) {
+            const GroundItemType* reward = &m_data->groundItems[item.reward()];
             giveReward(reward->itemId, RandomUtil::integer(reward->minQuantity, reward->maxQuantity));
             gainXp(Xp::PICK_UP);
         }
@@ -765,6 +798,14 @@ struct Scene {
     inline static const std::string MACHINE_NAME = "máquina de investigación";
 
     const GameData* m_data;
+    static constexpr float SEEN_RANGE = 30.0f;         // a esta distancia (y a la vista) un pokémon cuenta como visto en la Pokédex
+    static constexpr float COLLECT_WINDOW = 8.0f;      // segundos seguidos que recolecta cada vez
+    static constexpr float COLLECT_WAIT_MIN = 30.0f;   // segundos que pasa siguiendo al jugador entre una recolección y otra
+    static constexpr float COLLECT_WAIT_MAX = 60.0f;
+    static constexpr float HOLD_REPEAT = 0.45f;        // segundos entre golpes al mantener pulsado interactuar
+    float m_collectClock = 12.0f;
+    bool m_collecting = false;
+    float m_holdClock = 0.0f;
     int m_shownUid = 0;        // pokémon (uid y especie) que está fuera o saliendo
     int m_shownSpecies = -1;
     int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)

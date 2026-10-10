@@ -10,14 +10,14 @@ class ResearchMachine {
     static constexpr float DEPTH = 1.0f;
     static constexpr float HEIGHT = 1.7f;
     static constexpr float INTERACT_RANGE = 1.8f; // distancia desde el borde para poder usarla
-    static constexpr DirectX::XMFLOAT3 POSITION = { -3.0f, 0.0f, 3.0f };
+    static constexpr DirectX::XMFLOAT3 POSITION = { -3.0f, Physics::World::START_HEIGHT, 3.0f };
     static constexpr float YAW = 0.6f;
 
     float reach() const { return INTERACT_RANGE + WIDTH * 0.5f; }
 
     Physics::World::Box solid() const {
         const float half = (WIDTH > DEPTH ? WIDTH : DEPTH) * 0.5f;
-        return { { POSITION.x, HEIGHT * 0.5f, POSITION.z }, { half, HEIGHT * 0.5f, half } };
+        return { { POSITION.x, POSITION.y + HEIGHT * 0.5f, POSITION.z }, { half, HEIGHT * 0.5f, half } };
     }
 
     // Posición para el interaccionable genérico (nearestIn usa body.position).

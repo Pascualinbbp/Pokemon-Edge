@@ -23,9 +23,11 @@ namespace InputHandler {
             bool up = false, down = false, left = false, right = false; // mantenidas
             bool jump = false, crouch = false, sprint = false;          // eventos de un frame
             bool interact = false;                                      // F
+            bool interactHeld = false;                                  // F mantenida
             bool modeSwitch = false;                                    // R (solo mientras se juega)
             bool inventory = false;                                     // I (solo mientras se juega)
             bool map = false;                                           // M (solo mientras se juega)
+            bool pokedex = false;                                       // P (solo mientras se juega)
             bool throwBall = false;                                     // clic izquierdo
             bool aimToggle = false;                                     // clic derecho
             bool escape = false;                                        // ESC (solo mientras se juega)
@@ -57,8 +59,8 @@ namespace InputHandler {
         // Descarta lo que no debe arrastrarse entre frames o entre estados (pausa, carga...).
         inline void clearEvents() {
             mouseDX = mouseDY = 0.0f;
-            keys.jump = keys.crouch = keys.sprint = keys.throwBall = keys.interact = keys.inventory = keys.map = keys.modeSwitch = false;
-            keys.aimToggle = keys.escape = keys.lockTap = false;
+            keys.jump = keys.crouch = keys.sprint = keys.throwBall = keys.interact = keys.inventory = keys.map = keys.pokedex = keys.modeSwitch = false;
+            keys.aimToggle = keys.escape = keys.lockTap = keys.interactHeld = false;
             keys.ballSwitch = 0;
             keys.teamSelect = 0;
         }
@@ -148,6 +150,7 @@ namespace InputHandler {
                 break;
             case 'F':
                 if (newPress) k.interact = true;
+                k.interactHeld = pressed;
                 break;
             case 'R':
                 if (newPress && detail::captured) k.modeSwitch = true;
@@ -157,6 +160,9 @@ namespace InputHandler {
                 break;
             case 'I':
                 if (newPress && detail::captured) k.inventory = true;
+                break;
+            case 'P':
+                if (newPress && detail::captured) k.pokedex = true;
                 break;
             case '1': case '2': case '3': case '4': case '5': case '6':
                 if (newPress && detail::captured) k.teamSelect = static_cast<int>(key - '0');
@@ -298,8 +304,10 @@ namespace InputHandler {
             input.sprint = (pressed & InputBindings::PAD_SPRINT) != 0;
             input.pause = (pressed & InputBindings::PAD_PAUSE) != 0;
             input.interact = (pressed & InputBindings::PAD_INTERACT) != 0;
+            input.interactHeld = (pad.buttons & InputBindings::PAD_INTERACT) != 0;
             input.inventory = (pressed & InputBindings::PAD_INVENTORY) != 0;
             input.map = (pressed & InputBindings::PAD_MAP) != 0;
+            input.pokedex = (pressed & InputBindings::PAD_POKEDEX) != 0;
             input.modeSwitch = (pressed & InputBindings::PAD_MODE) != 0;
             input.aimHold = pad.lt > InputBindings::TRIGGER_THRESHOLD;
             input.throwBall = triggerDown && !detail::padPrevTriggerDown;
@@ -332,8 +340,10 @@ namespace InputHandler {
             input.crouch = k.crouch;
             input.sprint = k.sprint;
             input.interact = k.interact;
+            input.interactHeld = k.interactHeld;
             input.inventory = k.inventory;
             input.map = k.map;
+            input.pokedex = k.pokedex;
             input.modeSwitch = k.modeSwitch;
             input.throwBall = k.throwBall;
             input.aimToggle = k.aimToggle;

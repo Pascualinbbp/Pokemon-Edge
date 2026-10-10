@@ -10,7 +10,7 @@ class HabitatDao {
     public:
     std::vector<Habitat> findHabitats() const {
         std::vector<Habitat> habitats;
-        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, min_zones, max_zones, min_radius, max_radius, min_stretch, max_stretch, min_chests, max_chests, daily_chests, min_wild, max_wild, min_nodes, max_nodes, "
+        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, min_zones, max_zones, min_radius, max_radius, min_stretch, max_stretch, min_altitude, max_altitude, roughness, placement, beside_id, min_chests, max_chests, daily_chests, min_wild, max_wild, min_nodes, max_nodes, "
                                                          "min_weather_wait, max_weather_wait FROM habitat ORDER BY id;")) {
             Habitat habitat;
             habitat.id = DaoRow::integer(row, "id");
@@ -22,6 +22,12 @@ class HabitatDao {
             habitat.maxRadius = DaoRow::real(row, "max_radius");
             habitat.minStretch = DaoRow::real(row, "min_stretch");
             habitat.maxStretch = DaoRow::real(row, "max_stretch");
+            habitat.minAltitude = DaoRow::real(row, "min_altitude");
+            habitat.maxAltitude = DaoRow::real(row, "max_altitude");
+            habitat.roughness = DaoRow::real(row, "roughness");
+            const std::string& placement = DaoRow::text(row, "placement");
+            habitat.placement = placement == "COAST" ? HabitatPlacement::COAST : placement == "BESIDE" ? HabitatPlacement::BESIDE : placement == "SEA" ? HabitatPlacement::SEA : HabitatPlacement::ANY;
+            habitat.besideId = DaoRow::integer(row, "beside_id") > 0 ? DaoRow::integer(row, "beside_id") : -1;
             habitat.minChests = DaoRow::integer(row, "min_chests");
             habitat.maxChests = DaoRow::integer(row, "max_chests");
             habitat.dailyChests = DaoRow::integer(row, "daily_chests");

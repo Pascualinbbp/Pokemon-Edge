@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <vector>
 #include "imgui.h"
 #include "../../engine/core/gameStatus.hpp"
@@ -44,7 +45,9 @@ namespace MapTerrain {
                         data.habitat[index] = static_cast<signed char>(i);
                     }
                 }
-                data.colors[index] = IM_COL32(int(r * 255), int(g * 255), int(b * 255), 255);
+                const float height = map.height(Exploration::centerOf(col), Exploration::centerOf(row));
+                const float shade = height > 0.0f ? 0.8f + 0.35f * (std::min)(height / 16.0f, 1.0f) : 1.0f; // la tierra alta se ve más clara
+                data.colors[index] = IM_COL32((std::min)(255, int(r * shade * 255)), (std::min)(255, int(g * shade * 255)), (std::min)(255, int(b * shade * 255)), 255);
             }
         }
         return data;

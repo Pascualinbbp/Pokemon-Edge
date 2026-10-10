@@ -17,6 +17,8 @@ class GroundItem {
     GroundItem(int spot, const DirectX::XMFLOAT3& position) : m_spot(spot) { body.position = position; }
 
     int spot() const { return m_spot; }
+    int reward() const { return m_reward; }       // índice en GameData::groundItems de lo que da (se sortea al aparecer)
+    void setReward(int index) { m_reward = index; }
     float reach() const { return INTERACT_RANGE; }
     bool available() const { return !m_taken; }
     bool finished() const { return m_taken && m_fade >= FADE_TIME; }
@@ -34,6 +36,7 @@ class GroundItem {
 
     private:
     int m_spot;
+    int m_reward = -1;
     float pulse(float phase) const { return std::sin(m_time * 2.2f + phase) * 0.5f + 0.5f; }
 
     bool m_taken = false;

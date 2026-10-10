@@ -11,6 +11,7 @@ enum class GameState {
     CONTROLS,
     MAP,           // mapa grande (la partida queda congelada)
     INVENTORY,     // mochila de objetos (la partida queda congelada)
+    POKEDEX,       // Pokédex: todas las especies (la partida queda congelada)
     POKEMON,       // gestión de pokémon: equipo y PC (la partida queda congelada)
     STARTER,       // elección del pokémon inicial al empezar una partida nueva
     RESEARCH,      // máquina de investigación (la partida queda congelada)
@@ -20,7 +21,7 @@ enum class GameState {
 // Estados en los que la escena 3D se dibuja de fondo.
 constexpr bool isInGame(GameState state) {
     return state == GameState::PLAYING || state == GameState::PAUSED || state == GameState::CONTROLS || state == GameState::MAP ||
-           state == GameState::INVENTORY || state == GameState::POKEMON || state == GameState::STARTER || state == GameState::RESEARCH;
+           state == GameState::INVENTORY || state == GameState::POKEDEX || state == GameState::POKEMON || state == GameState::STARTER || state == GameState::RESEARCH;
 }
 
 // Estados en los que la ventana va en pantalla completa (desde que empieza la carga de la partida).

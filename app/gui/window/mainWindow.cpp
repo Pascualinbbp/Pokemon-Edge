@@ -15,6 +15,7 @@
 #include "../menus/mapComponent.hpp"
 #include "../game/inventoryComponent.hpp"
 #include "../game/pokemonComponent.hpp"
+#include "../game/pokedexComponent.hpp"
 #include "../game/researchComponent.hpp"
 #include "../game/starterComponent.hpp"
 #include "../menus/updateComponent.hpp"
@@ -268,8 +269,8 @@ void MainWindow::run() {
         }
         if (g_state == GameState::PLAYING) {
             const InputState input = InputHandler::poll(dt);
-            if (input.pause || engine.update(dt, input) || input.inventory || input.map) {
-                g_state = input.pause ? GameState::PAUSED : input.inventory ? GameState::INVENTORY : input.map ? GameState::MAP : GameState::PAUSED;
+            if (input.pause || engine.update(dt, input) || input.inventory || input.map || input.pokedex) {
+                g_state = input.pause ? GameState::PAUSED : input.inventory ? GameState::INVENTORY : input.map ? GameState::MAP : input.pokedex ? GameState::POKEDEX : GameState::PAUSED;
                 g_backState = GameState::PLAYING;
                 redrawFrames = 2;
                 justPaused = true;
@@ -361,6 +362,9 @@ void MainWindow::run() {
             case GameState::INVENTORY:
                 InventoryComponent::render(g_state, g_backState, engine.data(), engine.inventory());
                 break;
+            case GameState::POKEDEX:
+                PokedexComponent::render(g_state, g_backState, engine.data(), engine.storage());
+                break;
             case GameState::POKEMON:
                 PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress(), InputHandler::activeDevice());
                 break;
@@ -384,7 +388,7 @@ void MainWindow::run() {
 
         if (g_state != prevState) {
             redrawFrames = 2;
-            if (prevState == GameState::PAUSED && (g_state == GameState::INVENTORY || g_state == GameState::POKEMON || g_state == GameState::MAP)) g_backState = GameState::PAUSED;
+            if (prevState == GameState::PAUSED && (g_state == GameState::INVENTORY || g_state == GameState::POKEMON || g_state == GameState::POKEDEX || g_state == GameState::MAP)) g_backState = GameState::PAUSED;
             g_fullscreen.set(g_hwnd, isFullscreen(g_state));
             if (isInGame(prevState) && !isInGame(g_state)) SessionManager::saveCurrent(); // salir al menú guarda la partida
         } else if (redrawFrames > 0) {

@@ -18,9 +18,10 @@ namespace ResourceSpawn {
     inline constexpr float CLEAR_RADIUS = 4.5f;     // zona libre alrededor del inicio, de la máquina y de las paredes
     inline constexpr float PLANT_MIN_GROWTH = 0.3f; // una planta de partida nueva tiene al menos este crecimiento
     inline constexpr int PLACE_TRIES = 12;
+    inline constexpr float MIN_LAND = 0.35f;        // altura mínima del terreno para colocar un nodo
 
     inline std::vector<ResourceNode> generate(const GameData& data, const HabitatMap& habitats, unsigned seed,
-                                              const std::vector<Physics::World::Box>& walls) {
+                                              const Physics::World& world) {
         std::vector<ResourceNode> nodes;
         if (data.nodes.empty()) return nodes;
 
@@ -37,10 +38,11 @@ namespace ResourceSpawn {
         };
 
         const auto free = [&](float x, float z) {
+            if (world.groundHeight(x, z) < MIN_LAND) return false; // nunca en el agua
             if (x * x + z * z < CLEAR_RADIUS * CLEAR_RADIUS) return false;
             const float mx = x - ResearchMachine::POSITION.x, mz = z - ResearchMachine::POSITION.z;
             if (mx * mx + mz * mz < CLEAR_RADIUS * CLEAR_RADIUS) return false;
-            for (const Physics::World::Box& wall : walls) {
+            for (const Physics::World::Box& wall : world.obstacles) {
                 if (std::fabs(x - wall.center.x) < wall.half.x + 2.0f && std::fabs(z - wall.center.z) < wall.half.z + 2.0f) return false;
             }
             for (const ResourceNode& other : nodes) {
@@ -90,7 +92,7 @@ namespace ResourceSpawn {
                     const ResourceNodeType& node = data.nodes[type];
                     const float growth = node.plant() ? between(PLANT_MIN_GROWTH, 1.0f) : 1.0f;
                     nodes.emplace_back(type, node.id, node.hits, node.plant(), static_cast<float>(node.plant() ? node.growSeconds : node.regrowSeconds),
-                                       growth, DirectX::XMFLOAT3{ x, 0.0f, z }, between(0.0f, 6.2831853f));
+                                       growth, DirectX::XMFLOAT3{ x, world.groundHeight(x, z), z }, between(0.0f, 6.2831853f));
                 }
             }
         }

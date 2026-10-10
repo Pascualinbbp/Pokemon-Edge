@@ -17,11 +17,19 @@ namespace WildSpawn {
         std::vector<float> habitats;                // pesos de HabitatMap::weights
         std::vector<WeatherSystem::Local> weather;  // climas del punto
         bool night = false;
+        float depth = 0.0f;                         // profundidad del agua en el punto (0 = tierra)
     };
+
+    inline constexpr float MAX_LAND_DEPTH = 0.3f;   // con más agua que esto solo aparecen pokémon que nadan
 
     inline float strengthOf(const Context& context, int weatherId) {
         for (const WeatherSystem::Local& local : context.weather) if (local.weatherId == weatherId) return local.strength;
         return 0.0f;
+    }
+
+    // ¿Puede la especie estar en ese punto? Sobre el agua solo los que nadan.
+    inline bool fits(const PokemonSpecies& species, const Context& context) {
+        return species.swims || context.depth <= MAX_LAND_DEPTH;
     }
 
     // Peso base de la especie en el punto (0 = no aparece aquí).
@@ -59,15 +67,15 @@ namespace WildSpawn {
         std::vector<float> weights(data.species.size(), 0.0f);
         float total = 0.0f;
         for (size_t i = 0; i < data.species.size(); ++i) {
-            const float base = context.habitats.empty() ? 1.0f : baseWeight(data, data.species[i], context);
+            const float base = fits(data.species[i], context) ? (context.habitats.empty() ? 1.0f : baseWeight(data, data.species[i], context)) : 0.0f;
             weights[i] = base * conditionFactor(data.species[i], context);
             total += weights[i];
         }
         if (total <= 0.0f) { // las condiciones lo anulan todo: se ignoran
-            for (size_t i = 0; i < data.species.size(); ++i) weights[i] = context.habitats.empty() ? 1.0f : baseWeight(data, data.species[i], context);
+            for (size_t i = 0; i < data.species.size(); ++i) weights[i] = fits(data.species[i], context) ? (context.habitats.empty() ? 1.0f : baseWeight(data, data.species[i], context)) : 0.0f;
         }
         const float sum = std::accumulate(weights.begin(), weights.end(), 0.0f);
-        if (sum <= 0.0f) return data.species.empty() ? -1 : 0;
+        if (sum <= 0.0f) return -1;
         float pickAt = RandomUtil::range(0.0f, sum);
         for (size_t i = 0; i < weights.size(); ++i) {
             if (weights[i] <= 0.0f) continue;
@@ -75,6 +83,6 @@ namespace WildSpawn {
             if (pickAt < 0.0f) return static_cast<int>(i);
         }
         for (size_t i = weights.size(); i-- > 0;) if (weights[i] > 0.0f) return static_cast<int>(i);
-        return data.species.empty() ? -1 : 0;
+        return -1;
     }
 }

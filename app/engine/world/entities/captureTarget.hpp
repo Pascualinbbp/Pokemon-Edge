@@ -25,6 +25,7 @@ class CaptureTarget {
     static constexpr float SOLID_APPEAR  = 0.6f;  // a partir de este avance de aparición ya se puede golpear y es sólido
     static constexpr float WALK_SPEED    = 1.8f;  // m/s al vagar
     static constexpr float TURN_SPEED    = 6.0f;  // rad/s al girar hacia donde camina
+    static constexpr float WATER_EDGE    = 0.3f;  // profundidad que separa "tierra" de "agua" para vagar
     static constexpr float LEASH         = 6.0f;  // distancia máxima a su punto de aparición
 
     enum class Event { NONE, CAPTURED, ESCAPED }; // se emite en el instante en que la animación revela el resultado
@@ -54,6 +55,13 @@ class CaptureTarget {
         m_age = 0.0f;
         m_lifetime = RandomUtil::range(LIFETIME_MIN, LIFETIME_MAX);
     }
+
+    // Descarta el sitio (no vive nada ahí): queda fuera de juego hasta que el chunk lo renueve.
+    void discard() {
+        m_state = State::HIDDEN;
+        m_timer = 0.0f;
+    }
+    void setSwims(bool swims) { m_swims = swims; }
 
     bool hittable() const { return m_state == State::IDLE && m_appear >= SOLID_APPEAR; }
     bool gone() const { return m_state == State::HIDDEN; }       // capturado o derrotado: espera a que el chunk lo renueve
@@ -191,7 +199,7 @@ class CaptureTarget {
         Event event = Event::NONE;
         switch (m_state) {
             case State::IDLE:
-                wander(dt);
+                wander(dt, world);
                 break;
             case State::CAPTURING:
                 body.velocity.x = body.velocity.z = 0.0f;
@@ -216,7 +224,8 @@ class CaptureTarget {
     enum class State { IDLE, CAPTURING, HIDDEN };
 
     // Alterna paradas y paseos en una dirección al azar; si se aleja demasiado de su punto, vuelve hacia él.
-    void wander(float dt) {
+    // Los que no nadan evitan el agua y los que nadan evitan la tierra: al acercarse al límite dan media vuelta hacia su punto.
+    void wander(float dt, const Physics::World& world) {
         if (m_leaving) { // se aleja sin pararse
             m_walking = true;
             m_wanderTimer = 1.0f;
@@ -232,6 +241,15 @@ class CaptureTarget {
 
         const float delta = DirectX::XMScalarModAngle(m_heading - m_yaw);
         if (m_walking) m_yaw += (std::clamp)(delta, -TURN_SPEED * dt, TURN_SPEED * dt);
+        if (m_walking && !m_leaving) {
+            const float ax = body.position.x + std::sin(m_yaw) * 1.5f, az = body.position.z + std::cos(m_yaw) * 1.5f;
+            const float here = world.waterDepth(body.position.x, body.position.z), ahead = world.waterDepth(ax, az);
+            const bool bad = m_swims ? (ahead < WATER_EDGE && here >= WATER_EDGE) : (ahead > WATER_EDGE && ahead > here);
+            if (bad) {
+                m_heading = std::atan2(m_home.x - body.position.x, m_home.y - body.position.z);
+                m_wanderTimer = RandomUtil::range(0.5f, 1.5f);
+            }
+        }
         const bool go = m_walking && std::fabs(delta) < 0.5f;
         const float speed = m_leaving ? WALK_SPEED * 1.3f : WALK_SPEED;
         body.velocity.x = go ? std::sin(m_yaw) * speed : 0.0f;
@@ -255,5 +273,6 @@ class CaptureTarget {
     int m_speciesId = -1;
     int m_level = 1;
     bool m_shiny = false;
+    bool m_swims = false;
     int m_ballId = -1;
 };

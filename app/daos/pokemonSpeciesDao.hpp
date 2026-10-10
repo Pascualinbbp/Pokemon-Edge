@@ -26,6 +26,7 @@ class PokemonSpeciesDao {
             entry.catchRate = DaoRow::integer(row, "catch_rate");
             entry.minLevel = DaoRow::integer(row, "min_level");
             entry.maxLevel = DaoRow::integer(row, "max_level");
+            entry.swims = DaoRow::integer(row, "swims") != 0;
             entry.starter = DaoRow::integer(row, "starter") != 0;
             species.push_back(std::move(entry));
         }
@@ -87,5 +88,5 @@ class PokemonSpeciesDao {
 
     static constexpr const char* SELECT_POKEMON =
         "SELECT id, name, description, skill_id, skill_level, ability_id, passive_id, type1_id, type2_id, "
-        "hp, attack, sp_attack, defense, sp_defense, speed, catch_rate, min_level, max_level, generation_id, starter FROM pokemon ORDER BY id;";
+        "hp, attack, sp_attack, defense, sp_defense, speed, catch_rate, min_level, max_level, generation_id, starter, swims FROM pokemon ORDER BY id;";
 };

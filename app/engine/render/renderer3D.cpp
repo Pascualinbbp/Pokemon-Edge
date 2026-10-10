@@ -48,7 +48,7 @@ namespace {
     // al moverse el jugador) vista desde la dirección de la luz activa.
     constexpr float kNodeDrawRange = 90.0f; // los materiales de recolección más lejos no se dibujan
     constexpr UINT kShadowMapSize = 3072;
-    constexpr float kShadowHalfExtent = 92.0f; // cubre la diagonal del mundo (128 x 128)
+    constexpr float kShadowHalfExtent = 140.0f; // cubre la diagonal del mundo (192 x 192)
     constexpr float kLightDistance = 140.0f;
     constexpr float kLightNear = 20.0f;
     constexpr float kLightFar = 260.0f;
@@ -195,21 +195,41 @@ Renderer3D::Mesh Renderer3D::createMesh(ID3D11Device* device, const void* vertic
     return mesh;
 }
 
-// Suelo en tablero: 4 vértices y 6 índices por baldosa, generado una sola vez.
-Renderer3D::Mesh Renderer3D::createFloor(ID3D11Device* device, const HabitatMap& habitats, const GameData& data) {
-    constexpr float tile = 2.0f;
-    constexpr int tiles = static_cast<int>(2.0f * Scene::HALF_SIZE / tile);
-    static_assert(tiles * tiles * 4 <= 65535, "El suelo no cabe en índices de 16 bits");
+// Suelo con relieve: malla de vértices compartidos cada Heightfield::CELL metros, con la altura del terreno. Bajo el nivel del mar
+// los vértices se aplanan a la superficie del agua y se colorean según la profundidad (no hay una superficie de agua aparte).
+Renderer3D::Mesh Renderer3D::createFloor(ID3D11Device* device, const HabitatMap& habitats, const Physics::Heightfield& terrain, const GameData& data) {
+    constexpr float cell = Physics::Heightfield::CELL;
+    constexpr int cells = static_cast<int>(2.0f * Scene::HALF_SIZE / cell);
+    constexpr int side = cells + 1;
+    static_assert(side * side <= 65535, "El suelo no cabe en índices de 16 bits");
 
-    const XMFLOAT3 up = { 0.0f, 1.0f, 0.0f };
-    constexpr float CHECKER_SHADE = 0.88f; // las baldosas alternas son algo más oscuras
     constexpr XMFLOAT3 DEFAULT_GROUND = { 0.22f, 0.62f, 0.23f };
-
-    // Color del suelo en una esquina: mezcla de los colores de los hábitats según su peso allí.
     std::vector<XMFLOAT3> habitatColors;
     for (const Habitat& habitat : data.habitats) habitatColors.push_back(HabitatStyle::color(habitat.name));
+
+    // Color del agua según la profundidad: turquesa en la orilla, azul oscuro en lo profundo.
+    const auto waterColor = [](float depth) {
+        struct Stop { float depth; XMFLOAT3 color; };
+        static const Stop stops[] = { { 0.0f, { 0.38f, 0.80f, 0.86f } }, { 1.2f, { 0.24f, 0.62f, 0.82f } }, { 3.0f, { 0.14f, 0.44f, 0.76f } },
+                                      { 9.0f, { 0.07f, 0.26f, 0.58f } }, { 16.0f, { 0.03f, 0.10f, 0.32f } } };
+        constexpr int count = sizeof(stops) / sizeof(stops[0]);
+        if (depth <= stops[0].depth) return stops[0].color;
+        for (int i = 1; i < count; ++i) {
+            if (depth > stops[i].depth) continue;
+            const float t = (depth - stops[i - 1].depth) / (stops[i].depth - stops[i - 1].depth);
+            const XMFLOAT3& a = stops[i - 1].color;
+            const XMFLOAT3& b = stops[i].color;
+            return XMFLOAT3{ a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t };
+        }
+        return stops[count - 1].color;
+    };
+
     std::vector<float> weights;
-    const auto groundAt = [&](float x, float z, float shade) {
+    const auto groundColor = [&](float x, float z, float height) {
+        if (height < 0.0f) {
+            const XMFLOAT3 water = waterColor(-height);
+            return XMFLOAT4{ water.x, water.y, water.z, 1.0f };
+        }
         XMFLOAT3 color = habitatColors.empty() ? DEFAULT_GROUND : XMFLOAT3{ 0.0f, 0.0f, 0.0f };
         habitats.weights(x, z, weights);
         for (size_t i = 0; i < weights.size() && i < habitatColors.size(); ++i) {
@@ -217,28 +237,39 @@ Renderer3D::Mesh Renderer3D::createFloor(ID3D11Device* device, const HabitatMap&
             color.y += weights[i] * habitatColors[i].y;
             color.z += weights[i] * habitatColors[i].z;
         }
-        return XMFLOAT4{ color.x * shade, color.y * shade, color.z * shade, 1.0f };
+        // La tierra muy cerca del agua se ve húmeda y arenosa.
+        const float wet = (std::max)(0.0f, 1.0f - height / 0.35f) * 0.35f;
+        const XMFLOAT3 sand = { 0.78f, 0.72f, 0.50f };
+        return XMFLOAT4{ color.x + (sand.x - color.x) * wet, color.y + (sand.y - color.y) * wet, color.z + (sand.z - color.z) * wet, 1.0f };
     };
+    const auto surface = [&](float x, float z) { return (std::max)(terrain.sample(x, z), 0.0f); };
 
     std::vector<Vertex> vertices;
     std::vector<uint16_t> indices;
-    vertices.reserve(static_cast<size_t>(tiles) * tiles * 4);
-    indices.reserve(static_cast<size_t>(tiles) * tiles * 6);
+    vertices.reserve(static_cast<size_t>(side) * side);
+    indices.reserve(static_cast<size_t>(cells) * cells * 6);
 
-    for (int row = 0; row < tiles; ++row) {
-        for (int col = 0; col < tiles; ++col) {
-            const float x0 = -Scene::HALF_SIZE + col * tile;
-            const float z0 = -Scene::HALF_SIZE + row * tile;
-            const float x1 = x0 + tile;
-            const float z1 = z0 + tile;
-            const float shade = ((row + col) & 1) ? CHECKER_SHADE : 1.0f;
-
-            const int first = static_cast<int>(vertices.size());
-            vertices.push_back({ { x0, 0.0f, z0 }, up, groundAt(x0, z0, shade) });
-            vertices.push_back({ { x0, 0.0f, z1 }, up, groundAt(x0, z1, shade) });
-            vertices.push_back({ { x1, 0.0f, z0 }, up, groundAt(x1, z0, shade) });
-            vertices.push_back({ { x1, 0.0f, z1 }, up, groundAt(x1, z1, shade) });
-            for (const int i : { 0, 1, 2, 2, 1, 3 }) indices.push_back(static_cast<uint16_t>(first + i));
+    for (int row = 0; row < side; ++row) {
+        for (int col = 0; col < side; ++col) {
+            const float x = -Scene::HALF_SIZE + col * cell;
+            const float z = -Scene::HALF_SIZE + row * cell;
+            const float height = terrain.sample(x, z);
+            const float dx = surface(x + cell, z) - surface(x - cell, z);
+            const float dz = surface(x, z + cell) - surface(x, z - cell);
+            XMFLOAT3 normal = { -dx, 2.0f * cell, -dz };
+            const float length = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+            normal = { normal.x / length, normal.y / length, normal.z / length };
+            // Variación fina del tono para que el relieve se lea mejor.
+            const float tone = 0.96f + 0.04f * std::sin(x * 1.7f) * std::cos(z * 1.3f);
+            XMFLOAT4 color = groundColor(x, z, height);
+            color = { color.x * tone, color.y * tone, color.z * tone, 1.0f };
+            vertices.push_back({ { x, (std::max)(height, 0.0f), z }, normal, color });
+        }
+    }
+    for (int row = 0; row < cells; ++row) {
+        for (int col = 0; col < cells; ++col) {
+            const int i0 = row * side + col, i1 = i0 + 1, i2 = i0 + side, i3 = i2 + 1;
+            for (const int i : { i0, i2, i1, i1, i2, i3 }) indices.push_back(static_cast<uint16_t>(i));
         }
     }
     return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
@@ -781,7 +812,7 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     if (width <= 0 || height <= 0) return;
 
     if (!m_floorBuilt || m_floorSeed != scene.habitats.seed()) {
-        m_floor = createFloor(m_device, scene.habitats, scene.data());
+        m_floor = createFloor(m_device, scene.habitats, scene.world.terrain, scene.data());
         m_floorSeed = scene.habitats.seed();
         m_floorBuilt = true;
     }

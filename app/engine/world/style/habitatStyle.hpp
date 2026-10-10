@@ -15,6 +15,11 @@ namespace HabitatStyle {
         if (name == "Playa") return { 0.90f, 0.84f, 0.58f };
         if (name == "Río") return { 0.25f, 0.55f, 0.85f };
         if (name == "Lago") return { 0.15f, 0.40f, 0.72f };
+        if (name == "Orilla de río") return { 0.42f, 0.62f, 0.34f };
+        if (name == "Orilla de lago") return { 0.46f, 0.60f, 0.38f };
+        if (name == "Orilla del mar") return { 0.30f, 0.74f, 0.84f };
+        if (name == "Mar") return { 0.14f, 0.44f, 0.76f };
+        if (name == "Mar profundo") return { 0.05f, 0.18f, 0.46f };
         if (name == "Pantano") return { 0.30f, 0.38f, 0.22f };
         if (name == "Desierto") return { 0.82f, 0.66f, 0.36f };
         if (name == "Tundra") return { 0.86f, 0.92f, 0.96f };

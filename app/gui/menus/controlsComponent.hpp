@@ -10,8 +10,8 @@
 // Muestra únicamente los controles del dispositivo que se está usando.
 namespace ControlsComponent {
     namespace detail {
-        inline constexpr float PANEL_WIDTH = 760.0f;
-        inline constexpr float PANEL_HEIGHT = 372.0f;
+        inline constexpr float PANEL_WIDTH = 900.0f;
+        inline constexpr float PANEL_HEIGHT = 500.0f;
 
         // Posiciones (en el panel) de los elementos que cambian entre mandos.
         struct PadLayout {
@@ -34,29 +34,47 @@ namespace ControlsComponent {
         inline void drawKeyboard(ImDrawList* dl, const ImVec2& o) {
             using namespace GuiDraw;
             const float step = KEY_SIZE + KEY_GAP;
+            constexpr float ROW = 54.0f;          // separación vertical entre filas (las teclas miden 40)
+            constexpr float LEFT = 36.0f, RIGHT = 470.0f; // dos columnas, sin que nada se pise
 
-            // Movimiento: W / A S D
-            const ImVec2 move = offset(o, 40.0f, 30.0f);
+            // Columna izquierda: movimiento y acciones del personaje.
+            const ImVec2 move = offset(o, LEFT, 24.0f);
             keycap(dl, offset(move, step, 0.0f), "W");
             keycap(dl, offset(move, 0.0f, step), "A");
             keycap(dl, offset(move, step, step), "S");
             keycap(dl, offset(move, 2.0f * step, step), "D");
             label(dl, move.x + 3.0f * step + 12.0f, move.y + step - KEY_GAP * 0.5f, "Mover");
 
-            keyRow(dl, offset(o, 40.0f, 144.0f), { "W", "W" }, "Correr (pulsa W dos veces)");
-            keyRow(dl, offset(o, 40.0f, 204.0f), { "SHIFT" }, "Agacharse / Deslizarse", 90.0f);
-            keyRow(dl, offset(o, 40.0f, 264.0f), { "Q", "E" }, "Pokéball (apuntando) / pokémon (1-6)");
+            float y = 24.0f + 2.0f * step + 16.0f;
+            keyRow(dl, offset(o, LEFT, y), { "W", "W" }, "Correr (pulsa W dos veces)");
+            y += ROW;
+            keyRow(dl, offset(o, LEFT, y), { "SHIFT" }, "Agacharse / Deslizarse", 90.0f);
+            y += ROW;
+            keyRow(dl, offset(o, LEFT, y), { "ESPACIO" }, "Saltar", 120.0f);
+            y += ROW;
+            keyRow(dl, offset(o, LEFT, y), { "Q", "E" }, "Pokéball (apuntando) / pokémon");
+            y += ROW;
+            keyRow(dl, offset(o, LEFT, y), { "1-6" }, "Elegir pokémon del equipo", 70.0f);
 
-            keyRow(dl, offset(o, 420.0f, 30.0f), { "ESPACIO" }, "Saltar", 150.0f);
-            keyRow(dl, offset(o, 420.0f, 90.0f), { "ESC" }, "Pausa / Salir de apuntar", 60.0f);
-            keyRow(dl, offset(o, 420.0f, 150.0f), { "TAB" }, "Fijar objetivo (mantener: soltar)", 60.0f);
-            keyRow(dl, offset(o, 420.0f, 264.0f), { "F" }, "Interactuar");
-            keyRow(dl, offset(o, 600.0f, 264.0f), { "I" }, "Inventario");
-            keyRow(dl, offset(o, 420.0f, 318.0f), { "R" }, "Cambiar modo del pokémon");
-            keyRow(dl, offset(o, 600.0f, 318.0f), { "M" }, "Mapa");
-            mouse(dl, offset(o, 440.0f, 204.0f));
-            label(dl, o.x + 504.0f, o.y + 206.0f, "Mover la cámara");
-            label(dl, o.x + 504.0f, o.y + 228.0f, "Der.: apuntar · Izq.: lanzar");
+            // Columna derecha: interacción, menús y cámara.
+            y = 24.0f;
+            keyRow(dl, offset(o, RIGHT, y), { "F" }, "Interactuar (mantener: seguir trabajando)");
+            y += ROW;
+            keyRow(dl, offset(o, RIGHT, y), { "R" }, "Cambiar modo del equipo");
+            y += ROW;
+            keyRow(dl, offset(o, RIGHT, y), { "TAB" }, "Fijar objetivo (mantener: soltar)", 60.0f);
+            y += ROW;
+            keyRow(dl, offset(o, RIGHT, y), { "ESC" }, "Pausa / Salir de apuntar", 60.0f);
+            y += ROW;
+            keyRow(dl, offset(o, RIGHT, y), { "I" }, "Inventario");
+            y += ROW;
+            keyRow(dl, offset(o, RIGHT, y), { "M" }, "Mapa");
+            y += ROW;
+            keyRow(dl, offset(o, RIGHT, y), { "P" }, "Pokédex");
+            y += ROW;
+            mouse(dl, offset(o, RIGHT + 14.0f, y - 6.0f));
+            label(dl, o.x + RIGHT + 76.0f, o.y + y + 8.0f, "Mover la cámara");
+            label(dl, o.x + RIGHT + 76.0f, o.y + y + 30.0f, "Der.: apuntar · Izq.: lanzar");
         }
 
         inline void drawGamepad(ImDrawList* dl, const ImVec2& o, InputDevice device) {
@@ -143,6 +161,7 @@ namespace ControlsComponent {
             callout(fx, fy - 17.0f, fy - 17.0f, 550.0f, "Modo del pokémon");
             callout(350.0f, xbox ? 102.0f : 98.0f, 22.0f, 210.0f, "Inventario");
             callout(pauseX, pauseY, 14.0f, 550.0f, "Pausa");
+            callout(layout.dpadX, layout.dpadY, xbox ? 200.0f : 150.0f, 210.0f, "Mapa (arriba) / Pokédex (der.)");
         }
     }
 
@@ -159,7 +178,7 @@ namespace ControlsComponent {
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
         dl->AddRectFilled(origin, GuiDraw::offset(origin, detail::PANEL_WIDTH, detail::PANEL_HEIGHT), GuiStyle::PANEL, 12.0f);
-        if (isGamepad(device)) detail::drawGamepad(dl, origin, device);
+        if (isGamepad(device)) detail::drawGamepad(dl, GuiDraw::offset(origin, (detail::PANEL_WIDTH - 760.0f) * 0.5f, 60.0f), device);
         else detail::drawKeyboard(dl, origin);
 
         GuiLayout::gap(GuiLayout::GAP_SMALL);

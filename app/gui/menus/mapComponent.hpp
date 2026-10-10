@@ -17,7 +17,7 @@
 // aparición de sus pokémon.
 namespace MapComponent {
     namespace detail {
-        inline constexpr float MARGIN = 48.0f;
+        inline constexpr float MARGIN = 24.0f;
         inline constexpr int MAX_ROWS = 8; // filas de cada lista del detalle
 
         struct Entry {
@@ -122,8 +122,8 @@ namespace MapComponent {
         }
 
         // Capa inferior (sin explorar) y capa superior (terreno explorado).
-        const float top = MARGIN + 54.0f;
-        const float side = (std::min)(screen.y - top - MARGIN, screen.x * 0.56f);
+        const float top = MARGIN + 50.0f;
+        const float side = (std::min)(screen.y - top - MARGIN - 6.0f, screen.x * 0.68f); // el mapa ocupa casi toda la pantalla
         const ImVec2 a(MARGIN, top), b(a.x + side, a.y + side);
         const float cell = side / static_cast<float>(cells);
         dl->AddRectFilled(ImVec2(a.x - 6.0f, a.y - 6.0f), ImVec2(b.x + 6.0f, b.y + 6.0f), IM_COL32(14, 16, 26, 245), 10.0f);
@@ -163,7 +163,7 @@ namespace MapComponent {
         dl->AddTriangle(tip, left, right, IM_COL32(0, 0, 0, 230), 2.0f);
 
         // Panel de información.
-        const ImVec2 pa(b.x + 36.0f, a.y - 6.0f), pb(screen.x - MARGIN, b.y + 6.0f);
+        const ImVec2 pa(b.x + 24.0f, a.y - 6.0f), pb(screen.x - MARGIN, b.y + 6.0f);
         GuiCards::panel(dl, pa, pb);
         GuiCards::text(dl, ImVec2(pa.x + 16.0f, pa.y + 14.0f), GuiStyle::MUTED, "HÁBITATS EXPLORADOS", 0.9f);
         float x = pa.x + 16.0f;

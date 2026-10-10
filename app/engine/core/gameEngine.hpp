@@ -34,6 +34,7 @@ class GameEngine {
         m_scene.exploration.restore(save.explored);
         m_scene.inventory.restore(save.items, save.selectedBall, save.money);
         m_scene.storage.restore(save.team, save.pc, save.autoReleaseRank, save.activeIndex);
+        m_scene.storage.restoreDex(save.dexSeen, save.dexCaught);
         m_scene.progress.restore(save.playerLevel, save.playerXp, save.badges);
     }
 
@@ -46,6 +47,7 @@ class GameEngine {
         save.explored = m_scene.exploration.store();
         m_scene.inventory.store(save.items, save.selectedBall, save.money);
         m_scene.storage.store(save.team, save.pc);
+        m_scene.storage.storeDex(save.dexSeen, save.dexCaught);
         save.autoReleaseRank = m_scene.storage.autoRankIndex();
         save.activeIndex = m_scene.storage.activeIndex();
         save.playerLevel = m_scene.progress.level();

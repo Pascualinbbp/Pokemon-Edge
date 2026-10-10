@@ -58,6 +58,7 @@ struct PokemonSpecies {
     int maxLevel = 1;
     int generationId = -1;    // generación (tabla generation)
     std::vector<Evolution> evolutions; // vacío = no evoluciona
+    bool swims = false;       // acuático: solo aparece donde hay agua y se mueve por ella
     bool starter = false;     // se puede elegir como pokémon inicial
 
     // Evolución por nivel que corresponde a 'level'; si hay varias posibles, elige una según 'roll' (0..1). nullptr si no toca.

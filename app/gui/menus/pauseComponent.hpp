@@ -11,10 +11,10 @@ namespace PauseComponent {
     namespace detail {
         inline constexpr float MARGIN = 36.0f;
         inline constexpr float PANEL_WIDTH = 400.0f;
-        inline constexpr float ROW_HEIGHT = 84.0f;
-        inline constexpr float ROW_GAP = 12.0f;
+        inline constexpr float ROW_HEIGHT = 76.0f;
+        inline constexpr float ROW_GAP = 10.0f;
 
-        enum class Icon { BAG, POKEBALL, MAP, CONTROLS, EXIT };
+        enum class Icon { BAG, POKEBALL, DEX, MAP, CONTROLS, EXIT };
 
         inline void drawIcon(ImDrawList* dl, const ImVec2& c, float r, Icon icon) {
             const ImU32 white = IM_COL32(255, 255, 255, 255);
@@ -25,6 +25,11 @@ namespace PauseComponent {
                     break;
                 case Icon::POKEBALL:
                     ItemIcon::ball(dl, c, r * 0.9f, { 0.90f, 0.20f, 0.20f });
+                    break;
+                case Icon::DEX:
+                    dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y - r * 0.85f), ImVec2(c.x + r * 0.7f, c.y + r * 0.85f), white, r * 0.2f);
+                    dl->AddRectFilled(ImVec2(c.x - r * 0.45f, c.y - r * 0.6f), ImVec2(c.x + r * 0.45f, c.y + r * 0.05f), IM_COL32(40, 40, 55, 255), r * 0.1f);
+                    dl->AddCircleFilled(ImVec2(c.x, c.y + r * 0.5f), r * 0.17f, IM_COL32(230, 70, 60, 255));
                     break;
                 case Icon::MAP:
                     dl->AddRectFilled(ImVec2(c.x - r * 0.8f, c.y - r * 0.7f), ImVec2(c.x + r * 0.8f, c.y + r * 0.7f), white, r * 0.15f);
@@ -61,8 +66,8 @@ namespace PauseComponent {
             const ImVec2 c(a.x + 46.0f, a.y + ROW_HEIGHT * 0.5f);
             dl->AddCircleFilled(c, 28.0f, GuiStyle::ACCENT, 32);
             drawIcon(dl, c, 17.0f, icon);
-            GuiCards::text(dl, ImVec2(a.x + 94.0f, a.y + 17.0f), IM_COL32(255, 255, 255, 255), title, 1.2f);
-            GuiCards::text(dl, ImVec2(a.x + 94.0f, a.y + 46.0f), GuiStyle::MUTED, subtitle, 0.85f);
+            GuiCards::text(dl, ImVec2(a.x + 94.0f, a.y + 14.0f), IM_COL32(255, 255, 255, 255), title, 1.2f);
+            GuiCards::text(dl, ImVec2(a.x + 94.0f, a.y + 42.0f), GuiStyle::MUTED, subtitle, 0.85f);
             ImGui::Dummy(ImVec2(0.0f, ROW_GAP));
             return clicked;
         }
@@ -89,11 +94,13 @@ namespace PauseComponent {
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
         if (option(1, Icon::POKEBALL, "Pokémon", "Equipo y PC", width)) state = GameState::POKEMON;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
-        if (option(2, Icon::MAP, "Mapa", "Zonas exploradas y sus hábitats", width)) state = GameState::MAP;
+        if (option(2, Icon::DEX, "Pokédex", "Pokémon vistos y capturados", width)) state = GameState::POKEDEX;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
-        if (option(3, Icon::CONTROLS, "Controles", "Teclado y mando", width)) state = GameState::CONTROLS;
+        if (option(3, Icon::MAP, "Mapa", "Zonas exploradas y sus hábitats", width)) state = GameState::MAP;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
-        if (option(4, Icon::EXIT, "Menú principal", "Guarda la partida y sale", width)) state = GameState::MAIN_MENU;
+        if (option(4, Icon::CONTROLS, "Controles", "Teclado y mando", width)) state = GameState::CONTROLS;
+        ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
+        if (option(5, Icon::EXIT, "Menú principal", "Guarda la partida y sale", width)) state = GameState::MAIN_MENU;
 
         if (GuiInput::backPressed() || GuiInput::startPressed()) state = GameState::PLAYING;
     }

@@ -1,6 +1,7 @@
 #pragma once
 #include <optional>
 #include <DirectXMath.h>
+#include "../../physics/physicsWorld.hpp"
 #include "../../../models/gameData.hpp"
 #include "../../../utils/core/randomUtil.hpp"
 #include "../entities/groundItem.hpp"
@@ -22,13 +23,16 @@ namespace GroundSpawn {
     };
     inline constexpr int COUNT = static_cast<int>(sizeof(SPOTS) / sizeof(SPOTS[0]));
 
-    inline std::optional<GroundItem> make(const GameData& data, int spot) {
-        if (data.groundItems.empty()) return std::nullopt;
-        return GroundItem(spot, DirectX::XMFLOAT3{ SPOTS[spot][0], 0.0f, SPOTS[spot][1] });
+    // Qué dará un objeto suelto: índice en ground_item sorteado según su peso (se decide al aparecer para poder mostrarlo).
+    inline int pickReward(const GameData& data) {
+        const GroundItemType* reward = RandomUtil::pick(data.groundItems, [](const GroundItemType& g) { return g.spawnWeight; });
+        return reward ? static_cast<int>(reward - data.groundItems.data()) : -1;
     }
 
-    // Recompensa de recoger un objeto suelto: uno de la tabla ground_item según su peso. Devuelve nullptr si no hay.
-    inline const GroundItemType* pickReward(const GameData& data) {
-        return RandomUtil::pick(data.groundItems, [](const GroundItemType& g) { return g.spawnWeight; });
+    inline std::optional<GroundItem> make(const GameData& data, int spot) {
+        if (data.groundItems.empty()) return std::nullopt;
+        GroundItem item(spot, DirectX::XMFLOAT3{ SPOTS[spot][0], Physics::World::START_HEIGHT, SPOTS[spot][1] });
+        item.setReward(pickReward(data));
+        return item;
     }
 }

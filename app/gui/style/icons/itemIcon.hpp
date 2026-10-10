@@ -81,10 +81,13 @@ namespace ItemIcon {
     }
 
     // Pokémon: cubo del color de su especie con morro (igual que en el mundo).
-    inline void creature(ImDrawList* dl, const ImVec2& c, float r, int speciesId, float alpha = 1.0f) {
+    inline void creature(ImDrawList* dl, const ImVec2& c, float r, int speciesId, float alpha = 1.0f, float darken = 0.0f) {
         const DirectX::XMFLOAT3 tone = PokemonStyle::color(speciesId);
-        dl->AddRectFilled(ImVec2(c.x - r * 0.8f, c.y - r * 0.8f), ImVec2(c.x + r * 0.8f, c.y + r * 0.8f), detail::color(tone, alpha), r * 0.15f);
-        dl->AddRectFilled(ImVec2(c.x + r * 0.35f, c.y - r * 0.1f), ImVec2(c.x + r * 0.95f, c.y + r * 0.35f), IM_COL32(255, 230, 40, static_cast<int>(255.0f * alpha)), r * 0.08f);
+        const float keep = 1.0f - darken; // darken = 1 -> silueta casi negra (pokémon sin ver)
+        const DirectX::XMFLOAT3 shaded = { tone.x * keep, tone.y * keep, tone.z * keep };
+        const auto fade = [&](int r8, int g8, int b8) { return IM_COL32(static_cast<int>(r8 * keep), static_cast<int>(g8 * keep), static_cast<int>(b8 * keep), static_cast<int>(255.0f * alpha)); };
+        dl->AddRectFilled(ImVec2(c.x - r * 0.8f, c.y - r * 0.8f), ImVec2(c.x + r * 0.8f, c.y + r * 0.8f), detail::color(shaded, alpha), r * 0.15f);
+        dl->AddRectFilled(ImVec2(c.x + r * 0.35f, c.y - r * 0.1f), ImVec2(c.x + r * 0.95f, c.y + r * 0.35f), fade(255, 230, 40), r * 0.08f);
         dl->AddCircleFilled(ImVec2(c.x - r * 0.2f, c.y - r * 0.25f), r * 0.1f, IM_COL32(20, 20, 25, static_cast<int>(255.0f * alpha)));
     }
 

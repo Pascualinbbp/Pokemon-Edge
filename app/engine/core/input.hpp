@@ -25,8 +25,10 @@ struct InputState {
     bool lockCancel = false;  // TAB / R3 mantenido: soltar el objetivo
     bool inventory = false;   // I / Select (View en Xbox): abrir el inventario
     bool map = false;         // M / cruceta arriba: abrir el mapa
+    bool pokedex = false;     // P / cruceta derecha: abrir la Pokédex
     bool modeSwitch = false;  // R / triángulo (Y en Xbox): cambiar el modo del pokémon que acompaña
     bool interact = false;    // F / cuadrado (X en Xbox): abrir un cofre cercano
+    bool interactHeld = false; // F / cuadrado mantenido: sigue trabajando el recurso cercano
     int ballSwitch = 0;       // Q / E / rueda del ratón / L1 / R1: -1 pokéball (o pokémon) anterior, +1 siguiente
     int teamSelect = 0;       // teclas 1..6: pokémon del equipo que pasa a acompañar al jugador (0 = ninguna)
 };

@@ -319,6 +319,7 @@ namespace PokemonComponent {
                     storage.release(std::vector<int>(teamMarks.begin(), teamMarks.end()), std::vector<int>(pcMarks.begin(), pcMarks.end()));
                     clearMarks();
                     select({ true, 0 });
+                    selecting = false; // terminada la liberación se sale del modo
                 }
             }
 
@@ -454,11 +455,11 @@ namespace PokemonComponent {
                 }
             }
 
-            // Modo del acompañante (solo para los del equipo): recolección, captura o combate.
+            // Modo del equipo entero (solo en la ficha de los del equipo): recolección, captura o combate.
             if (selection.inTeam) {
-                std::snprintf(text, sizeof(text), "MODO: %s", CompanionRules::label(owned.mode));
+                std::snprintf(text, sizeof(text), "MODO: %s", CompanionRules::label(storage.mode));
                 ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + 106.0f));
-                if (GuiCards::button("##mode", text, ImVec2(200.0f, 28.0f), true, IM_COL32(70, 90, 150, 255))) storage.cycleMode(true, selection.index);
+                if (GuiCards::button("##mode", text, ImVec2(200.0f, 28.0f), true, IM_COL32(70, 90, 150, 255))) storage.cycleMode();
             }
 
             const float left = pos.x + 16.0f, width = size.x - 32.0f;

@@ -87,9 +87,10 @@ class Camera {
         return eyePos;
     }
 
-    DirectX::XMMATRIX viewMatrix(const DirectX::XMFLOAT3& target) const {
+    DirectX::XMMATRIX viewMatrix(const DirectX::XMFLOAT3& target, float minEyeY = -1.0e9f) const {
         DirectX::XMFLOAT3 at, eyePos;
         compute(target, at, eyePos);
+        eyePos.y = (std::max)(eyePos.y, minEyeY);
         return DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&eyePos), DirectX::XMLoadFloat3(&at), DirectX::g_XMIdentityR1);
     }
 

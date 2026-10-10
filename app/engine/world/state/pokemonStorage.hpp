@@ -21,7 +21,6 @@ struct OwnedPokemon {
     EvRules::Evs evs = {};          // EVs actuales: empiezan en 0 y suben entrenándolo
     EvRules::Evs evCaps = {};       // EVs máximos con los que salió (su potencial)
     int xp = 0;                     // experiencia hacia el siguiente nivel (no se guarda)
-    CompanionRules::Mode mode = CompanionRules::Mode::COLLECT; // qué hace cuando acompaña al jugador (no se guarda)
 };
 
 // Resultado de un análisis de la máquina de investigación.
@@ -54,6 +53,20 @@ class PokemonStorage {
         m_pc.clear();
         m_autoMin = EvRules::Rank::D;
         m_active = 0;
+        m_dex.assign(data.species.size(), DEX_UNSEEN);
+    }
+
+    // --- Pokédex: cada especie está sin ver, vista o capturada (una vez capturada no vuelve atrás). ---
+    enum DexState : unsigned char { DEX_UNSEEN = 0, DEX_SEEN = 1, DEX_CAUGHT = 2 };
+    DexState dexState(int speciesId) const {
+        const int index = m_data->speciesIndex(speciesId);
+        return index >= 0 && index < static_cast<int>(m_dex.size()) ? static_cast<DexState>(m_dex[index]) : DEX_UNSEEN;
+    }
+    void markSeen(int speciesId) { markDex(speciesId, DEX_SEEN); }
+    int dexCount(DexState atLeast) const {
+        int count = 0;
+        for (const unsigned char state : m_dex) count += state >= atLeast ? 1 : 0;
+        return count;
     }
 
     const std::vector<OwnedPokemon>& team() const { return m_team; }
@@ -73,6 +86,7 @@ class PokemonStorage {
         sentToPc = teamFull();
         OwnedPokemon stored = owned;
         stored.uid = m_nextUid++;
+        markDex(owned.speciesId, DEX_CAUGHT);
         if (!sentToPc) m_team.push_back(stored);
         else if (!pcFull()) m_pc.push_back(stored);
         else return false;
@@ -165,6 +179,7 @@ class PokemonStorage {
         const Evolution* evolution = species ? species->levelEvolution(owned->level, RandomUtil::range(0.0f, 1.0f)) : nullptr;
         if (evolution && m_data->speciesById(evolution->toId)) {
             owned->speciesId = evolution->toId;
+            markDex(owned->speciesId, DEX_CAUGHT);
             return LevelResult::EVOLVED;
         }
         return LevelResult::LEVELED;
@@ -188,10 +203,9 @@ class PokemonStorage {
         return result;
     }
 
-    // Modo del pokémon (qué hace cuando acompaña al jugador).
-    void cycleMode(bool inTeam, int index) {
-        if (OwnedPokemon* owned = at(inTeam, index)) owned->mode = CompanionRules::next(owned->mode);
-    }
+    // Modo de todo el equipo (qué hace el pokémon que acompaña al jugador; no se guarda).
+    CompanionRules::Mode mode = CompanionRules::Mode::COLLECT;
+    void cycleMode() { mode = CompanionRules::next(mode); }
 
     // Suma hasta 'amount' EVs en una estadística (sin pasar de su máximo). Devuelve false si no cambia nada.
     bool train(bool inTeam, int index, int stat, int amount) {
@@ -249,6 +263,24 @@ class PokemonStorage {
         pc = encode(m_pc);
     }
 
+    // Pokédex guardada por nombre de especie: las vistas y las capturadas.
+    void storeDex(std::vector<std::string>& seen, std::vector<std::string>& caught) const {
+        seen.clear();
+        caught.clear();
+        for (size_t i = 0; i < m_dex.size() && i < m_data->species.size(); ++i) {
+            if (m_dex[i] == DEX_CAUGHT) caught.push_back(m_data->species[i].name);
+            else if (m_dex[i] == DEX_SEEN) seen.push_back(m_data->species[i].name);
+        }
+    }
+
+    void restoreDex(const std::vector<std::string>& seen, const std::vector<std::string>& caught) {
+        m_dex.assign(m_data->species.size(), DEX_UNSEEN);
+        for (const std::string& name : seen) if (const int i = m_data->speciesIndexByName(name); i >= 0) m_dex[i] = DEX_SEEN;
+        for (const std::string& name : caught) if (const int i = m_data->speciesIndexByName(name); i >= 0) m_dex[i] = DEX_CAUGHT;
+        for (const OwnedPokemon& owned : m_team) markDex(owned.speciesId, DEX_CAUGHT); // partidas antiguas: lo que ya tienes está capturado
+        for (const OwnedPokemon& owned : m_pc) markDex(owned.speciesId, DEX_CAUGHT);
+    }
+
     void restore(const std::vector<std::string>& team, const std::vector<std::string>& pc, int autoRank, int active) {
         m_team.clear();
         m_pc.clear();
@@ -262,6 +294,12 @@ class PokemonStorage {
 
     private:
     static constexpr char SEPARATOR = '|';
+
+    void markDex(int speciesId, DexState state) {
+        const int index = m_data->speciesIndex(speciesId);
+        if (index >= 0 && index < static_cast<int>(m_dex.size()) && m_dex[index] < state) m_dex[index] = state;
+    }
+    std::vector<unsigned char> m_dex;
 
     // Quita a un pokémon del equipo manteniendo como activo al mismo (o al que ocupe su lugar si era él).
     void eraseFromTeam(int index) {

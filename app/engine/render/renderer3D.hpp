@@ -69,7 +69,7 @@ class Renderer3D {
 
     static Mesh createMesh(ID3D11Device* device, const void* vertices, UINT vertexCount, UINT stride,
         const std::vector<uint16_t>& indices);
-    static Mesh createFloor(ID3D11Device* device, const HabitatMap& habitats, const GameData& data);
+    static Mesh createFloor(ID3D11Device* device, const HabitatMap& habitats, const Physics::Heightfield& terrain, const GameData& data);
     static Mesh createPlayer(ID3D11Device* device);
     static Mesh createCube(ID3D11Device* device);
     static Mesh createSphere(ID3D11Device* device, bool dome = false); // pokéball o, con dome, la semiesfera superior blanca

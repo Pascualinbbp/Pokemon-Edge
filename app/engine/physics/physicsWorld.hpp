@@ -3,13 +3,18 @@
 #include <cmath>
 #include <vector>
 #include "body.hpp"
+#include "heightfield.hpp"
 
 namespace Physics {
     // Reglas físicas compartidas por todas las entidades del mundo.
     class World {
         public:
         static constexpr float GRAVITY = 20.0f;
-        static constexpr float HALF_SIZE = 64.0f; // el mundo va de -HALF_SIZE a +HALF_SIZE en X y Z
+        static constexpr float HALF_SIZE = 96.0f; // el mundo va de -HALF_SIZE a +HALF_SIZE en X y Z
+        static constexpr float WATER_LEVEL = 0.0f; // altura de la superficie del agua (mar, ríos y lagos)
+        static constexpr float SWIM_DEPTH = 0.6f;  // con más agua que esto no se camina: se nada
+        static constexpr float START_HEIGHT = 1.0f; // altura del terreno plano de la zona de inicio (paredes, máquina...)
+        static constexpr float SUBMERGED = 0.4f;   // fracción de la altura de un cuerpo que se hunde al flotar
         static constexpr float STEP_HEIGHT = 0.3f; // desnivel que se sube andando; por debajo de la cara superior menos esto, el sólido bloquea
         static constexpr float SLIDE_SPEED = 5.0f; // velocidad con la que se resbala de lo que no admite quedarse encima
 
@@ -27,8 +32,15 @@ namespace Physics {
         std::vector<Box> creatures; // hitbox de los pokémon: la escena los rehace cada frame
         std::vector<Box> props;     // objetos sólidos del mundo (cofres, rocas, árboles...): la escena los rehace cada frame
 
-        // Altura del terreno en (x, z). De momento el suelo es plano; aquí irá el terreno generado.
-        float groundHeight(float, float) const { return 0.0f; }
+        Heightfield terrain; // relieve del mundo (lo rellena la escena al generarlo)
+
+        // Altura del terreno en (x, z) (bajo el agua es el fondo).
+        float groundHeight(float x, float z) const { return terrain.sample(x, z); }
+        // Altura de lo que se ve: el terreno o la superficie del agua.
+        float surfaceHeight(float x, float z) const { return (std::max)(groundHeight(x, z), WATER_LEVEL); }
+        // Profundidad del agua en (x, z) (0 = tierra).
+        float waterDepth(float x, float z) const { return (std::max)(0.0f, WATER_LEVEL - groundHeight(x, z)); }
+        bool swimmable(float x, float z) const { return waterDepth(x, z) > SWIM_DEPTH; }
 
         // ¿Hay algún sólido fijo (paredes, rocas, árboles, cofres...) entre dos puntos? Los pokémon no cuentan.
         bool blocked(const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to) const {
@@ -122,7 +134,8 @@ namespace Physics {
         // Altura del suelo bajo el cuerpo: el terreno o la cara superior más alta de los sólidos que tiene debajo.
         // En los que no admiten quedarse encima (pokémon, personajes) el cuerpo se posa un instante y resbala.
         float supportHeight(Body& body, float previousLow, float dt) const {
-            float height = groundHeight(body.position.x, body.position.z);
+            // Sobre el agua los cuerpos flotan, algo hundidos según su altura.
+            float height = (std::max)(groundHeight(body.position.x, body.position.z), WATER_LEVEL - body.collisionHeight * SUBMERGED);
             if (body.collisionRadius <= 0.0f) return height;
 
             forEachSolid(body, [&](const Box& box) {

@@ -19,12 +19,13 @@ class ChestField {
     static constexpr float EXCLUSION_RADIUS = 14.0f; // nunca aparece uno tan cerca del jugador
     static constexpr float INTERVAL = 6.0f;          // segundos entre intentos de generar un cofre
     static constexpr int PLACE_TRIES = 10;
+    static constexpr float MIN_LAND = 0.35f;         // altura mínima del terreno para colocar un cofre
 
     std::vector<Chest> entities;
 
     // 'day' cambia cada vez que empieza un día: se rehacen los objetivos por zona y los topes de cada hábitat.
     void update(float dt, int day, float playerX, float playerZ, const GameData& data, const HabitatMap& habitats,
-                const std::vector<Physics::World::Box>& walls) {
+                const Physics::World& world) {
         for (Chest& chest : entities) chest.update(dt);
         entities.erase(std::remove_if(entities.begin(), entities.end(), [](const Chest& c) { return c.finished(); }), entities.end());
         if (data.chests.empty() || habitats.zones().empty()) return;
@@ -52,11 +53,11 @@ class ChestField {
             const float angle = RandomUtil::range(0.0f, 6.2831853f), radial = std::sqrt(RandomUtil::range(0.0f, 1.0f));
             const float u = std::cos(angle) * radial * zone.radius * zone.stretch, v = std::sin(angle) * radial * zone.radius / zone.stretch;
             const float x = zone.x + u * zone.cosA - v * zone.sinA, z = zone.z + u * zone.sinA + v * zone.cosA;
-            if (!valid(x, z, playerX, playerZ, walls)) continue;
+            if (!valid(x, z, playerX, playerZ, world)) continue;
 
             const int type = ChestRules::pickType(data.chests);
             if (type < 0) return;
-            entities.emplace_back(zoneIndex, type, data.chests[type].rarity, DirectX::XMFLOAT3{ x, 0.0f, z }, RandomUtil::range(-3.14159265f, 3.14159265f));
+            entities.emplace_back(zoneIndex, type, data.chests[type].rarity, DirectX::XMFLOAT3{ x, world.groundHeight(x, z), z }, RandomUtil::range(-3.14159265f, 3.14159265f));
             --m_budget[zone.habitat];
             return;
         }
@@ -69,13 +70,13 @@ class ChestField {
         return count;
     }
 
-    bool valid(float x, float z, float playerX, float playerZ, const std::vector<Physics::World::Box>& walls) const {
+    bool valid(float x, float z, float playerX, float playerZ, const Physics::World& world) const {
         const float half = Physics::World::HALF_SIZE - 2.0f;
-        if (std::fabs(x) > half || std::fabs(z) > half) return false;
+        if (std::fabs(x) > half || std::fabs(z) > half || world.groundHeight(x, z) < MIN_LAND) return false; // nunca en el agua
         if ((x - playerX) * (x - playerX) + (z - playerZ) * (z - playerZ) < EXCLUSION_RADIUS * EXCLUSION_RADIUS) return false;
         const float mx = x - ResearchMachine::POSITION.x, mz = z - ResearchMachine::POSITION.z;
         if (mx * mx + mz * mz < 16.0f) return false;
-        for (const Physics::World::Box& wall : walls) {
+        for (const Physics::World::Box& wall : world.obstacles) {
             if (std::fabs(x - wall.center.x) < wall.half.x + 2.0f && std::fabs(z - wall.center.z) < wall.half.z + 2.0f) return false;
         }
         for (const Chest& chest : entities) {

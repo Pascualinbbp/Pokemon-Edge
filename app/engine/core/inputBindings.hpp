@@ -13,6 +13,7 @@ namespace InputBindings {
     inline constexpr uint16_t PAD_INTERACT = Gamepad::WEST; // cuadrado en PlayStation, X en Xbox: abrir cofres
     inline constexpr uint16_t PAD_INVENTORY = Gamepad::BACK; // Select en PlayStation, Ver en Xbox: inventario
     inline constexpr uint16_t PAD_MAP = Gamepad::DPAD_UP;   // cruceta arriba: mapa
+    inline constexpr uint16_t PAD_POKEDEX = Gamepad::DPAD_RIGHT; // cruceta derecha: Pokédex
     inline constexpr uint16_t PAD_MODE = Gamepad::NORTH;   // triángulo en PlayStation, Y en Xbox: modo del pokémon
     inline constexpr uint16_t PAD_BALL_PREV = Gamepad::L1; // pokéball anterior
     inline constexpr uint16_t PAD_BALL_NEXT = Gamepad::R1; // pokéball siguiente

@@ -27,11 +27,13 @@ class WildField {
     static constexpr float EDGE = 1.5f;             // separación de los pokémon al borde de su chunk
     static constexpr int POINT_TRIES = 10;
 
-    // Elige especie, nivel y brillo de un pokémon recién colocado.
+    // Los pokémon solo nacen en el semicírculo que el jugador tiene delante (hacia donde mira la cámara, yaw).
+    // assign elige especie, nivel y brillo del recién colocado; devuelve false si ahí no puede vivir ninguno.
     template <typename Assign>
-    void update(float dt, float playerX, float playerZ, const GameData& data, const HabitatMap& habitats, Assign assign) {
+    void update(float dt, float playerX, float playerZ, float yaw, const GameData& data, const HabitatMap& habitats, Assign assign) {
         if (m_chunks.empty()) m_chunks.resize(CHUNKS * CHUNKS);
         m_loaded.clear();
+        m_view = { std::sin(yaw), std::cos(yaw) };
 
         // Vivos dentro de la zona de aparición y chunks por poblar (los más cercanos primero).
         int alive = 0;
@@ -51,6 +53,7 @@ class WildField {
             const int count = countFor(entry.second % CHUNKS, entry.second / CHUNKS, data, habitats);
             if (alive + count > MAX_IN_ZONE) break;
             alive += populate(entry.second % CHUNKS, entry.second / CHUNKS, count, playerX, playerZ, assign);
+            if (alive >= MAX_IN_ZONE) break;
         }
 
         for (int row = 0; row < CHUNKS; ++row) {
@@ -65,8 +68,8 @@ class WildField {
                             DirectX::XMFLOAT2 at;
                             if (pointIn(col, row, playerX, playerZ, at, &wild)) {
                                 wild.place(at.x, at.y, RandomUtil::range(-3.14159265f, 3.14159265f));
-                                assign(wild);
-                                ++alive;
+                                if (assign(wild)) ++alive;
+                                else wild.discard();
                             }
                         }
                         awake = true;
@@ -127,7 +130,9 @@ class WildField {
             out = { -Physics::World::HALF_SIZE + col * CHUNK + RandomUtil::range(EDGE, CHUNK - EDGE),
                     -Physics::World::HALF_SIZE + row * CHUNK + RandomUtil::range(EDGE, CHUNK - EDGE) };
             const float dx = out.x - px, dz = out.y - pz;
-            if (dx * dx + dz * dz > EXCLUSION_RADIUS * EXCLUSION_RADIUS && !crowded(col, row, out, ignore)) return true;
+            const float d2 = dx * dx + dz * dz;
+            const bool inFront = dx * m_view.x + dz * m_view.y >= 0.0f; // semicírculo delantero
+            if (inFront && d2 > EXCLUSION_RADIUS * EXCLUSION_RADIUS && d2 <= SPAWN_RADIUS * SPAWN_RADIUS && !crowded(col, row, out, ignore)) return true;
         }
         return false;
     }
@@ -148,7 +153,6 @@ class WildField {
     template <typename Assign>
     int populate(int col, int row, int count, float px, float pz, Assign& assign) {
         Chunk& chunk = m_chunks[row * CHUNKS + col];
-        chunk.populated = true;
         chunk.wilds.reserve(MAX_PER_CHUNK); // sin realojar: Scene guarda punteros a estos pokémon
         int placed = 0;
         for (int i = 0; i < count; ++i) {
@@ -156,13 +160,16 @@ class WildField {
             if (!pointIn(col, row, px, pz, at)) continue;
             CaptureTarget wild;
             wild.place(at.x, at.y, RandomUtil::range(-3.14159265f, 3.14159265f));
-            assign(wild);
+            if (!assign(wild)) continue;
             chunk.wilds.push_back(std::move(wild));
             ++placed;
         }
+        // Un chunk que está detrás del jugador no se da por poblado: se reintenta cuando quede delante.
+        chunk.populated = count == 0 || placed > 0;
         return placed;
     }
 
+    DirectX::XMFLOAT2 m_view = { 0.0f, 1.0f }; // hacia dónde mira el jugador (x, z)
     std::vector<Chunk> m_chunks;
     std::vector<CaptureTarget*> m_loaded;
     std::vector<std::pair<float, int>> m_pending;
