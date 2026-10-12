@@ -4,13 +4,13 @@
 #include <vector>
 #include "../../physics/physicsWorld.hpp"
 
-// Lo que el jugador ha explorado del mundo: una cuadrícula de celdas de 2 m que se destapan alrededor de donde pasa.
+// Lo que el jugador ha explorado del mundo: una cuadrícula de celdas de 4 m que se destapan alrededor de donde pasa.
 // Es lo que desbloquea el mapa grande; el minimapa y el mapa comparten esta misma cuadrícula (CELL y SIZE).
 class Exploration {
     public:
-    static constexpr float CELL = 2.0f;
+    static constexpr float CELL = 4.0f;
     static constexpr int SIZE = static_cast<int>(2.0f * Physics::World::HALF_SIZE / CELL);
-    static constexpr float REVEAL_RADIUS = 18.0f;
+    static constexpr float REVEAL_RADIUS = 28.0f;
 
     static int cellOf(float coordinate) { return static_cast<int>(std::floor((coordinate + Physics::World::HALF_SIZE) / CELL)); }
     static float centerOf(int cell) { return -Physics::World::HALF_SIZE + (cell + 0.5f) * CELL; }

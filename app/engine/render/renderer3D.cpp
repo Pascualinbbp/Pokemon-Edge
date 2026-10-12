@@ -44,16 +44,23 @@ namespace {
     const XMFLOAT4 kWallTint = { 0.62f, 0.58f, 0.52f, 0.0f };
     const XMFLOAT4 kNoseTint = { 1.0f, 0.90f, 0.15f, 0.0f };
 
-    // Mapa de sombras: una proyección ortográfica fija que cubre todo el mundo (así las sombras no "nadan"
-    // al moverse el jugador) vista desde la dirección de la luz activa.
+    // Mapa de sombras: una proyección ortográfica centrada en el jugador (el mundo es enorme) cuyo centro salta de texel en
+    // texel, así las sombras no "nadan" al moverse. Vista desde la dirección de la luz activa.
     constexpr float kNodeDrawRange = 90.0f; // los materiales de recolección más lejos no se dibujan
     constexpr UINT kShadowMapSize = 3072;
-    constexpr float kShadowHalfExtent = 140.0f; // cubre la diagonal del mundo (192 x 192)
-    constexpr float kLightDistance = 140.0f;
-    constexpr float kLightNear = 20.0f;
-    constexpr float kLightFar = 260.0f;
+    constexpr float kShadowHalfExtent = 80.0f; // radio de mundo que recibe sombras alrededor del jugador
+    constexpr float kLightDistance = 400.0f;
+    constexpr float kLightDepth = 500.0f;      // profundidad total del volumen de sombras (cubre desde el mar hasta la isla del cielo)
+    constexpr float kFarPlane = 700.0f;
+    constexpr float kTerrainDrawRange = 640.0f; // los trozos de terreno más lejos no se dibujan
+    constexpr int kChunkCells = 32;             // celdas por lado de cada trozo de terreno (33 x 33 vértices: cabe en índices de 16 bits)
+    constexpr float kFogDensity = 0.0020f;
+    constexpr float kWaterFogDensity = 0.07f;
+    constexpr float kOceanHalf = 1500.0f;
+    constexpr float kHip = 0.62f;               // altura de la cadera del personaje
+    constexpr float ROD_LENGTH = 1.8f;          // largo de la caña
     constexpr float kShadowNormalOffset = 0.05f; // evita el moteado en superficies casi paralelas a la luz
-    constexpr float kShadowDepthBias = 0.0004f;
+    constexpr float kShadowDepthBias = 0.0001f;
 
     constexpr const char* kShaderCode = R"(
         cbuffer Object : register(b0) {
@@ -74,6 +81,9 @@ namespace {
             float4 SkyHorizon;
             float4 SkyParams;
             float4 ShadowParams; // x = texel, y = desplazamiento por la normal, z = sesgo
+            float4 CameraPos;    // xyz = cámara, w = marea
+            float4 Env;          // x = oscuridad, y = densidad de niebla, z = bajo el agua, w = radio del archipiélago
+            float4 FogColor;
         }
         Texture2D ShadowMap : register(t0);
         SamplerComparisonState ShadowSampler : register(s0);
@@ -106,6 +116,15 @@ namespace {
             return sum / 9.0f;
         }
 
+        // Niebla (o agua turbia bajo la superficie) y oscuridad de cuevas: solo se ve lo que queda cerca de la luz del jugador.
+        float3 ApplyEnv(float3 color, float3 wpos) {
+            float dist = length(wpos - CameraPos.xyz);
+            float torch = saturate(1.0f - dist / 28.0f);
+            color *= lerp(1.0f, torch * torch + 0.03f, Env.x);
+            float fog = 1.0f - exp(-dist * Env.y);
+            return lerp(color, FogColor.rgb, saturate(fog));
+        }
+
         float4 PS(PS_IN input) : SV_Target {
             float3 n = normalize(input.nrm);
             float diffuse = saturate(dot(n, LightDir.xyz));
@@ -115,7 +134,7 @@ namespace {
             // El alfa del vértice indica cuánto se tiñe (1 = todo, 0 = conserva su color); el alfa del tinte es el brillo propio.
             float3 albedo = lerp(input.col.rgb, input.col.rgb * Tint.rgb, input.col.a);
             float3 shaded = albedo * (ambient + LightColor.rgb * diffuse * lit);
-            return float4(saturate(lerp(shaded, albedo, Tint.a)), 1.0f);
+            return float4(ApplyEnv(saturate(lerp(shaded, albedo, Tint.a)), input.wpos), 1.0f);
         }
 
         // --- Mapa de sombras: solo profundidad ---
@@ -178,7 +197,90 @@ namespace {
             sky = lerp(sky, float3(0.92f, 0.94f, 1.0f), above * moon * saturate(MoonDir.y * 6.0f + 0.5f));
             sky += above * pow(saturate(moonDot), 220.0f) * 0.25f * float3(0.7f, 0.8f, 1.0f) * saturate(MoonDir.y * 4.0f);
 
+            sky = lerp(sky, FogColor.rgb, Env.z);   // bajo el agua no hay cielo
+            sky *= 1.0f - Env.x * 0.97f;            // en una cueva tampoco
             return float4(saturate(sky), 1.0f);
+        }
+
+        // --- Agua: olas, marea, corriente, transparencia según la profundidad, espuma y reflejo del cielo ---
+        // Por vértice: pos = superficie base, nrm = (profundidad, corriente x, corriente z), col.a = tipo
+        // (0 mar, 1 río, 2 lago, 3 charca de pantano, 4 cascada, 5 mar abierto hasta el horizonte).
+        struct WATER_IN { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 info : TEXCOORD1; float kind : TEXCOORD2; };
+
+        float WaveHeight(float2 p, float kind, float t) {
+            float amp = kind < 0.5f ? 0.22f : kind < 1.5f ? 0.05f : kind < 2.5f ? 0.09f : kind < 3.5f ? 0.02f : 0.10f;
+            float h = sin(dot(p, float2(0.55f, 0.35f)) + t * 1.3f) * 0.6f
+                    + sin(dot(p, float2(-0.31f, 0.72f)) + t * 1.7f) * 0.3f
+                    + sin(dot(p, float2(1.10f, -0.40f)) + t * 2.3f) * 0.1f;
+            return h * amp;
+        }
+
+        WATER_IN VS_WATER(VS_IN input) {
+            WATER_IN output;
+            float kind = floor(input.col.a + 0.5f);
+            bool sea = kind < 0.5f || kind > 4.5f;
+            float3 p = input.pos;
+            p.y += (sea ? CameraPos.w : 0.0f) + WaveHeight(p.xz, kind > 4.5f ? 0.0f : kind, SkyParams.w);
+            output.pos = mul(float4(p, 1.0f), WorldViewProj);
+            output.wpos = p;
+            output.info = float3(input.nrm.x + (sea ? CameraPos.w : 0.0f), input.nrm.y, input.nrm.z);
+            output.kind = kind;
+            return output;
+        }
+
+        float4 PS_WATER(WATER_IN input) : SV_Target {
+            float k = floor(input.kind + 0.5f);
+            float2 pxz = input.wpos.xz;
+            if (k > 4.5f) clip(length(pxz) - (Env.w - 8.0f)); // el mar abierto solo fuera del archipiélago
+            float t = SkyParams.w;
+            float kk = k > 4.5f ? 0.0f : k;
+
+            float e = 0.35f;
+            float h0 = WaveHeight(pxz, kk, t);
+            float hx = WaveHeight(pxz + float2(e, 0.0f), kk, t);
+            float hz = WaveHeight(pxz + float2(0.0f, e), kk, t);
+            float3 n = normalize(float3(-(hx - h0) / e * 2.5f, 1.0f, -(hz - h0) / e * 2.5f));
+            float3 v = normalize(CameraPos.xyz - input.wpos);
+            float depth = input.info.x;
+            float2 flow = input.info.yz;
+
+            float3 shallow, deep;
+            float full;
+            if (k < 0.5f || k > 4.5f) { shallow = float3(0.30f, 0.80f, 0.84f); deep = float3(0.03f, 0.18f, 0.42f); full = 7.0f; }
+            else if (k < 1.5f)        { shallow = float3(0.38f, 0.74f, 0.74f); deep = float3(0.10f, 0.36f, 0.52f); full = 2.5f; }
+            else if (k < 2.5f)        { shallow = float3(0.30f, 0.68f, 0.74f); deep = float3(0.06f, 0.28f, 0.46f); full = 4.0f; }
+            else if (k < 3.5f)        { shallow = float3(0.30f, 0.46f, 0.16f); deep = float3(0.10f, 0.24f, 0.10f); full = 0.8f; }
+            else                      { shallow = float3(0.80f, 0.92f, 0.96f); deep = float3(0.45f, 0.70f, 0.85f); full = 1.5f; }
+            float tdep = saturate(depth / full);
+            float3 base = lerp(shallow, deep, sqrt(tdep));
+            float alpha = (k > 2.5f && k < 3.5f) ? lerp(0.55f, 0.92f, tdep) : (k > 3.5f && k < 4.5f) ? 0.85f : lerp(0.28f, 0.96f, sqrt(tdep));
+            alpha *= smoothstep(0.0f, 0.25f, depth); // en la orilla es transparente
+            if (k > 4.5f) alpha = 1.0f;
+
+            float diff = saturate(dot(n, LightDir.xyz));
+            float3 color = base * (AmbientSky.rgb + LightColor.rgb * diff * 0.8f);
+            float fres = 0.04f + 0.70f * pow(1.0f - saturate(dot(n, v)), 4.0f);
+            color = lerp(color, SkyHorizon.rgb * 0.9f + AmbientSky.rgb * 0.2f, fres);
+            float spec = pow(saturate(dot(reflect(-LightDir.xyz, n), v)), 90.0f);
+            color += LightColor.rgb * spec * ((k > 2.5f && k < 3.5f) ? 0.2f : 1.2f);
+
+            // Espuma en la orilla, rayas de corriente y cascadas.
+            float foam = 0.0f;
+            if (k < 2.5f) {
+                float edge = 1.0f - smoothstep(0.0f, 0.5f, depth);
+                float wob = 0.5f + 0.5f * sin(t * 1.8f + pxz.x * 0.9f + pxz.y * 0.7f);
+                foam = edge * (0.4f + 0.6f * wob);
+            }
+            float speed = length(flow);
+            if (speed > 0.05f) {
+                float2 d = flow / speed;
+                float s = sin(dot(pxz, d) * 2.6f - t * speed * 4.0f + sin(dot(pxz, float2(-d.y, d.x)) * 1.7f) * 1.3f);
+                foam += saturate(s - 0.7f) * 0.5f * saturate(speed);
+            }
+            if (k > 3.5f && k < 4.5f) foam += 0.5f + 0.4f * sin(pxz.x * 2.1f + pxz.y * 3.0f - t * 9.0f);
+            color = lerp(color, float3(0.95f, 0.98f, 1.0f), saturate(foam) * 0.85f);
+            alpha = saturate(alpha + foam * 0.5f + fres * 0.25f);
+            return float4(ApplyEnv(color, input.wpos), alpha);
         }
     )";
 }
@@ -195,122 +297,190 @@ Renderer3D::Mesh Renderer3D::createMesh(ID3D11Device* device, const void* vertic
     return mesh;
 }
 
-// Suelo con relieve: malla de vértices compartidos cada Heightfield::CELL metros, con la altura del terreno. Bajo el nivel del mar
-// los vértices se aplanan a la superficie del agua y se colorean según la profundidad (no hay una superficie de agua aparte).
-Renderer3D::Mesh Renderer3D::createFloor(ID3D11Device* device, const HabitatMap& habitats, const Physics::Heightfield& terrain, const GameData& data) {
-    constexpr float cell = Physics::Heightfield::CELL;
-    constexpr int cells = static_cast<int>(2.0f * Scene::HALF_SIZE / cell);
-    constexpr int side = cells + 1;
-    static_assert(side * side <= 65535, "El suelo no cabe en índices de 16 bits");
+// Trozos de malla de un campo de nodos (n x n, un nodo cada Heightfield::CELL metros): cada trozo son kChunkCells celdas por lado con
+// vértices propios (cabe en 16 bits) y solo las celdas que 'keepCell' acepta. vertexAt(col, row) da el vértice de un nodo.
+template <typename VertexFn, typename KeepFn>
+std::vector<Renderer3D::Chunk> Renderer3D::buildChunks(ID3D11Device* device, int nodes, VertexFn vertexAt, KeepFn keepCell) {
+    std::vector<Chunk> chunks;
+    const int cells = nodes - 1;
+    const int count = (cells + kChunkCells - 1) / kChunkCells;
+    constexpr int side = kChunkCells + 1;
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+    for (int cz = 0; cz < count; ++cz) {
+        for (int cx = 0; cx < count; ++cx) {
+            const int col0 = cx * kChunkCells, row0 = cz * kChunkCells;
+            indices.clear();
+            for (int r = 0; r < kChunkCells && row0 + r < cells; ++r) {
+                for (int c = 0; c < kChunkCells && col0 + c < cells; ++c) {
+                    if (!keepCell(col0 + c, row0 + r)) continue;
+                    const int i0 = r * side + c, i1 = i0 + 1, i2 = i0 + side, i3 = i2 + 1;
+                    for (const int i : { i0, i2, i1, i1, i2, i3 }) indices.push_back(static_cast<uint16_t>(i));
+                }
+            }
+            if (indices.empty()) continue;
 
+            vertices.clear();
+            XMFLOAT3 lo = { 1.0e9f, 1.0e9f, 1.0e9f }, hi = { -1.0e9f, -1.0e9f, -1.0e9f };
+            for (int r = 0; r < side; ++r) {
+                for (int c = 0; c < side; ++c) {
+                    const Vertex v = vertexAt((std::min)(col0 + c, nodes - 1), (std::min)(row0 + r, nodes - 1));
+                    vertices.push_back(v);
+                    lo = { (std::min)(lo.x, v.pos.x), (std::min)(lo.y, v.pos.y), (std::min)(lo.z, v.pos.z) };
+                    hi = { (std::max)(hi.x, v.pos.x), (std::max)(hi.y, v.pos.y), (std::max)(hi.z, v.pos.z) };
+                }
+            }
+            Chunk chunk;
+            chunk.mesh = createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
+            chunk.center = { (lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f };
+            chunk.radius = 0.5f * std::sqrt((hi.x - lo.x) * (hi.x - lo.x) + (hi.y - lo.y) * (hi.y - lo.y) + (hi.z - lo.z) * (hi.z - lo.z));
+            chunks.push_back(std::move(chunk));
+        }
+    }
+    return chunks;
+}
+
+// Relieve del mundo. Color según el hábitat y la altura: arena junto al mar, roca en lo empinado, nieve y hielo en las cumbres
+// (por encima de la línea de nieve) y fondo de arena o fango bajo el agua (el agua es una superficie aparte, translúcida).
+// Los nodos fuera del archipiélago y de las regiones no se dibujan, ni lo que queda vacío alrededor de la isla del cielo.
+std::vector<Renderer3D::Chunk> Renderer3D::createTerrain(ID3D11Device* device, const HabitatMap& habitats, const Physics::World& world, const GameData& data) {
+    const Physics::Heightfield& terrain = world.terrain;
     constexpr XMFLOAT3 DEFAULT_GROUND = { 0.22f, 0.62f, 0.23f };
+    constexpr XMFLOAT3 ROCK = { 0.46f, 0.44f, 0.42f };
+    constexpr XMFLOAT3 SNOW = { 0.94f, 0.96f, 1.0f };
+    constexpr XMFLOAT3 ICE = { 0.74f, 0.88f, 0.98f };
+    constexpr XMFLOAT3 SAND = { 0.80f, 0.74f, 0.52f };
+    constexpr XMFLOAT3 MUD = { 0.26f, 0.32f, 0.34f };
     std::vector<XMFLOAT3> habitatColors;
     for (const Habitat& habitat : data.habitats) habitatColors.push_back(HabitatStyle::color(habitat.name));
 
-    // Color del agua según la profundidad: turquesa en la orilla, azul oscuro en lo profundo.
-    const auto waterColor = [](float depth) {
-        struct Stop { float depth; XMFLOAT3 color; };
-        static const Stop stops[] = { { 0.0f, { 0.38f, 0.80f, 0.86f } }, { 1.2f, { 0.24f, 0.62f, 0.82f } }, { 3.0f, { 0.14f, 0.44f, 0.76f } },
-                                      { 9.0f, { 0.07f, 0.26f, 0.58f } }, { 16.0f, { 0.03f, 0.10f, 0.32f } } };
-        constexpr int count = sizeof(stops) / sizeof(stops[0]);
-        if (depth <= stops[0].depth) return stops[0].color;
-        for (int i = 1; i < count; ++i) {
-            if (depth > stops[i].depth) continue;
-            const float t = (depth - stops[i - 1].depth) / (stops[i].depth - stops[i - 1].depth);
-            const XMFLOAT3& a = stops[i - 1].color;
-            const XMFLOAT3& b = stops[i].color;
-            return XMFLOAT3{ a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t };
-        }
-        return stops[count - 1].color;
+    const auto mix = [](const XMFLOAT3& a, const XMFLOAT3& b, float t) {
+        t = (std::clamp)(t, 0.0f, 1.0f);
+        return XMFLOAT3{ a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t };
+    };
+    const auto smooth = [](float a, float b, float x) {
+        const float t = (std::clamp)((x - a) / (b - a), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
     };
 
     std::vector<float> weights;
-    const auto groundColor = [&](float x, float z, float height) {
-        if (height < 0.0f) {
-            const XMFLOAT3 water = waterColor(-height);
-            return XMFLOAT4{ water.x, water.y, water.z, 1.0f };
+    const int nodes = terrain.count();
+    const auto vertexAt = [&](int col, int row) {
+        const float x = terrain.nodeCoord(col), z = terrain.nodeCoord(row);
+        const float height = terrain.at(col, row);
+        float gx, gz;
+        terrain.gradient(x, z, gx, gz);
+        const float slope = std::sqrt(gx * gx + gz * gz);
+        const float length = std::sqrt(gx * gx + 1.0f + gz * gz);
+
+        XMFLOAT3 color;
+        if (height < 0.0f) { // fondo: arena en lo somero, fango en lo hondo
+            color = mix(SAND, MUD, -height / 10.0f);
+        } else {
+            color = habitatColors.empty() ? DEFAULT_GROUND : XMFLOAT3{ 0.0f, 0.0f, 0.0f };
+            habitats.weights(x, z, weights);
+            for (size_t i = 0; i < weights.size() && i < habitatColors.size(); ++i) {
+                color.x += weights[i] * habitatColors[i].x;
+                color.y += weights[i] * habitatColors[i].y;
+                color.z += weights[i] * habitatColors[i].z;
+            }
+            if (!habitats.regionAt(x, z)) {
+                color = mix(color, SAND, smooth(0.5f, 0.0f, height) * 0.6f);           // la tierra pegada al mar es arenosa
+                const float rock = smooth(0.55f, 1.0f, slope);                          // lo empinado es roca
+                color = mix(color, ROCK, rock);
+                const float line = HabitatMap::SNOW_LINE + 2.5f * std::sin(x * 0.11f) * std::cos(z * 0.09f); // línea de nieve irregular
+                const float snow = smooth(line - 2.0f, line + 2.5f, height) * (1.0f - 0.65f * rock);
+                color = mix(color, SNOW, snow);
+                color = mix(color, ICE, smooth(line + 10.0f, line + 22.0f, height) * (0.35f + 0.65f * rock)); // y hielo más arriba
+            }
         }
-        XMFLOAT3 color = habitatColors.empty() ? DEFAULT_GROUND : XMFLOAT3{ 0.0f, 0.0f, 0.0f };
-        habitats.weights(x, z, weights);
-        for (size_t i = 0; i < weights.size() && i < habitatColors.size(); ++i) {
-            color.x += weights[i] * habitatColors[i].x;
-            color.y += weights[i] * habitatColors[i].y;
-            color.z += weights[i] * habitatColors[i].z;
-        }
-        // La tierra muy cerca del agua se ve húmeda y arenosa.
-        const float wet = (std::max)(0.0f, 1.0f - height / 0.35f) * 0.35f;
-        const XMFLOAT3 sand = { 0.78f, 0.72f, 0.50f };
-        return XMFLOAT4{ color.x + (sand.x - color.x) * wet, color.y + (sand.y - color.y) * wet, color.z + (sand.z - color.z) * wet, 1.0f };
+        const float tone = 0.96f + 0.04f * std::sin(x * 1.7f) * std::cos(z * 1.3f); // variación fina para que el relieve se lea
+        return Vertex{ { x, height, z }, { -gx / length, 1.0f / length, -gz / length }, { color.x * tone, color.y * tone, color.z * tone, 1.0f } };
     };
-    const auto surface = [&](float x, float z) { return (std::max)(terrain.sample(x, z), 0.0f); };
-
-    std::vector<Vertex> vertices;
-    std::vector<uint16_t> indices;
-    vertices.reserve(static_cast<size_t>(side) * side);
-    indices.reserve(static_cast<size_t>(cells) * cells * 6);
-
-    for (int row = 0; row < side; ++row) {
-        for (int col = 0; col < side; ++col) {
-            const float x = -Scene::HALF_SIZE + col * cell;
-            const float z = -Scene::HALF_SIZE + row * cell;
-            const float height = terrain.sample(x, z);
-            const float dx = surface(x + cell, z) - surface(x - cell, z);
-            const float dz = surface(x, z + cell) - surface(x, z - cell);
-            XMFLOAT3 normal = { -dx, 2.0f * cell, -dz };
-            const float length = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
-            normal = { normal.x / length, normal.y / length, normal.z / length };
-            // Variación fina del tono para que el relieve se lea mejor.
-            const float tone = 0.96f + 0.04f * std::sin(x * 1.7f) * std::cos(z * 1.3f);
-            XMFLOAT4 color = groundColor(x, z, height);
-            color = { color.x * tone, color.y * tone, color.z * tone, 1.0f };
-            vertices.push_back({ { x, (std::max)(height, 0.0f), z }, normal, color });
-        }
-    }
-    for (int row = 0; row < cells; ++row) {
-        for (int col = 0; col < cells; ++col) {
-            const int i0 = row * side + col, i1 = i0 + 1, i2 = i0 + side, i3 = i2 + 1;
-            for (const int i : { i0, i2, i1, i1, i2, i3 }) indices.push_back(static_cast<uint16_t>(i));
-        }
-    }
-    return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
+    const auto keepCell = [&](int col, int row) {
+        const float x = terrain.nodeCoord(col) + Physics::Heightfield::CELL * 0.5f, z = terrain.nodeCoord(row) + Physics::Heightfield::CELL * 0.5f;
+        if (!habitats.playable(x, z)) return false;
+        const float void_ = HabitatMap::SKY_VOID * 0.5f;
+        return terrain.at(col, row) > void_ && terrain.at(col + 1, row) > void_ && terrain.at(col, row + 1) > void_ && terrain.at(col + 1, row + 1) > void_;
+    };
+    return buildChunks(device, nodes, vertexAt, keepCell);
 }
 
-// Jugador: cápsula (cilindro con un cono arriba y otro abajo), con color degradado de rojo claro a oscuro.
-Renderer3D::Mesh Renderer3D::createPlayer(ID3D11Device* device) {
-    constexpr int segments = 12;
-    constexpr float radius = 0.4f;
-    const XMFLOAT4 light = { 0.9f, 0.2f, 0.2f, 1.0f };
-    const XMFLOAT4 dark = { 0.7f, 0.1f, 0.1f, 1.0f };
+// Superficie del agua: una malla plana a la altura del agua en cada nodo con agua (y los de su orilla), con la profundidad, la corriente y el
+// tipo de agua en cada vértice; el shader pone las olas, la marea, la transparencia y la espuma.
+std::vector<Renderer3D::Chunk> Renderer3D::createWater(ID3D11Device* device, const HabitatMap& habitats, const Physics::World& world) {
+    const Physics::Heightfield& ground = world.terrain;
+    const Physics::Heightfield& level = world.water;
+    const int n = ground.count();
+    constexpr float WET = 0.03f;
+    const auto wet = [&](int c, int r) { return c >= 0 && r >= 0 && c < n && r < n && level.at(c, r) - ground.at(c, r) > WET; };
+    const auto code = [](uint8_t kind) {
+        switch (static_cast<HabitatMap::Water>(kind)) {
+            case HabitatMap::RIVER: case HabitatMap::UPPER_RIVER: return 1.0f;
+            case HabitatMap::LAKE: case HabitatMap::UPPER_LAKE:   return 2.0f;
+            case HabitatMap::POND:                                return 3.0f;
+            case HabitatMap::CASCADE:                             return 4.0f;
+            default:                                              return 0.0f;
+        }
+    };
 
-    // Orden de vértices: anillo inferior [0, segments), anillo superior [segments, 2*segments), punta inferior y punta superior.
+    const auto vertexAt = [&](int col, int row) {
+        float y = level.at(col, row), depth = (std::max)(0.0f, level.at(col, row) - ground.at(col, row)), kind = 0.0f;
+        if (wet(col, row)) kind = code(habitats.kindAtNode(col, row));
+        else { // el borde de la orilla toma el nivel y el tipo del agua que tiene al lado
+            float sum = 0.0f;
+            int count = 0;
+            for (int dr = -1; dr <= 1; ++dr) {
+                for (int dc = -1; dc <= 1; ++dc) {
+                    if (!wet(col + dc, row + dr)) continue;
+                    sum += level.at(col + dc, row + dr);
+                    kind = code(habitats.kindAtNode(col + dc, row + dr));
+                    ++count;
+                }
+            }
+            if (count > 0) y = sum / static_cast<float>(count);
+            depth = 0.0f;
+        }
+        return Vertex{ { ground.nodeCoord(col), y, ground.nodeCoord(row) }, { depth, world.flowX.at(col, row), world.flowZ.at(col, row) }, { 1.0f, 1.0f, 1.0f, kind } };
+    };
+    const auto keepCell = [&](int col, int row) { return wet(col, row) || wet(col + 1, row) || wet(col, row + 1) || wet(col + 1, row + 1); };
+    return buildChunks(device, n, vertexAt, keepCell);
+}
+
+// El mar hasta el horizonte: un único cuadrado enorme (tipo de agua 5); el shader solo lo pinta fuera del archipiélago.
+Renderer3D::Mesh Renderer3D::createOcean(ID3D11Device* device) {
+    const float h = kOceanHalf;
+    const Vertex vertices[4] = {
+        { { -h, 0.0f, -h }, { 50.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, 5.0f } },
+        { { -h, 0.0f,  h }, { 50.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, 5.0f } },
+        { {  h, 0.0f, -h }, { 50.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, 5.0f } },
+        { {  h, 0.0f,  h }, { 50.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, 5.0f } },
+    };
+    return createMesh(device, vertices, 4, sizeof(Vertex), { 0, 1, 2, 2, 1, 3 });
+}
+
+// Cono invertido unitario (radio 1 arriba, punta a -1 abajo): la base rocosa de la isla del cielo, más oscura cuanto más abajo.
+Renderer3D::Mesh Renderer3D::createCone(ID3D11Device* device) {
+    constexpr int segments = 20;
     std::vector<Vertex> vertices;
-    vertices.reserve(2 * segments + 2);
     for (int i = 0; i < segments; ++i) {
         const float theta = static_cast<float>(i) / segments * XM_2PI;
-        vertices.push_back({ { std::cos(theta) * radius, 0.2f, std::sin(theta) * radius }, ringNormal(theta, -0.35f), light });
+        const float wobble = 0.9f + 0.1f * std::sin(theta * 5.0f); // el borde no es un círculo perfecto
+        vertices.push_back({ { std::cos(theta) * wobble, 0.0f, std::sin(theta) * wobble }, ringNormal(theta, -0.6f), { 0.52f, 0.44f, 0.36f, 1.0f } });
     }
     for (int i = 0; i < segments; ++i) {
-        const float theta = static_cast<float>(i) / segments * XM_2PI;
-        vertices.push_back({ { std::cos(theta) * radius, 1.2f, std::sin(theta) * radius }, ringNormal(theta, 0.35f), dark });
+        const float theta = (static_cast<float>(i) + 0.5f) / segments * XM_2PI;
+        vertices.push_back({ { std::cos(theta) * 0.55f, -0.5f, std::sin(theta) * 0.55f }, ringNormal(theta, -0.6f), { 0.40f, 0.34f, 0.30f, 1.0f } });
     }
-    vertices.push_back({ { 0.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }, light });
-    vertices.push_back({ { 0.0f, 1.4f, 0.0f }, { 0.0f, 1.0f, 0.0f }, dark });
-
-    const int tipBottom = 2 * segments;
-    const int tipTop = tipBottom + 1;
-
-    // Sentido horario visto desde fuera (cara frontal en D3D11 por defecto).
+    vertices.push_back({ { 0.0f, -1.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }, { 0.28f, 0.24f, 0.22f, 1.0f } });
+    const int tip = 2 * segments;
+    const XMFLOAT3 inside = { 0.0f, -0.3f, 0.0f };
     std::vector<uint16_t> indices;
-    indices.reserve(segments * 12);
     for (int i = 0; i < segments; ++i) {
         const int j = (i + 1) % segments;
-        const int bottomI = i, bottomJ = j, topI = segments + i, topJ = segments + j;
-        for (const int index : { bottomI, topI, bottomJ,      // cuerpo
-                                 bottomJ, topI, topJ,
-                                 bottomI, bottomJ, tipBottom, // cono inferior
-                                 topJ, topI, tipTop }) {      // cono superior
-            indices.push_back(static_cast<uint16_t>(index));
-        }
+        addOutward(indices, vertices, i, j, segments + i, inside);
+        addOutward(indices, vertices, j, segments + j, segments + i, inside);
+        addOutward(indices, vertices, segments + i, segments + j, tip, inside);
     }
     return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
 }
@@ -448,6 +618,11 @@ void Renderer3D::init(ID3D11Device* device) {
     D3dUtil::check(device->CreateVertexShader(skyVsBlob->GetBufferPointer(), skyVsBlob->GetBufferSize(), nullptr, &m_skyVertexShader), "CreateVertexShader (sky)");
     D3dUtil::check(device->CreatePixelShader(skyPsBlob->GetBufferPointer(), skyPsBlob->GetBufferSize(), nullptr, &m_skyPixelShader), "CreatePixelShader (sky)");
 
+    const ComPtr<ID3DBlob> waterVsBlob = D3dUtil::compileShader(kShaderCode, "VS_WATER", "vs_4_0");
+    const ComPtr<ID3DBlob> waterPsBlob = D3dUtil::compileShader(kShaderCode, "PS_WATER", "ps_4_0");
+    D3dUtil::check(device->CreateVertexShader(waterVsBlob->GetBufferPointer(), waterVsBlob->GetBufferSize(), nullptr, &m_waterVertexShader), "CreateVertexShader (water)");
+    D3dUtil::check(device->CreatePixelShader(waterPsBlob->GetBufferPointer(), waterPsBlob->GetBufferSize(), nullptr, &m_waterPixelShader), "CreatePixelShader (water)");
+
     // 2. Input layout (el mapa de sombras reutiliza el de los objetos)
     const D3D11_INPUT_ELEMENT_DESC layout[] = {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,                        D3D11_INPUT_PER_VERTEX_DATA, 0 },
@@ -468,6 +643,30 @@ void Renderer3D::init(ID3D11Device* device) {
     skyDepth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
     skyDepth.DepthFunc = D3D11_COMPARISON_ALWAYS;
     D3dUtil::check(device->CreateDepthStencilState(&skyDepth, &m_skyDepth), "CreateDepthStencilState (sky)");
+
+    // El agua: mezcla por alfa, prueba la profundidad sin escribirla y se ve por las dos caras.
+    D3D11_BLEND_DESC blend = {};
+    blend.RenderTarget[0].BlendEnable = TRUE;
+    blend.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    blend.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    blend.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    blend.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    blend.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+    blend.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    D3dUtil::check(device->CreateBlendState(&blend, &m_waterBlend), "CreateBlendState (water)");
+
+    D3D11_DEPTH_STENCIL_DESC waterDepth = {};
+    waterDepth.DepthEnable = TRUE;
+    waterDepth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    waterDepth.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+    D3dUtil::check(device->CreateDepthStencilState(&waterDepth, &m_waterDepth), "CreateDepthStencilState (water)");
+
+    D3D11_RASTERIZER_DESC noCull = {};
+    noCull.FillMode = D3D11_FILL_SOLID;
+    noCull.CullMode = D3D11_CULL_NONE;
+    noCull.DepthClipEnable = TRUE;
+    D3dUtil::check(device->CreateRasterizerState(&noCull, &m_noCull), "CreateRasterizerState (no cull)");
 
     D3D11_TEXTURE2D_DESC shadowDesc = {};
     shadowDesc.Width = kShadowMapSize;
@@ -509,18 +708,25 @@ void Renderer3D::init(ID3D11Device* device) {
 
     // 5. Geometría
     m_device = device;
-    m_player = createPlayer(device);
+    m_ocean = createOcean(device);
+    m_cone = createCone(device);
     m_cube = createCube(device);
     m_sphere = createSphere(device);
     m_dome = createSphere(device, true);
     m_star = createStar(device);
-    m_draws.reserve(32);
+    m_draws.reserve(256);
 }
 
-XMMATRIX Renderer3D::lightViewProj(const XMFLOAT3& lightDir) {
+XMMATRIX Renderer3D::lightViewProj(const XMFLOAT3& lightDir, const XMFLOAT3& focus) {
     const XMVECTOR toLight = XMVector3Normalize(XMLoadFloat3(&lightDir));
     const XMMATRIX view = XMMatrixLookAtLH(XMVectorScale(toLight, kLightDistance), XMVectorZero(), g_XMIdentityR1);
-    return view * XMMatrixOrthographicLH(2.0f * kShadowHalfExtent, 2.0f * kShadowHalfExtent, kLightNear, kLightFar);
+    // El centro del volumen de sombras, en el espacio de la luz, salta de texel en texel: las sombras no tiemblan al moverse.
+    XMFLOAT3 f;
+    XMStoreFloat3(&f, XMVector3TransformCoord(XMLoadFloat3(&focus), view));
+    const float texel = 2.0f * kShadowHalfExtent / static_cast<float>(kShadowMapSize);
+    const float cx = std::floor(f.x / texel + 0.5f) * texel, cy = std::floor(f.y / texel + 0.5f) * texel;
+    return view * XMMatrixOrthographicOffCenterLH(cx - kShadowHalfExtent, cx + kShadowHalfExtent, cy - kShadowHalfExtent, cy + kShadowHalfExtent,
+                                                  f.z - kLightDepth * 0.5f, f.z + kLightDepth * 0.5f);
 }
 
 void Renderer3D::add(const Mesh& mesh, CXMMATRIX world, const XMFLOAT4& tint, bool castsShadow) {
@@ -538,7 +744,13 @@ void Renderer3D::collect(const Scene& scene) {
     }
 
     const XMFLOAT3& p = scene.player.body.position;
-    add(m_player, XMMatrixScaling(1.0f, scene.player.heightScale(), 1.0f) * XMMatrixTranslation(p.x, p.y, p.z), kWhite);
+    addPlayer(scene);
+    const float time = scene.dayCycle.lighting().time;
+    for (const HabitatMap::Portal& portal : scene.habitats.portals()) {
+        const float dx = portal.x - p.x, dz = portal.z - p.z;
+        if (dx * dx + dz * dz < 160.0f * 160.0f) addPortal(portal, scene.world, time);
+    }
+    addSky(scene, time);
 
     for (const CaptureTarget* wild : scene.wild.loaded()) {
         const CaptureTarget& target = *wild;
@@ -581,6 +793,151 @@ void Renderer3D::collect(const Scene& scene) {
     addMachine();
 
     for (const Pokeball& ball : scene.balls) addBall(ball, 0.0f, 1.0f, 0.0f);
+}
+
+// Jugador: torso, cabeza, dos brazos y dos piernas (cubos) con la postura de PlayerPose (andar, trepar, nadar, bucear, usar una
+// herramienta) y, si la usa, la herramienta en la mano.
+void Renderer3D::addPlayer(const Scene& scene) {
+    const Player& player = scene.player;
+    const PlayerPose pose = player.pose();
+    const XMFLOAT3& p = player.body.position;
+    const XMMATRIX root = XMMatrixScaling(1.0f, player.heightScale(), 1.0f) * XMMatrixRotationY(player.facing()) * XMMatrixTranslation(p.x, p.y, p.z);
+    const XMMATRIX hip = XMMatrixRotationX(pose.lean) * XMMatrixTranslation(0.0f, kHip, 0.0f) * root; // el cuerpo se inclina desde la cadera
+
+    static const XMFLOAT4 skin = { 0.95f, 0.78f, 0.62f, 0.0f }, shirt = { 0.85f, 0.18f, 0.18f, 0.0f }, pants = { 0.20f, 0.26f, 0.52f, 0.0f }, hair = { 0.18f, 0.12f, 0.10f, 0.0f };
+    constexpr float ARM = 0.5f, LEG = kHip, SHOULDER_X = 0.32f, SHOULDER_Y = 0.46f, LEG_X = 0.12f;
+
+    add(m_cube, XMMatrixScaling(0.50f, 0.52f, 0.28f) * XMMatrixTranslation(0.0f, 0.26f, 0.0f) * hip, shirt);                  // torso
+    add(m_cube, XMMatrixScaling(0.30f, 0.30f, 0.30f) * XMMatrixTranslation(0.0f, 0.68f, 0.02f) * hip, skin);                 // cabeza
+    add(m_cube, XMMatrixScaling(0.32f, 0.10f, 0.32f) * XMMatrixTranslation(0.0f, 0.86f, 0.01f) * hip, hair);                 // pelo
+
+    // Miembro colgando desde su articulación: 'angle' lo levanta hacia delante, 'roll' lo separa del cuerpo.
+    const auto limbFrame = [&](float x, float y, float angle, float roll) {
+        return XMMatrixRotationX(-angle) * XMMatrixRotationZ(roll) * XMMatrixTranslation(x, y, 0.0f) * hip;
+    };
+    const auto limb = [&](const XMFLOAT4& tint, float width, float length, const XMMATRIX& frame) {
+        add(m_cube, XMMatrixScaling(width, length, width) * XMMatrixTranslation(0.0f, -length * 0.5f, 0.0f) * frame, tint);
+    };
+    const XMMATRIX rightArm = limbFrame(SHOULDER_X, SHOULDER_Y, pose.rightArm, pose.rightRoll);
+    const XMMATRIX leftArm = limbFrame(-SHOULDER_X, SHOULDER_Y, pose.leftArm, -pose.leftRoll);
+    limb(skin, 0.13f, ARM, rightArm);
+    limb(skin, 0.13f, ARM, leftArm);
+    limb(pants, 0.18f, LEG, limbFrame(LEG_X, 0.0f, pose.rightLeg, 0.0f));
+    limb(pants, 0.18f, LEG, limbFrame(-LEG_X, 0.0f, pose.leftLeg, 0.0f));
+
+    if (pose.holding != PlayerAction::NONE) {
+        const XMMATRIX hand = XMMatrixRotationX(-pose.toolTilt) * XMMatrixTranslation(0.0f, -ARM, 0.0f) * rightArm; // marco de la mano: -y sigue la dirección del brazo
+        addTool(pose.holding, hand);
+        if (pose.holding == PlayerAction::FISH) {
+            XMFLOAT3 tip;
+            XMStoreFloat3(&tip, XMVector3TransformCoord(XMVectorSet(0.0f, -ROD_LENGTH, 0.0f, 1.0f), hand));
+            addFishingLine(scene, tip);
+        }
+    }
+}
+
+// La herramienta en la mano (marco: el origen es la mano y -y apunta hacia donde apunta el brazo).
+void Renderer3D::addTool(PlayerAction tool, CXMMATRIX hand) {
+    static const XMFLOAT4 wood = { 0.55f, 0.38f, 0.20f, 0.0f }, metal = { 0.72f, 0.74f, 0.78f, 0.0f }, blue = { 0.20f, 0.42f, 0.85f, 0.0f };
+    const auto part = [&](const XMFLOAT4& tint, float sx, float sy, float sz, float x, float y, float z) {
+        add(m_cube, XMMatrixScaling(sx, sy, sz) * XMMatrixTranslation(x, y, z) * hand, tint);
+    };
+    switch (tool) {
+        case PlayerAction::CHOP:  // hacha: mango y hoja
+            part(wood, 0.06f, 0.85f, 0.06f, 0.0f, -0.15f, 0.0f);
+            part(metal, 0.05f, 0.22f, 0.30f, 0.0f, -0.52f, 0.13f);
+            break;
+        case PlayerAction::MINE:  // pico: mango y cabeza alargada
+            part(wood, 0.06f, 0.85f, 0.06f, 0.0f, -0.15f, 0.0f);
+            part(metal, 0.06f, 0.09f, 0.62f, 0.0f, -0.55f, 0.0f);
+            break;
+        case PlayerAction::WATER: // regadera: cuerpo y pitorro
+            part(blue, 0.26f, 0.22f, 0.22f, 0.0f, -0.12f, 0.08f);
+            part(blue, 0.05f, 0.05f, 0.30f, 0.0f, -0.10f, 0.30f);
+            break;
+        case PlayerAction::FISH:  // caña
+            part(wood, 0.035f, ROD_LENGTH + 0.2f, 0.035f, 0.0f, -ROD_LENGTH * 0.5f + 0.1f, 0.0f);
+            part(metal, 0.08f, 0.08f, 0.08f, 0.0f, -0.05f, 0.05f);
+            break;
+        default: break;
+    }
+}
+
+// Hilo de la caña (de la punta al corcho) y el corcho: la mitad de arriba roja y la de abajo blanca; se hunde cuando pica.
+void Renderer3D::addFishingLine(const Scene& scene, const XMFLOAT3& rodTip) {
+    if (!scene.fishing.active()) return;
+    XMFLOAT3 b = scene.fishing.bobber();
+    const float t = scene.dayCycle.lighting().time;
+    const float bite = scene.fishing.phase() == Fishing::Phase::BITING ? -0.12f + 0.05f * std::sin(t * 30.0f) : 0.0f;
+    b.y += std::sin(t * 2.0f + b.x) * 0.03f + bite;
+
+    const XMFLOAT3 d = { b.x - rodTip.x, b.y - rodTip.y, b.z - rodTip.z };
+    const float length = (std::max)(std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z), 0.01f);
+    const float yaw = std::atan2(d.x, d.z), pitch = -std::asin((std::clamp)(d.y / length, -1.0f, 1.0f));
+    add(m_cube, XMMatrixScaling(0.012f, 0.012f, length) * XMMatrixRotationX(pitch) * XMMatrixRotationY(yaw) *
+        XMMatrixTranslation((rodTip.x + b.x) * 0.5f, (rodTip.y + b.y) * 0.5f, (rodTip.z + b.z) * 0.5f), { 0.9f, 0.9f, 0.9f, 0.5f }, false);
+    const float r = 0.12f;
+    add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(b.x, b.y + r * 0.4f, b.z), { 0.95f, 0.15f, 0.12f, 0.2f }, false);
+}
+
+// Portal: entrada de cueva o mina (un arco de roca con el hueco oscuro, mirando al centro de la isla) o columna de luz giratoria.
+void Renderer3D::addPortal(const HabitatMap::Portal& portal, const Physics::World& world, float time) {
+    const float y = world.groundHeight(portal.x, portal.z);
+    const bool entrance = portal.kind == HabitatPlacement::CAVE || portal.kind == HabitatPlacement::MINE;
+    if (entrance) {
+        static const XMFLOAT4 rock = { 0.42f, 0.40f, 0.38f, 0.0f }, dark = { 0.01f, 0.01f, 0.01f, 1.0f };
+        const XMMATRIX base = XMMatrixRotationY(std::atan2(-portal.x, -portal.z)) * XMMatrixTranslation(portal.x, y, portal.z);
+        const auto part = [&](const XMFLOAT4& tint, float sx, float sy, float sz, float x, float py) { add(m_cube, XMMatrixScaling(sx, sy, sz) * XMMatrixTranslation(x, py, 0.0f) * base, tint); };
+        part(rock, 0.9f, 3.4f, 1.1f, -1.8f, 1.7f);
+        part(rock, 0.9f, 3.4f, 1.1f, 1.8f, 1.7f);
+        part(rock, 4.6f, 0.9f, 1.1f, 0.0f, 3.6f);
+        part(dark, 2.7f, 3.2f, 0.3f, 0.0f, 1.6f);
+        return;
+    }
+    // Columna de luz: color según adónde lleva (arriba = cielo, "Salir" = verde, "Bajar" = amarillo).
+    const bool sky = portal.kind == HabitatPlacement::SKY;
+    const XMFLOAT4 color = sky ? XMFLOAT4{ 0.55f, 0.90f, 1.0f, 1.0f } : portal.kind == HabitatPlacement::ANY ? XMFLOAT4{ 1.0f, 0.90f, 0.40f, 1.0f } : XMFLOAT4{ 0.5f, 1.0f, 0.6f, 1.0f };
+    const float base = (std::max)(y, world.waterLevel(portal.x, portal.z));
+    add(m_cube, XMMatrixScaling(0.35f, 9.0f, 0.35f) * XMMatrixTranslation(portal.x, base + 4.5f, portal.z), color, false);
+    for (int i = 0; i < 6; ++i) {
+        const float a = time * 1.5f + i * XM_2PI / 6.0f;
+        add(m_cube, XMMatrixScaling(0.3f, 0.3f, 0.3f) * XMMatrixRotationY(a) * XMMatrixTranslation(portal.x + std::cos(a) * 1.6f, base + 0.8f + std::fmod(time * 1.2f + i, 4.0f), portal.z + std::sin(a) * 1.6f), color, false);
+    }
+}
+
+// Isla del cielo: la base rocosa, las nubes alrededor y, en el mar, la corriente ascendente que lleva hasta ella.
+void Renderer3D::addSky(const Scene& scene, float time) {
+    const XMFLOAT3& p = scene.player.body.position;
+    for (const HabitatMap::Region& region : scene.habitats.regions()) {
+        if (region.kind != HabitatPlacement::SKY) continue;
+        const float dx = region.x - p.x, dz = region.z - p.z;
+        if (dx * dx + dz * dz > 520.0f * 520.0f) continue;
+        const float floorY = scene.world.groundHeight(region.x, region.z);
+        const float radius = region.radius - 2.0f;
+        add(m_cone, XMMatrixScaling(radius, 62.0f, radius) * XMMatrixTranslation(region.x, floorY - 0.5f, region.z), kWhite, false);
+
+        // Nubes: grupos de bloques blancos aplastados, repartidos de forma fija alrededor y debajo de la isla.
+        for (int i = 0; i < 26; ++i) {
+            const float h1 = std::fmod(std::sin(i * 12.9898f) * 43758.5453f, 1.0f), h2 = std::fmod(std::sin(i * 78.233f) * 12345.6789f, 1.0f), h3 = std::fmod(std::sin(i * 39.346f) * 9876.543f, 1.0f);
+            const float angle = std::fabs(h1) * XM_2PI, dist = region.radius + 10.0f + std::fabs(h2) * 170.0f;
+            const float cx = region.x + std::cos(angle) * dist + std::sin(time * 0.05f + i) * 3.0f, cz = region.z + std::sin(angle) * dist;
+            const float cy = floorY - 25.0f - std::fabs(h3) * 70.0f;
+            for (int k = 0; k < 4; ++k) {
+                const float s = 7.0f + 5.0f * std::fabs(std::sin(i * 3.1f + k * 1.7f));
+                add(m_cube, XMMatrixScaling(s * 1.6f, s * 0.45f, s) * XMMatrixTranslation(cx + (k - 1.5f) * s * 0.9f, cy + (k & 1) * 1.5f, cz + std::sin(k * 2.3f + i) * s * 0.5f), { 1.0f, 1.0f, 1.0f, 0.65f }, false);
+            }
+        }
+    }
+    if (scene.habitats.hasUpdraft()) {
+        const float ux = scene.habitats.updraftX(), uz = scene.habitats.updraftZ();
+        const float dx = ux - p.x, dz = uz - p.z;
+        if (dx * dx + dz * dz < 300.0f * 300.0f) {
+            for (int i = 0; i < 48; ++i) {
+                const float a = time * 1.2f + i * 0.6f, r = 2.4f + i * 0.05f;
+                add(m_cube, XMMatrixScaling(0.8f, 0.8f, 0.8f) * XMMatrixRotationY(a) * XMMatrixTranslation(ux + std::cos(a) * r, i * 3.2f + 1.0f, uz + std::sin(a) * r), { 0.82f, 0.95f, 1.0f, 1.0f }, false);
+            }
+        }
+    }
 }
 
 // Pokémon (salvaje o compañero): cubo del color de su especie con un morro amarillo que marca hacia dónde mira.
@@ -787,7 +1144,35 @@ void Renderer3D::renderShadowMap(ID3D11DeviceContext* context, CXMMATRIX lightVi
     context->OMSetRenderTargets(1, rtv.GetAddressOf(), dsv.Get());
 }
 
-void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, CXMMATRIX view, CXMMATRIX lightViewProj) {
+// Dibuja los trozos de malla cuya esfera envolvente cae a menos de kTerrainDrawRange de la cámara.
+void Renderer3D::drawChunks(ID3D11DeviceContext* context, const std::vector<Chunk>& chunks, CXMMATRIX viewProj) const {
+    setObject(context, XMMatrixIdentity(), viewProj, kWhite);
+    for (const Chunk& chunk : chunks) {
+        const float dx = chunk.center.x - m_eye.x, dy = chunk.center.y - m_eye.y, dz = chunk.center.z - m_eye.z;
+        const float reach = kTerrainDrawRange + chunk.radius;
+        if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+        drawIndexed(context, chunk.mesh);
+    }
+}
+
+// El agua translúcida, después de todo lo opaco: se ve lo que hay debajo según su profundidad.
+void Renderer3D::drawWater(ID3D11DeviceContext* context, CXMMATRIX viewProj) const {
+    const float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    context->OMSetBlendState(m_waterBlend.Get(), blendFactor, 0xFFFFFFFF);
+    context->OMSetDepthStencilState(m_waterDepth.Get(), 0);
+    context->RSSetState(m_noCull.Get());
+    context->VSSetShader(m_waterVertexShader.Get(), nullptr, 0);
+    context->PSSetShader(m_waterPixelShader.Get(), nullptr, 0);
+
+    drawChunks(context, m_water, viewProj);
+    drawIndexed(context, m_ocean);
+
+    context->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFF);
+    context->OMSetDepthStencilState(nullptr, 0);
+    context->RSSetState(nullptr);
+}
+
+void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, CXMMATRIX view, CXMMATRIX lightViewProj, const Environment& env) {
     XMMATRIX viewRotation = view;
     viewRotation.r[3] = g_XMIdentityR3; // el cielo no se mueve con la posición de la cámara
     const XMMATRIX inverse = XMMatrixInverse(nullptr, viewRotation * XMLoadFloat4x4(&m_proj));
@@ -805,16 +1190,22 @@ void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Light
     fc.skyHorizon = { light.skyHorizon.x, light.skyHorizon.y, light.skyHorizon.z, 0.0f };
     fc.skyParams = { light.starVisibility, light.warm, light.angle, light.time };
     fc.shadowParams = { 1.0f / static_cast<float>(kShadowMapSize), kShadowNormalOffset, kShadowDepthBias, 0.0f };
+    fc.cameraPos = { env.eye.x, env.eye.y, env.eye.z, env.tide };
+    const float day = (std::min)(1.0f, 0.25f + light.ambientSky.y * 1.2f); // el agua turbia y la niebla se oscurecen de noche
+    const XMFLOAT3 fog = env.underwater ? XMFLOAT3{ 0.04f * day, 0.22f * day, 0.36f * day } : XMFLOAT3{ light.skyHorizon.x, light.skyHorizon.y, light.skyHorizon.z };
+    fc.env = { env.darkness, env.underwater ? kWaterFogDensity : (env.darkness > 0.5f ? 0.0f : kFogDensity), env.underwater ? 1.0f : 0.0f, env.worldRadius };
+    fc.fogColor = { fog.x * (1.0f - env.darkness), fog.y * (1.0f - env.darkness), fog.z * (1.0f - env.darkness), 0.0f };
     context->UpdateSubresource(m_frameBuffer.Get(), 0, nullptr, &fc, 0, 0);
 }
 
 void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int width, int height) {
     if (width <= 0 || height <= 0) return;
 
-    if (!m_floorBuilt || m_floorSeed != scene.habitats.seed()) {
-        m_floor = createFloor(m_device, scene.habitats, scene.world.terrain, scene.data());
-        m_floorSeed = scene.habitats.seed();
-        m_floorBuilt = true;
+    if (!m_worldBuilt || m_worldSeed != scene.habitats.seed()) {
+        m_terrain = createTerrain(m_device, scene.habitats, scene.world, scene.data());
+        m_water = createWater(m_device, scene.habitats, scene.world);
+        m_worldSeed = scene.habitats.seed();
+        m_worldBuilt = true;
     }
 
     const float aspect = static_cast<float>(width) / height;
@@ -822,21 +1213,34 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     if (aspect != m_aspect || fov != m_fov) {
         m_aspect = aspect;
         m_fov = fov;
-        XMStoreFloat4x4(&m_proj, XMMatrixPerspectiveFovLH(fov, aspect, 0.1f, 250.0f));
+        XMStoreFloat4x4(&m_proj, XMMatrixPerspectiveFovLH(fov, aspect, 0.1f, kFarPlane));
     }
+
+    // Entorno: dónde está la cámara, si está bajo el agua o en una cueva (la oscuridad entra y sale poco a poco).
+    const XMFLOAT3& player = scene.player.body.position;
+    Environment env;
+    env.eye = scene.camera.eye(player);
+    env.focus = player;
+    env.tide = scene.world.tide;
+    env.underwater = scene.player.diving() && env.eye.y < scene.world.waterLevel(env.eye.x, env.eye.z);
+    env.worldRadius = scene.habitats.radius();
+    const HabitatMap::Region* region = scene.habitats.regionAt(player.x, player.z);
+    m_darkness += ((region && region->dark() ? 1.0f : 0.0f) - m_darkness) * 0.08f;
+    env.darkness = m_darkness;
+    m_eye = env.eye;
 
     const DayCycle::Lighting light = scene.dayCycle.lighting();
     const XMMATRIX view = scene.getViewMatrix();
     const XMMATRIX viewProj = view * XMLoadFloat4x4(&m_proj);
-    const XMMATRIX lightMatrix = lightViewProj(light.lightDir);
+    const XMMATRIX lightMatrix = lightViewProj(light.lightDir, env.focus);
     collect(scene);
-    updateFrame(context, light, view, lightMatrix);
+    updateFrame(context, light, view, lightMatrix, env);
 
     ID3D11Buffer* buffers[2] = { m_objectBuffer.Get(), m_frameBuffer.Get() };
     context->VSSetConstantBuffers(0, 2, buffers);
     context->PSSetConstantBuffers(0, 2, buffers);
 
-    // 1. Mapa de sombras: la luz activa (sol o luna) ve todos los objetos.
+    // 1. Mapa de sombras: la luz activa (sol o luna) ve todos los objetos cercanos.
     renderShadowMap(context, lightMatrix);
 
     // 2. Cielo (cubre toda la pantalla; no usa la profundidad).
@@ -848,7 +1252,7 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     context->Draw(3, 0);
     context->OMSetDepthStencilState(nullptr, 0);
 
-    // 3. Suelo y objetos, iluminados por el sol o la luna y con las sombras del mapa.
+    // 3. Relieve y objetos, iluminados por el sol o la luna y con las sombras del mapa.
     ID3D11ShaderResourceView* shadowSrv = m_shadowSrv.Get();
     ID3D11SamplerState* shadowSampler = m_shadowSampler.Get();
     context->PSSetShaderResources(0, 1, &shadowSrv);
@@ -857,13 +1261,20 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     context->VSSetShader(m_vertexShader.Get(), nullptr, 0);
     context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
 
-    setObject(context, XMMatrixIdentity(), viewProj, kWhite);
-    drawIndexed(context, m_floor);
+    drawChunks(context, m_terrain, viewProj);
     drawAll(context, viewProj, false);
+
+    // 4. El agua, translúcida, encima de todo lo anterior.
+    drawWater(context, viewProj);
 }
 
 void Renderer3D::cleanup() {
     m_draws.clear();
+    m_noCull.Reset();
+    m_waterDepth.Reset();
+    m_waterBlend.Reset();
+    m_waterPixelShader.Reset();
+    m_waterVertexShader.Reset();
     m_shadowRaster.Reset();
     m_shadowSampler.Reset();
     m_shadowSrv.Reset();
@@ -881,7 +1292,9 @@ void Renderer3D::cleanup() {
     m_dome = {};
     m_star = {};
     m_cube = {};
-    m_player = {};
-    m_floor = {};
-    m_floorBuilt = false;
+    m_cone = {};
+    m_ocean = {};
+    m_water.clear();
+    m_terrain.clear();
+    m_worldBuilt = false;
 }

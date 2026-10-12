@@ -29,12 +29,15 @@ class GameEngine {
 
     void applySave(const SaveData& save) {
         m_scene = save.worldSeed != 0 ? Scene(m_data, save.worldSeed) : Scene(m_data);
-        m_scene.player.body.position = { save.playerPosition[0], save.playerPosition[1], save.playerPosition[2] };
+        float x = save.playerPosition[0], z = save.playerPosition[2];
+        if (!m_scene.habitats.playable(x, z)) x = z = 0.0f; // partidas de antes del mundo nuevo: el inicio
+        m_scene.player.body.position = { x, (std::max)(save.playerPosition[1], m_scene.world.surfaceHeight(x, z)) + 0.5f, z };
         m_scene.dayCycle.setTime(save.worldTime);
         m_scene.exploration.restore(save.explored);
         m_scene.inventory.restore(save.items, save.selectedBall, save.money);
         m_scene.storage.restore(save.team, save.pc, save.autoReleaseRank, save.activeIndex);
         m_scene.storage.restoreDex(save.dexSeen, save.dexCaught);
+        m_scene.storage.dexProgress.restore(save.dexProgress);
         m_scene.progress.restore(save.playerLevel, save.playerXp, save.badges);
     }
 
@@ -48,6 +51,7 @@ class GameEngine {
         m_scene.inventory.store(save.items, save.selectedBall, save.money);
         m_scene.storage.store(save.team, save.pc);
         m_scene.storage.storeDex(save.dexSeen, save.dexCaught);
+        m_scene.storage.dexProgress.store(save.dexProgress);
         save.autoReleaseRank = m_scene.storage.autoRankIndex();
         save.activeIndex = m_scene.storage.activeIndex();
         save.playerLevel = m_scene.progress.level();

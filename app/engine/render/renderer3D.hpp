@@ -49,6 +49,19 @@ class Renderer3D {
         DirectX::XMFLOAT4 skyHorizon;
         DirectX::XMFLOAT4 skyParams;    // x = estrellas, y = tinte cálido, z = ángulo del cielo, w = segundos
         DirectX::XMFLOAT4 shadowParams; // x = tamaño de texel, y = desplazamiento por la normal, z = sesgo de profundidad
+        DirectX::XMFLOAT4 cameraPos;    // xyz = posición de la cámara, w = marea (m)
+        DirectX::XMFLOAT4 env;          // x = oscuridad (cueva, mina), y = densidad de la niebla, z = bajo el agua, w = radio del archipiélago
+        DirectX::XMFLOAT4 fogColor;
+    };
+
+    // Entorno del frame que no sale de la luz del día: dónde está la cámara, la marea, la niebla y la oscuridad.
+    struct Environment {
+        DirectX::XMFLOAT3 eye = {};
+        DirectX::XMFLOAT3 focus = {};   // punto que centra el mapa de sombras (el jugador)
+        float tide = 0.0f;
+        float darkness = 0.0f;
+        bool underwater = false;
+        float worldRadius = 300.0f;
     };
 
     // Geometría inmutable e indexada: cada vértice se comparte entre triángulos.
@@ -69,16 +82,32 @@ class Renderer3D {
 
     static Mesh createMesh(ID3D11Device* device, const void* vertices, UINT vertexCount, UINT stride,
         const std::vector<uint16_t>& indices);
-    static Mesh createFloor(ID3D11Device* device, const HabitatMap& habitats, const Physics::Heightfield& terrain, const GameData& data);
-    static Mesh createPlayer(ID3D11Device* device);
+
+    // Un trozo de malla del mundo (terreno o agua): se descarta entero si queda fuera del alcance de la cámara.
+    struct Chunk {
+        Mesh mesh;
+        DirectX::XMFLOAT3 center = {};
+        float radius = 0.0f;
+    };
+    template <typename VertexFn, typename KeepFn>
+    static std::vector<Chunk> buildChunks(ID3D11Device* device, int nodes, VertexFn vertexAt, KeepFn keepCell);
+    static std::vector<Chunk> createTerrain(ID3D11Device* device, const HabitatMap& habitats, const Physics::World& world, const GameData& data);
+    static std::vector<Chunk> createWater(ID3D11Device* device, const HabitatMap& habitats, const Physics::World& world);
+    static Mesh createOcean(ID3D11Device* device);
+    static Mesh createCone(ID3D11Device* device);
     static Mesh createCube(ID3D11Device* device);
     static Mesh createSphere(ID3D11Device* device, bool dome = false); // pokéball o, con dome, la semiesfera superior blanca
     static Mesh createStar(ID3D11Device* device);
-    static DirectX::XMMATRIX lightViewProj(const DirectX::XMFLOAT3& lightDir);
+    static DirectX::XMMATRIX lightViewProj(const DirectX::XMFLOAT3& lightDir, const DirectX::XMFLOAT3& focus);
 
     void collect(const Scene& scene);
     void add(const Mesh& mesh, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint, bool castsShadow = true);
     void addBall(const Pokeball& ball, float tilt, float scale, float glow);
+    void addPlayer(const Scene& scene);
+    void addTool(PlayerAction tool, DirectX::CXMMATRIX hand);
+    void addFishingLine(const Scene& scene, const DirectX::XMFLOAT3& rodTip);
+    void addPortal(const HabitatMap::Portal& portal, const Physics::World& world, float time);
+    void addSky(const Scene& scene, float time);
     void addChest(const Chest& chest);
     void addNode(const ResourceNode& node);
     void addGroundItem(const GroundItem& item);
@@ -88,9 +117,11 @@ class Renderer3D {
         const DirectX::XMFLOAT4& tint) const;
     void drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) const;
     void drawAll(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj, bool shadowPass) const;
+    void drawChunks(ID3D11DeviceContext* context, const std::vector<Chunk>& chunks, DirectX::CXMMATRIX viewProj) const;
+    void drawWater(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj) const;
     void renderShadowMap(ID3D11DeviceContext* context, DirectX::CXMMATRIX lightViewProj) const;
     void updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, DirectX::CXMMATRIX view,
-        DirectX::CXMMATRIX lightViewProj);
+        DirectX::CXMMATRIX lightViewProj, const Environment& env);
 
     ComPtr<ID3D11VertexShader> m_vertexShader;
     ComPtr<ID3D11PixelShader> m_pixelShader;
@@ -105,12 +136,22 @@ class Renderer3D {
     ComPtr<ID3D11ShaderResourceView> m_shadowSrv;
     ComPtr<ID3D11SamplerState> m_shadowSampler;     // comparación con filtrado: bordes suaves
     ComPtr<ID3D11RasterizerState> m_shadowRaster;   // con sesgo según la pendiente
+    ComPtr<ID3D11VertexShader> m_waterVertexShader; // agua: olas, marea, corriente
+    ComPtr<ID3D11PixelShader> m_waterPixelShader;   // agua: transparencia por profundidad, espuma, reflejo
+    ComPtr<ID3D11BlendState> m_waterBlend;
+    ComPtr<ID3D11DepthStencilState> m_waterDepth;   // el agua prueba la profundidad pero no la escribe
+    ComPtr<ID3D11RasterizerState> m_noCull;         // el agua se ve también desde abajo
 
-    Mesh m_floor;                // suelo coloreado según los hábitats; se rehace cuando cambia el mapa
+    std::vector<Chunk> m_terrain; // relieve coloreado según hábitat, altura y pendiente; se rehace cuando cambia el mapa
+    std::vector<Chunk> m_water;   // superficie del agua (mar, ríos, lagos, charcas, cascadas)
+    Mesh m_ocean;                 // el mar hasta el horizonte, fuera del archipiélago
+    Mesh m_cone;                  // la base rocosa de la isla del cielo
     ID3D11Device* m_device = nullptr;
-    bool m_floorBuilt = false;
-    unsigned m_floorSeed = 0;
-    Mesh m_player;
+    bool m_worldBuilt = false;
+    unsigned m_worldSeed = 0;
+    DirectX::XMFLOAT3 m_eye = {}; // posición de la cámara en el último frame (recorte del terreno)
+    float m_darkness = 0.0f;      // oscuridad actual (suave al entrar y salir de cuevas)
+
     Mesh m_cube;   // cubo unitario blanco centrado en el origen: paredes, pokémon y su morro (se tiñe al dibujar)
     Mesh m_sphere; // pokéball: mitad tintada con el color del tipo, banda oscura y mitad blanca
     Mesh m_dome;   // semiesfera blanca de los objetos sueltos

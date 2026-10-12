@@ -5,6 +5,7 @@
 #include <vector>
 #include "../../../models/gameData.hpp"
 #include "../../../utils/core/randomUtil.hpp"
+#include "dexProgress.hpp"
 #include "../rules/companionRules.hpp"
 #include "../rules/evRules.hpp"
 #include "../rules/pokemonRules.hpp"
@@ -54,7 +55,10 @@ class PokemonStorage {
         m_autoMin = EvRules::Rank::D;
         m_active = 0;
         m_dex.assign(data.species.size(), DEX_UNSEEN);
+        dexProgress.setData(data);
     }
+
+    DexProgress dexProgress; // logros por especie y sus recompensas (la Pokédex las muestra)
 
     // --- Pokédex: cada especie está sin ver, vista o capturada (una vez capturada no vuelve atrás). ---
     enum DexState : unsigned char { DEX_UNSEEN = 0, DEX_SEEN = 1, DEX_CAUGHT = 2 };
@@ -87,6 +91,8 @@ class PokemonStorage {
         OwnedPokemon stored = owned;
         stored.uid = m_nextUid++;
         markDex(owned.speciesId, DEX_CAUGHT);
+        dexProgress.captured(owned.speciesId, owned.shiny, owned.level);
+        if (owned.analyzed) if (const PokemonSpecies* species = m_data->speciesById(owned.speciesId)) dexProgress.ranked(owned.speciesId, EvRules::rank(species->stats, owned.evCaps));
         if (!sentToPc) m_team.push_back(stored);
         else if (!pcFull()) m_pc.push_back(stored);
         else return false;
@@ -175,6 +181,7 @@ class PokemonStorage {
         OwnedPokemon* owned = at(inTeam, index);
         if (!owned || owned->level >= cap) return LevelResult::NONE;
         ++owned->level;
+        dexProgress.leveled(owned->speciesId, owned->level);
         const PokemonSpecies* species = m_data->speciesById(owned->speciesId);
         const Evolution* evolution = species ? species->levelEvolution(owned->level, RandomUtil::range(0.0f, 1.0f)) : nullptr;
         if (evolution && m_data->speciesById(evolution->toId)) {
@@ -183,6 +190,21 @@ class PokemonStorage {
             return LevelResult::EVOLVED;
         }
         return LevelResult::LEVELED;
+    }
+
+    // Evoluciona a un pokémon del equipo por un método que no es el nivel (cascada...). Devuelve la especie nueva o nullptr si no toca.
+    const PokemonSpecies* evolveBy(int teamIndex, Evolution::Method method) {
+        OwnedPokemon* owned = at(true, teamIndex);
+        const PokemonSpecies* species = owned ? m_data->speciesById(owned->speciesId) : nullptr;
+        if (!species) return nullptr;
+        for (const Evolution& evolution : species->evolutions) {
+            const PokemonSpecies* next = evolution.method == method ? m_data->speciesById(evolution.toId) : nullptr;
+            if (!next) continue;
+            owned->speciesId = next->id;
+            markDex(next->id, DEX_CAUGHT);
+            return next;
+        }
+        return nullptr;
     }
 
     // Experiencia de combate: sube de nivel (y evoluciona) sin pasar de 'cap'. Devuelve niveles ganados y si evolucionó.
@@ -242,6 +264,7 @@ class PokemonStorage {
                 entry.level = owned.level;
                 entry.shiny = owned.shiny;
                 entry.rank = EvRules::rank(species->stats, owned.evCaps);
+                dexProgress.ranked(owned.speciesId, entry.rank);
                 entry.reward = ResearchRules::reward(*m_data, *species, owned.level, owned.shiny);
                 const bool drop = !owned.shiny && !bound(owned) && entry.rank < m_autoMin && (&list != &m_team || m_team.size() > 1);
                 entry.released = drop;

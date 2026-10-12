@@ -2,11 +2,12 @@
 #include "imgui.h"
 #include "guiDraw.hpp"
 #include "../../engine/core/inputDevice.hpp"
+#include "../../engine/core/promptAction.hpp"
 
 // Ayudas de "qué botón pulsar" dentro del juego. El icono depende del dispositivo en uso, así que
 // cambian solas al pasar de teclado a mando (y de un mando a otro).
 namespace GuiPrompts {
-    enum class Action { JUMP, CROUCH, SPRINT, PAUSE, AIM, THROW, LOCK, BALL_SWITCH, INTERACT, INVENTORY, MODE, MAP };
+    using Action = PromptAction;
 
     namespace detail {
         inline constexpr float HEIGHT = 24.0f;
@@ -17,6 +18,7 @@ namespace GuiPrompts {
             switch (action) {
                 case Action::JUMP:     face = GuiDraw::Face::SOUTH; return true;
                 case Action::CROUCH:   face = GuiDraw::Face::EAST;  return true;
+                case Action::RELEASE:  face = GuiDraw::Face::EAST;  return true;
                 case Action::INTERACT: face = GuiDraw::Face::WEST;  return true;
                 case Action::MODE:     face = GuiDraw::Face::NORTH; return true;
                 default:               return false;
@@ -39,6 +41,7 @@ namespace GuiPrompts {
                     case Action::INVENTORY:   return "I";
                     case Action::MODE:        return "R";
                     case Action::MAP:         return "M";
+                    case Action::RELEASE:     return "G";
                 }
             }
             switch (action) {

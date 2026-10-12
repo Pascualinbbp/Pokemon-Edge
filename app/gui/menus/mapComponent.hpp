@@ -126,10 +126,9 @@ namespace MapComponent {
         const float side = (std::min)(screen.y - top - MARGIN - 6.0f, screen.x * 0.68f); // el mapa ocupa casi toda la pantalla
         const ImVec2 a(MARGIN, top), b(a.x + side, a.y + side);
         const float cell = side / static_cast<float>(cells);
-        dl->AddRectFilled(ImVec2(a.x - 6.0f, a.y - 6.0f), ImVec2(b.x + 6.0f, b.y + 6.0f), IM_COL32(14, 16, 26, 245), 10.0f);
-        dl->AddRectFilled(a, b, IM_COL32(34, 38, 54, 255));
         for (int row = 0; row < cells; ++row) {
             for (int col = 0; col < cells; ++col) {
+                if (!terrain.valid[static_cast<size_t>(row) * cells + col]) continue; // el mapa solo dibuja el archipiélago y las regiones
                 const bool seen = explored.seen(col, row);
                 if (!seen) {
                     if (((row + col) & 1) == 0) continue; // tablero tenue: la zona oculta no es un bloque liso
@@ -142,7 +141,6 @@ namespace MapComponent {
                 dl->AddRectFilled(ImVec2(a.x + col * cell, b.y - (row + 1) * cell), ImVec2(a.x + (col + 1) * cell + 0.5f, b.y - row * cell + 0.5f), color);
             }
         }
-        dl->AddRect(a, b, IM_COL32(255, 255, 255, 120), 0.0f, 0, 1.5f);
 
         // Construcciones exploradas y jugador.
         const auto toScreen = [&](float x, float z) {

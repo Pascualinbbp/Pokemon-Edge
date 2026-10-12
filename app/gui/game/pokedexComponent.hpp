@@ -8,6 +8,7 @@
 #include "../style/guiStyle.hpp"
 #include "../style/icons/itemIcon.hpp"
 #include "../window/guiInput.hpp"
+#include "../../engine/world/state/inventory.hpp"
 #include "../../engine/world/state/pokemonStorage.hpp"
 #include "../../models/gameData.hpp"
 
@@ -23,6 +24,7 @@ namespace PokedexComponent {
         inline constexpr float UNSEEN_DARKEN = 0.93f;
 
         inline int selectedId = -1; // id de la especie seleccionada
+        inline std::string claimMessage; // resultado de la última recompensa reclamada
 
         // Marca de la esquina: pokéball (capturado) o casilla vacía (visto).
         inline void marker(ImDrawList* dl, const ImVec2& c, float r, PokemonStorage::DexState state) {
@@ -56,6 +58,11 @@ namespace PokedexComponent {
                 ImGui::PopID();
                 if (picked) selectedId = species.id;
                 marker(dl, ImVec2(origin.x + 16.0f, origin.y + 16.0f), 8.0f, state);
+                if (storage.dexProgress.claimableCount(species.id) > 0) { // hay recompensas por reclamar
+                    const ImVec2 at(origin.x + TILE_WIDTH - 14.0f, origin.y + 14.0f);
+                    dl->AddCircleFilled(at, 7.0f, IM_COL32(255, 200, 60, 255), 16);
+                    dl->AddCircle(at, 7.0f, IM_COL32(0, 0, 0, 120), 16, 1.5f);
+                }
             }
             ImGui::PopStyleVar();
             ImGui::EndChild();
@@ -69,7 +76,40 @@ namespace PokedexComponent {
             ImGui::TextUnformatted(value.c_str());
         }
 
-        inline void drawDetail(const GameData& data, const PokemonStorage& storage, const PokemonSpecies* species, const ImVec2& pos, const ImVec2& size) {
+        // Texto de lo que pide un logro y cómo va ("Captura 5   3 / 5").
+        inline std::string progressText(const PokemonStorage& storage, const DexReward& reward, int speciesId) {
+            const int value = storage.dexProgress.value(speciesId, reward.kind);
+            if (reward.kind == DexReward::Kind::RANK) return value >= 0 ? std::string("mejor: ") + EvRules::label(EvRules::RANKS[value]) : "sin analizar";
+            return std::to_string((std::min)(value, reward.threshold)) + " / " + std::to_string(reward.threshold);
+        }
+
+        // Recompensas de progreso de la especie: lo conseguido, lo que falta y el botón para reclamarlas.
+        inline void drawProgress(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PokemonSpecies& species) {
+            if (data.dexRewards.empty()) return;
+            ImGui::Dummy(ImVec2(0.0f, 8.0f));
+            GuiCards::muted("Progreso");
+            for (const DexReward& reward : data.dexRewards) {
+                if (!reward.appliesTo(species.id)) continue;
+                const bool done = storage.dexProgress.claimed(reward, species.id);
+                const bool can = storage.dexProgress.claimable(reward, species.id);
+                const Item* item = data.item(reward.itemId);
+                const std::string prize = std::to_string(reward.quantity) + "x " + (item ? data.itemName(*item) : std::string("?"));
+                ImGui::PushID(reward.id);
+                const std::string text = reward.description + "   " + progressText(storage, reward, species.id);
+                ImGui::PushStyleColor(ImGuiCol_Text, done ? GuiStyle::MUTED : IM_COL32(255, 255, 255, 255));
+                ImGui::TextUnformatted(text.c_str());
+                ImGui::PopStyleColor();
+                ImGui::SameLine((std::max)(ImGui::GetContentRegionAvail().x - 120.0f, 200.0f));
+                if (done) GuiCards::muted("Reclamada");
+                else if (GuiCards::button("##claim", can ? "Reclamar" : prize.c_str(), ImVec2(120.0f, 24.0f), can, IM_COL32(220, 160, 40, 255))) {
+                    if (storage.dexProgress.claim(reward, species.id, inventory)) claimMessage = "Has obtenido " + prize;
+                    else claimMessage = "No hay sitio en la mochila";
+                }
+                ImGui::PopID();
+            }
+        }
+
+        inline void drawDetail(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PokemonSpecies* species, const ImVec2& pos, const ImVec2& size) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             GuiCards::panel(dl, pos, ImVec2(pos.x + size.x, pos.y + size.y));
             if (!species) return;
@@ -149,12 +189,18 @@ namespace PokedexComponent {
                 }
                 line("Evoluciona:", std::string(known ? next->name : "???") + "  (" + how + ")");
             }
+            drawProgress(data, storage, inventory, *species);
+            if (!claimMessage.empty()) {
+                ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 215, 90, 255));
+                ImGui::TextUnformatted(claimMessage.c_str());
+                ImGui::PopStyleColor();
+            }
             ImGui::EndChild();
         }
     }
 
     // ESC, P, Select o el botón de volver del mando cierran la Pokédex.
-    inline void render(GameState& state, GameState back, const GameData& data, const PokemonStorage& storage) {
+    inline void render(GameState& state, GameState back, const GameData& data, PokemonStorage& storage, Inventory& inventory) {
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, 170));
         if (data.species.empty()) {
             state = back;
@@ -173,6 +219,12 @@ namespace PokedexComponent {
                       storage.dexCount(PokemonStorage::DEX_CAUGHT), static_cast<int>(data.species.size()));
         GuiCards::text(dl, ImVec2(screen.x - detail::MARGIN - GuiCards::textWidth(counts, 1.1f), detail::MARGIN - 2.0f), IM_COL32(255, 215, 90, 255), counts, 1.1f);
 
+        if (const int pending = storage.dexProgress.claimableCount(-1); pending > 0) {
+            char gifts[64];
+            std::snprintf(gifts, sizeof(gifts), "Recompensas por reclamar: %d", pending);
+            GuiCards::text(dl, ImVec2(detail::MARGIN + 300.0f, detail::MARGIN - 2.0f), IM_COL32(255, 200, 60, 255), gifts, 1.1f);
+        }
+
         const PokemonSpecies* picked = data.speciesById(detail::selectedId);
         if (!picked) {
             picked = &data.species.front();
@@ -183,7 +235,7 @@ namespace PokedexComponent {
         const float gridWidth = screen.x - detail::MARGIN * 2.0f - detail::DETAIL_WIDTH - 28.0f;
         ImGui::SetCursorScreenPos(gridPos);
         detail::drawGrid(data, storage, ImVec2(gridWidth, height));
-        detail::drawDetail(data, storage, picked, ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));
+        detail::drawDetail(data, storage, inventory, picked, ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));
 
         GuiCards::text(dl, ImVec2(detail::MARGIN, screen.y - detail::MARGIN), GuiStyle::MUTED, "ESC: volver", 0.9f);
         if (GuiInput::backPressed() || ImGui::IsKeyPressed(ImGuiKey_P, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, false)) state = back;

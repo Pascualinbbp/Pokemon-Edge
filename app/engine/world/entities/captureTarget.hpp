@@ -27,6 +27,8 @@ class CaptureTarget {
     static constexpr float TURN_SPEED    = 6.0f;  // rad/s al girar hacia donde camina
     static constexpr float WATER_EDGE    = 0.3f;  // profundidad que separa "tierra" de "agua" para vagar
     static constexpr float LEASH         = 6.0f;  // distancia máxima a su punto de aparición
+    static constexpr float DIVE_MIN_DEPTH = 1.2f; // con menos agua que esto no se sumerge
+    static constexpr float DIVE_SPEED    = 1.5f;  // m/s al subir o bajar
 
     enum class Event { NONE, CAPTURED, ESCAPED }; // se emite en el instante en que la animación revela el resultado
 
@@ -52,6 +54,10 @@ class CaptureTarget {
         m_shiny = false;
         m_hp = 1.0f;
         m_leaving = false;
+        m_leash = LEASH;
+        m_surface = false;
+        m_diveFraction = RandomUtil::range(0.0f, 1.0f);
+        body.underwater = false;
         m_age = 0.0f;
         m_lifetime = RandomUtil::range(LIFETIME_MIN, LIFETIME_MAX);
     }
@@ -62,6 +68,10 @@ class CaptureTarget {
         m_timer = 0.0f;
     }
     void setSwims(bool swims) { m_swims = swims; }
+    // Los que nadan se sumergen a una profundidad propia (0 = justo bajo la superficie, 1 = en el fondo); 'surface' los deja flotando.
+    void setDive(float fraction, bool surface = false) { m_diveFraction = fraction; m_surface = surface; }
+    void setLeash(float meters) { m_leash = meters; }
+    bool underwater() const { return body.underwater; }
 
     bool hittable() const { return m_state == State::IDLE && m_appear >= SOLID_APPEAR; }
     bool gone() const { return m_state == State::HIDDEN; }       // capturado o derrotado: espera a que el chunk lo renueve
@@ -216,12 +226,25 @@ class CaptureTarget {
             case State::HIDDEN:
                 return event;
         }
+        dive(world);
         world.step(body, dt);
         return event;
     }
 
     private:
     enum class State { IDLE, CAPTURING, HIDDEN };
+
+    // Los que nadan, donde hay fondo suficiente, se sumergen a su profundidad: sin gravedad, subiendo o bajando hasta ella.
+    void dive(const Physics::World& world) {
+        const float depth = world.waterDepth(body.position.x, body.position.z);
+        const bool deep = m_swims && !m_surface && m_state == State::IDLE && depth > DIVE_MIN_DEPTH;
+        body.underwater = deep;
+        if (!deep) return;
+        const float level = world.waterLevel(body.position.x, body.position.z);
+        const float lowest = level - depth + 0.1f, highest = level - SIZE - 0.1f; // el cubo siempre bajo la superficie
+        const float target = lowest + (std::max)(highest - lowest, 0.0f) * (1.0f - m_diveFraction);
+        body.velocity.y = (std::clamp)((target - body.position.y) * 1.5f, -DIVE_SPEED, DIVE_SPEED);
+    }
 
     // Alterna paradas y paseos en una dirección al azar; si se aleja demasiado de su punto, vuelve hacia él.
     // Los que no nadan evitan el agua y los que nadan evitan la tierra: al acercarse al límite dan media vuelta hacia su punto.
@@ -233,7 +256,7 @@ class CaptureTarget {
         m_wanderTimer -= dt;
         if (m_wanderTimer <= 0.0f) {
             const float homeDx = m_home.x - body.position.x, homeDz = m_home.y - body.position.z;
-            const bool tooFar = homeDx * homeDx + homeDz * homeDz > LEASH * LEASH;
+            const bool tooFar = homeDx * homeDx + homeDz * homeDz > m_leash * m_leash;
             m_walking = tooFar || RandomUtil::roll(65.0f);
             m_wanderTimer = m_walking ? RandomUtil::range(1.5f, 3.5f) : RandomUtil::range(1.5f, 4.0f);
             if (m_walking) m_heading = tooFar ? std::atan2(homeDx, homeDz) : RandomUtil::range(-3.14159265f, 3.14159265f);
@@ -274,5 +297,8 @@ class CaptureTarget {
     int m_level = 1;
     bool m_shiny = false;
     bool m_swims = false;
+    bool m_surface = false;     // flota en la superficie (el pescado)
+    float m_diveFraction = 0.5f;
+    float m_leash = LEASH;
     int m_ballId = -1;
 };

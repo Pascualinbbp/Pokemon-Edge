@@ -363,7 +363,7 @@ void MainWindow::run() {
                 InventoryComponent::render(g_state, g_backState, engine.data(), engine.inventory());
                 break;
             case GameState::POKEDEX:
-                PokedexComponent::render(g_state, g_backState, engine.data(), engine.storage());
+                PokedexComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory());
                 break;
             case GameState::POKEMON:
                 PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress(), InputHandler::activeDevice());

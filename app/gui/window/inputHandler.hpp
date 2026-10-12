@@ -24,6 +24,8 @@ namespace InputHandler {
             bool jump = false, crouch = false, sprint = false;          // eventos de un frame
             bool interact = false;                                      // F
             bool interactHeld = false;                                  // F mantenida
+            bool jumpHeld = false, crouchHeld = false;                  // espacio / shift izquierdo mantenidos
+            bool release = false;                                       // G
             bool modeSwitch = false;                                    // R (solo mientras se juega)
             bool inventory = false;                                     // I (solo mientras se juega)
             bool map = false;                                           // M (solo mientras se juega)
@@ -60,7 +62,7 @@ namespace InputHandler {
         inline void clearEvents() {
             mouseDX = mouseDY = 0.0f;
             keys.jump = keys.crouch = keys.sprint = keys.throwBall = keys.interact = keys.inventory = keys.map = keys.pokedex = keys.modeSwitch = false;
-            keys.aimToggle = keys.escape = keys.lockTap = keys.interactHeld = false;
+            keys.aimToggle = keys.escape = keys.lockTap = keys.release = keys.interactHeld = keys.jumpHeld = keys.crouchHeld = false;
             keys.ballSwitch = 0;
             keys.teamSelect = 0;
         }
@@ -167,11 +169,18 @@ namespace InputHandler {
             case '1': case '2': case '3': case '4': case '5': case '6':
                 if (newPress && detail::captured) k.teamSelect = static_cast<int>(key - '0');
                 break;
+            case 'G':
+                if (newPress) k.release = true;
+                break;
             case VK_SPACE:
                 if (newPress) k.jump = true;
+                k.jumpHeld = pressed;
                 break;
             case VK_SHIFT: // solo el shift izquierdo (por su scancode)
-                if (newPress && ((lParam >> 16) & 0xFF) == detail::LEFT_SHIFT_SCANCODE) k.crouch = true;
+                if (((lParam >> 16) & 0xFF) == detail::LEFT_SHIFT_SCANCODE) {
+                    if (newPress) k.crouch = true;
+                    k.crouchHeld = pressed;
+                }
                 break;
             case VK_TAB:
                 if (newPress && detail::captured) {
@@ -301,6 +310,9 @@ namespace InputHandler {
             input.lookY = -pad.ry * std::fabs(pad.ry) * InputBindings::LOOK_SPEED * dt;
             input.jump = (pressed & InputBindings::PAD_JUMP) != 0;
             input.crouch = (pressed & InputBindings::PAD_CROUCH) != 0;
+            input.crouchHeld = (pad.buttons & InputBindings::PAD_CROUCH) != 0;
+            input.jumpHeld = (pad.buttons & InputBindings::PAD_JUMP) != 0;
+            input.release = (pressed & InputBindings::PAD_RELEASE) != 0;
             input.sprint = (pressed & InputBindings::PAD_SPRINT) != 0;
             input.pause = (pressed & InputBindings::PAD_PAUSE) != 0;
             input.interact = (pressed & InputBindings::PAD_INTERACT) != 0;
@@ -338,6 +350,9 @@ namespace InputHandler {
             input.lookY = detail::mouseDY;
             input.jump = k.jump;
             input.crouch = k.crouch;
+            input.crouchHeld = k.crouchHeld;
+            input.jumpHeld = k.jumpHeld;
+            input.release = k.release;
             input.sprint = k.sprint;
             input.interact = k.interact;
             input.interactHeld = k.interactHeld;

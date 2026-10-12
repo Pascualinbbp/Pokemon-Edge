@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include "pokemon/ability.hpp"
+#include "pokemon/dexReward.hpp"
 #include "world/chestType.hpp"
 #include "world/groundItemType.hpp"
 #include "world/habitat.hpp"
@@ -32,6 +33,7 @@ struct GameData {
     std::vector<TrainingItem> trainingItems;
     std::vector<ChestType> chests;
     std::vector<ResourceNodeType> nodes;
+    std::vector<DexReward> dexRewards;
     std::vector<Habitat> habitats;
     std::vector<Weather> weathers;
     std::vector<WeatherFusion> fusions;

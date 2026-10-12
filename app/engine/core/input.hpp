@@ -12,6 +12,8 @@ struct InputState {
 
     // Estado mantenido.
     bool aimHold = false;     // apuntar mientras se mantiene (L2 en el mando)
+    bool jumpHeld = false;    // espacio / ✕ mantenido: subir al bucear
+    bool crouchHeld = false;  // shift izquierdo / ○ mantenido: bajar al bucear
 
     // Eventos de un solo frame (nueva pulsación).
     bool jump = false;
@@ -28,6 +30,7 @@ struct InputState {
     bool pokedex = false;     // P / cruceta derecha: abrir la Pokédex
     bool modeSwitch = false;  // R / triángulo (Y en Xbox): cambiar el modo del pokémon que acompaña
     bool interact = false;    // F / cuadrado (X en Xbox): abrir un cofre cercano
+    bool release = false;     // G / ○ (B en Xbox): liberar (al pescar o capturar un pokémon se elige entre capturar y liberar)
     bool interactHeld = false; // F / cuadrado mantenido: sigue trabajando el recurso cercano
     int ballSwitch = 0;       // Q / E / rueda del ratón / L1 / R1: -1 pokéball (o pokémon) anterior, +1 siguiente
     int teamSelect = 0;       // teclas 1..6: pokémon del equipo que pasa a acompañar al jugador (0 = ninguna)

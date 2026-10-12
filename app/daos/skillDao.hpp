@@ -9,8 +9,8 @@ class SkillDao {
     public:
     std::vector<Skill> findAll() const {
         std::vector<Skill> skills;
-        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description FROM skill ORDER BY id;")) {
-            skills.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::text(row, "description") });
+        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, animation FROM skill ORDER BY id;")) {
+            skills.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::text(row, "description"), DaoRow::text(row, "animation") });
         }
         if (skills.empty()) Logger::logError("SKILL_DAO", "La tabla skill no existe o está vacía (falta aplicar testing/sql/skill.sql).");
         return skills;

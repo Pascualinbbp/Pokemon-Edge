@@ -19,7 +19,8 @@ class ChestField {
     static constexpr float EXCLUSION_RADIUS = 14.0f; // nunca aparece uno tan cerca del jugador
     static constexpr float INTERVAL = 6.0f;          // segundos entre intentos de generar un cofre
     static constexpr int PLACE_TRIES = 10;
-    static constexpr float MIN_LAND = 0.35f;         // altura mínima del terreno para colocar un cofre
+    static constexpr float MIN_LAND_DEPTH = -50.0f;  // por debajo de esto no hay suelo (el vacío alrededor de la isla del cielo)
+    static constexpr float MAX_SLOPE = 0.6f;         // un cofre no se coloca en una ladera empinada
 
     std::vector<Chest> entities;
 
@@ -28,7 +29,7 @@ class ChestField {
                 const Physics::World& world) {
         for (Chest& chest : entities) chest.update(dt);
         entities.erase(std::remove_if(entities.begin(), entities.end(), [](const Chest& c) { return c.finished(); }), entities.end());
-        if (data.chests.empty() || habitats.zones().empty()) return;
+        if (data.chests.empty() || habitats.chestSites().empty()) return;
 
         if (day != m_day) newDay(day, data, habitats);
         m_timer -= dt;
@@ -37,8 +38,8 @@ class ChestField {
 
         // Zonas cercanas con sitio libre y tope diario sin agotar.
         std::vector<int> candidates;
-        for (size_t z = 0; z < habitats.zones().size(); ++z) {
-            const HabitatMap::Zone& zone = habitats.zones()[z];
+        for (size_t z = 0; z < habitats.chestSites().size(); ++z) {
+            const HabitatMap::Zone& zone = habitats.chestSites()[z];
             const float dx = zone.x - playerX, dz = zone.z - playerZ;
             const float reach = SPAWN_RADIUS + zone.radius;
             if (dx * dx + dz * dz > reach * reach || m_budget[zone.habitat] <= 0) continue;
@@ -47,7 +48,7 @@ class ChestField {
         if (candidates.empty()) return;
 
         const int zoneIndex = candidates[RandomUtil::integer(0, static_cast<int>(candidates.size()) - 1)];
-        const HabitatMap::Zone& zone = habitats.zones()[zoneIndex];
+        const HabitatMap::Zone& zone = habitats.chestSites()[zoneIndex];
         for (int attempt = 0; attempt < PLACE_TRIES; ++attempt) {
             // Punto al azar dentro de la elipse de la zona.
             const float angle = RandomUtil::range(0.0f, 6.2831853f), radial = std::sqrt(RandomUtil::range(0.0f, 1.0f));
@@ -71,8 +72,7 @@ class ChestField {
     }
 
     bool valid(float x, float z, float playerX, float playerZ, const Physics::World& world) const {
-        const float half = Physics::World::HALF_SIZE - 2.0f;
-        if (std::fabs(x) > half || std::fabs(z) > half || world.groundHeight(x, z) < MIN_LAND) return false; // nunca en el agua
+        if (world.waterDepth(x, z) > 0.05f || world.groundHeight(x, z) < MIN_LAND_DEPTH || world.slope(x, z) > MAX_SLOPE) return false; // nunca en el agua ni en una pared
         if ((x - playerX) * (x - playerX) + (z - playerZ) * (z - playerZ) < EXCLUSION_RADIUS * EXCLUSION_RADIUS) return false;
         const float mx = x - ResearchMachine::POSITION.x, mz = z - ResearchMachine::POSITION.z;
         if (mx * mx + mz * mz < 16.0f) return false;
@@ -90,9 +90,9 @@ class ChestField {
         m_day = day;
         m_budget.assign(data.habitats.size(), 0);
         for (size_t h = 0; h < data.habitats.size(); ++h) m_budget[h] = data.habitats[h].dailyChests;
-        m_targets.assign(habitats.zones().size(), 0);
+        m_targets.assign(habitats.chestSites().size(), 0);
         for (size_t z = 0; z < m_targets.size(); ++z) {
-            const int h = habitats.zones()[z].habitat;
+            const int h = habitats.chestSites()[z].habitat;
             if (h < static_cast<int>(data.habitats.size())) m_targets[z] = RandomUtil::integer(data.habitats[h].minChests, data.habitats[h].maxChests);
         }
     }

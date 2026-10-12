@@ -18,7 +18,18 @@ namespace ResourceSpawn {
     inline constexpr float CLEAR_RADIUS = 4.5f;     // zona libre alrededor del inicio, de la máquina y de las paredes
     inline constexpr float PLANT_MIN_GROWTH = 0.3f; // una planta de partida nueva tiene al menos este crecimiento
     inline constexpr int PLACE_TRIES = 12;
-    inline constexpr float MIN_LAND = 0.35f;        // altura mínima del terreno para colocar un nodo
+    inline constexpr float MAX_SLOPE = 0.55f;       // en laderas más empinadas no crece nada
+    inline constexpr float PORTAL_CLEAR = 7.0f;     // zona libre alrededor de cada portal
+
+    // Altura a la que se asienta un nodo: la más baja del suelo bajo su base, para que no flote por el lado de cuesta abajo.
+    inline float seat(const Physics::World& world, float x, float z, float half) {
+        float low = world.groundHeight(x, z);
+        for (int i = 0; i < 8; ++i) {
+            const float a = i * 0.785398f;
+            low = (std::min)(low, world.groundHeight(x + std::cos(a) * half, z + std::sin(a) * half));
+        }
+        return low - 0.04f;
+    }
 
     inline std::vector<ResourceNode> generate(const GameData& data, const HabitatMap& habitats, unsigned seed,
                                               const Physics::World& world) {
@@ -38,7 +49,11 @@ namespace ResourceSpawn {
         };
 
         const auto free = [&](float x, float z) {
-            if (world.groundHeight(x, z) < MIN_LAND) return false; // nunca en el agua
+            if (world.waterDepth(x, z) > 0.05f || world.groundHeight(x, z) < -50.0f || world.slope(x, z) > MAX_SLOPE) return false; // nunca en el agua ni en una ladera empinada
+            for (const HabitatMap::Portal& portal : habitats.portals()) {
+                const float px = x - portal.x, pz = z - portal.z;
+                if (px * px + pz * pz < PORTAL_CLEAR * PORTAL_CLEAR) return false;
+            }
             if (x * x + z * z < CLEAR_RADIUS * CLEAR_RADIUS) return false;
             const float mx = x - ResearchMachine::POSITION.x, mz = z - ResearchMachine::POSITION.z;
             if (mx * mx + mz * mz < CLEAR_RADIUS * CLEAR_RADIUS) return false;
@@ -55,6 +70,7 @@ namespace ResourceSpawn {
         for (int row = 0; row < chunks; ++row) {
             for (int col = 0; col < chunks; ++col) {
                 const float x0 = -half + col * CHUNK, z0 = -half + row * CHUNK;
+                if (!habitats.playable(x0 + CHUNK * 0.5f, z0 + CHUNK * 0.5f)) continue;
                 habitats.weights(x0 + CHUNK * 0.5f, z0 + CHUNK * 0.5f, weights);
                 float count = weights.empty() ? 3.0f : 0.0f;
                 for (size_t h = 0; h < weights.size() && h < data.habitats.size(); ++h) {
@@ -92,7 +108,7 @@ namespace ResourceSpawn {
                     const ResourceNodeType& node = data.nodes[type];
                     const float growth = node.plant() ? between(PLANT_MIN_GROWTH, 1.0f) : 1.0f;
                     nodes.emplace_back(type, node.id, node.hits, node.plant(), static_cast<float>(node.plant() ? node.growSeconds : node.regrowSeconds),
-                                       growth, DirectX::XMFLOAT3{ x, world.groundHeight(x, z), z }, between(0.0f, 6.2831853f));
+                                       growth, DirectX::XMFLOAT3{ x, seat(world, x, z, ResourceStyle::look(node.id).half), z }, between(0.0f, 6.2831853f));
                 }
             }
         }

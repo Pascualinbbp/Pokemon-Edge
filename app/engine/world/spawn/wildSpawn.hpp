@@ -18,8 +18,11 @@ namespace WildSpawn {
         std::vector<WeatherSystem::Local> weather;  // climas del punto
         bool night = false;
         float depth = 0.0f;                         // profundidad del agua en el punto (0 = tierra)
+        int rod = 0;                                // nivel de la caña con la que se pesca (0 = no se pesca)
     };
 
+    inline constexpr int ROD_COMMON = 150;          // índice de captura desde el que pica con la caña de nivel 1
+    inline constexpr int ROD_UNCOMMON = 60;         // y con la de nivel 2 (los más raros exigen nivel 3)
     inline constexpr float MAX_LAND_DEPTH = 0.3f;   // con más agua que esto solo aparecen pokémon que nadan
 
     inline float strengthOf(const Context& context, int weatherId) {
@@ -47,6 +50,17 @@ namespace WildSpawn {
         return weight;
     }
 
+    // Pesca: cada nivel de caña deja pescar a los de captura más difícil, y cuanto mejor es la caña más pican los raros.
+    // Solo pican los que nadan. Con rod 0 no afecta.
+    inline float rodFactor(const PokemonSpecies& species, const Context& context) {
+        if (context.rod <= 0) return 1.0f;
+        if (!species.swims) return 0.0f;
+        const int needed = species.catchRate >= ROD_COMMON ? 1 : species.catchRate >= ROD_UNCOMMON ? 2 : 3;
+        if (context.rod < needed) return 0.0f;
+        const float rarity = 1.0f - (std::min)(species.catchRate, 255) / 255.0f;
+        return 1.0f + static_cast<float>(context.rod - 1) * rarity;
+    }
+
     // Multiplicador de las condiciones favorables: cada clima actúa en proporción a su fuerza.
     inline float conditionFactor(const PokemonSpecies& species, const Context& context) {
         float factor = 1.0f;
@@ -62,17 +76,20 @@ namespace WildSpawn {
         return factor;
     }
 
+    inline float baseOf(const GameData& data, const PokemonSpecies& species, const Context& context) {
+        return fits(species, context) ? (context.habitats.empty() ? 1.0f : baseWeight(data, species, context)) * rodFactor(species, context) : 0.0f;
+    }
+
     // Índice en GameData::species del pokémon que aparece (-1 si no hay ninguno).
     inline int pick(const GameData& data, const Context& context) {
         std::vector<float> weights(data.species.size(), 0.0f);
         float total = 0.0f;
         for (size_t i = 0; i < data.species.size(); ++i) {
-            const float base = fits(data.species[i], context) ? (context.habitats.empty() ? 1.0f : baseWeight(data, data.species[i], context)) : 0.0f;
-            weights[i] = base * conditionFactor(data.species[i], context);
+            weights[i] = baseOf(data, data.species[i], context) * conditionFactor(data.species[i], context);
             total += weights[i];
         }
         if (total <= 0.0f) { // las condiciones lo anulan todo: se ignoran
-            for (size_t i = 0; i < data.species.size(); ++i) weights[i] = fits(data.species[i], context) ? (context.habitats.empty() ? 1.0f : baseWeight(data, data.species[i], context)) : 0.0f;
+            for (size_t i = 0; i < data.species.size(); ++i) weights[i] = baseOf(data, data.species[i], context);
         }
         const float sum = std::accumulate(weights.begin(), weights.end(), 0.0f);
         if (sum <= 0.0f) return -1;

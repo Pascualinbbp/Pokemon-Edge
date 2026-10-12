@@ -14,7 +14,10 @@ struct ResourceChance {
 };
 
 // Dónde se coloca un hábitat al generar el mundo (columna placement).
-enum class HabitatPlacement { ANY, COAST, BESIDE, SEA };
+// ANY / COAST: zonas de tierra; BESIDE: orilla de un hábitat de agua (besideId); SEA: mar por profundidad; RIVER / UPPER_RIVER / LAKE /
+// UPPER_LAKE / POND: agua dulce (UPPER = aguas arriba de una cascada; POND = charcas de un pantano, besideId); PEAK: tierra por encima de
+// la línea de nieve; CAVE / MINE / SKY: zonas especiales fuera del mapa principal (cueva, mina, isla del cielo).
+enum class HabitatPlacement { ANY, COAST, BESIDE, SEA, RIVER, UPPER_RIVER, LAKE, UPPER_LAKE, POND, PEAK, CAVE, MINE, SKY };
 
 struct Habitat {
     int id = -1;
@@ -39,6 +42,12 @@ struct Habitat {
     int minNodes = 3;  // materiales de recolección por chunk
     int maxNodes = 6;
     bool sea() const { return placement == HabitatPlacement::SEA; }
+    bool land() const { return placement == HabitatPlacement::ANY || placement == HabitatPlacement::COAST; }
+    // Agua dulce: su min/max_altitude son la profundidad (negativa) de ríos, lagos y charcas.
+    bool freshWater() const {
+        return placement == HabitatPlacement::RIVER || placement == HabitatPlacement::UPPER_RIVER || placement == HabitatPlacement::LAKE ||
+               placement == HabitatPlacement::UPPER_LAKE || placement == HabitatPlacement::POND;
+    }
     float minWeatherWait = 60.0f;
     float maxWeatherWait = 120.0f;
     std::vector<WeatherChance> weather;

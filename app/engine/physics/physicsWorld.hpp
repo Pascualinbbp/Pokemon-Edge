@@ -10,8 +10,9 @@ namespace Physics {
     class World {
         public:
         static constexpr float GRAVITY = 20.0f;
-        static constexpr float HALF_SIZE = 96.0f; // el mundo va de -HALF_SIZE a +HALF_SIZE en X y Z
-        static constexpr float WATER_LEVEL = 0.0f; // altura de la superficie del agua (mar, ríos y lagos)
+        static constexpr float HALF_SIZE = 384.0f; // las mallas del mundo cubren de -HALF_SIZE a +HALF_SIZE; el mundo jugable es el archipiélago y las regiones
+        static constexpr float CLIMB_SLOPE = 0.85f; // pendiente (m de subida por m) desde la que no se anda: se escala
+        static constexpr float CLIMB_MAX = 2.4f;    // más empinado que esto es una pared: no se puede subir
         static constexpr float SWIM_DEPTH = 0.6f;  // con más agua que esto no se camina: se nada
         static constexpr float START_HEIGHT = 1.0f; // altura del terreno plano de la zona de inicio (paredes, máquina...)
         static constexpr float SUBMERGED = 0.4f;   // fracción de la altura de un cuerpo que se hunde al flotar
@@ -32,15 +33,44 @@ namespace Physics {
         std::vector<Box> creatures; // hitbox de los pokémon: la escena los rehace cada frame
         std::vector<Box> props;     // objetos sólidos del mundo (cofres, rocas, árboles...): la escena los rehace cada frame
 
-        Heightfield terrain; // relieve del mundo (lo rellena la escena al generarlo)
+        // Zona jugable: un disco (el archipiélago) más las regiones especiales (cueva, mina, isla del cielo).
+        struct Disc { float x = 0.0f, z = 0.0f, radius = 0.0f; };
+
+        Heightfield terrain;  // relieve del mundo (lo rellena la escena al generarlo)
+        Heightfield water;    // altura de la superficie del agua (= el terreno donde no hay agua)
+        Heightfield seaMask;  // 1 donde el agua es mar (sube y baja con la marea)
+        Heightfield flowX, flowZ; // corriente de los ríos (m/s)
+        float tide = 0.0f;    // desviación de la marea (m), la fija la escena cada frame
+        Disc archipelago{ 0.0f, 0.0f, HALF_SIZE };
+        std::vector<Disc> regions;
 
         // Altura del terreno en (x, z) (bajo el agua es el fondo).
         float groundHeight(float x, float z) const { return terrain.sample(x, z); }
+        // Altura de la superficie del agua en (x, z) (con la marea); en tierra seca es la del terreno.
+        float waterLevel(float x, float z) const { return water.empty() ? 0.0f : water.sample(x, z) + tide * seaMask.sample(x, z); }
         // Altura de lo que se ve: el terreno o la superficie del agua.
-        float surfaceHeight(float x, float z) const { return (std::max)(groundHeight(x, z), WATER_LEVEL); }
+        float surfaceHeight(float x, float z) const { return (std::max)(groundHeight(x, z), waterLevel(x, z)); }
         // Profundidad del agua en (x, z) (0 = tierra).
-        float waterDepth(float x, float z) const { return (std::max)(0.0f, WATER_LEVEL - groundHeight(x, z)); }
+        float waterDepth(float x, float z) const { return (std::max)(0.0f, waterLevel(x, z) - groundHeight(x, z)); }
         bool swimmable(float x, float z) const { return waterDepth(x, z) > SWIM_DEPTH; }
+        // Pendiente del terreno (m/m).
+        float slope(float x, float z) const { return terrain.slope(x, z); }
+        // Corriente del agua en un punto (0 donde no hay).
+        void current(float x, float z, float& fx, float& fz) const {
+            fx = flowX.empty() ? 0.0f : flowX.sample(x, z);
+            fz = flowZ.empty() ? 0.0f : flowZ.sample(x, z);
+        }
+
+        // Deja un punto dentro de la zona jugable: la región en la que está o, si no, el archipiélago.
+        void clampToWorld(float& x, float& z, float margin = 2.0f) const {
+            for (const Disc& region : regions) {
+                const float dx = x - region.x, dz = z - region.z;
+                if (dx * dx + dz * dz > (region.radius + 40.0f) * (region.radius + 40.0f)) continue;
+                limit(x, z, region, margin);
+                return;
+            }
+            limit(x, z, archipelago, margin);
+        }
 
         // ¿Hay algún sólido fijo (paredes, rocas, árboles, cofres...) entre dos puntos? Los pokémon no cuentan.
         bool blocked(const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to) const {
@@ -79,19 +109,38 @@ namespace Physics {
         // Los cuerpos con restitution > 0 (proyectiles) botan y ruedan; el resto se quedan en el suelo.
         void step(Body& body, float dt) const {
             const float previousLow = body.position.y - body.groundOffset; // altura de los pies al empezar el paso
-            if (!body.onGround) body.velocity.y -= GRAVITY * body.gravityScale * dt;
+            if (!body.onGround && !body.underwater) body.velocity.y -= GRAVITY * body.gravityScale * dt;
 
-            body.position.x = (std::clamp)(body.position.x + body.velocity.x * dt, -HALF_SIZE, HALF_SIZE);
-            body.position.z = (std::clamp)(body.position.z + body.velocity.z * dt, -HALF_SIZE, HALF_SIZE);
+            body.position.x += body.velocity.x * dt;
+            body.position.z += body.velocity.z * dt;
             body.position.y += body.velocity.y * dt;
+            const bool afloat = waterDepth(body.position.x, body.position.z) > 0.05f;
+            if (afloat) { // la corriente arrastra
+                float fx, fz;
+                current(body.position.x, body.position.z, fx, fz);
+                body.position.x += fx * dt;
+                body.position.z += fz * dt;
+            }
+            clampToWorld(body.position.x, body.position.z);
             if (body.collisionRadius > 0.0f) pushOutAll(body, previousLow);
 
             const float floorY = supportHeight(body, previousLow, dt) + body.groundOffset;
+            if (body.stickToGround && body.onGround && !body.underwater && body.velocity.y <= 0.0f && body.position.y - floorY < STICK_DISTANCE) body.position.y = floorY;
             const bool touching = body.position.y <= floorY && body.velocity.y <= 0.0f;
             body.onGround = touching;
             if (!touching) return;
 
             body.position.y = floorY;
+
+            // Sobre el agua no hay bote: el cuerpo se posa y flota.
+            const bool onWater = waterDepth(body.position.x, body.position.z) > 0.05f;
+            if (onWater) {
+                body.velocity.y = 0.0f;
+                const float keep = (std::max)(0.0f, 1.0f - WATER_DRAG * dt);
+                body.velocity.x *= keep;
+                body.velocity.z *= keep;
+                return;
+            }
 
             // Bote: se pierde parte de la velocidad vertical y algo de la horizontal.
             if (body.restitution > 0.0f && -body.velocity.y > BOUNCE_MIN_SPEED) {
@@ -111,6 +160,15 @@ namespace Physics {
         }
 
         private:
+        static void limit(float& x, float& z, const Disc& disc, float margin) {
+            const float dx = x - disc.x, dz = z - disc.z, reach = disc.radius - margin;
+            const float d2 = dx * dx + dz * dz;
+            if (d2 <= reach * reach) return;
+            const float k = reach / std::sqrt(d2);
+            x = disc.x + dx * k;
+            z = disc.z + dz * k;
+        }
+
         // Recorre los sólidos que afectan a este cuerpo.
         template <typename F>
         void forEachSolid(const Body& body, F f) const {
@@ -135,7 +193,8 @@ namespace Physics {
         // En los que no admiten quedarse encima (pokémon, personajes) el cuerpo se posa un instante y resbala.
         float supportHeight(Body& body, float previousLow, float dt) const {
             // Sobre el agua los cuerpos flotan, algo hundidos según su altura.
-            float height = (std::max)(groundHeight(body.position.x, body.position.z), WATER_LEVEL - body.collisionHeight * SUBMERGED);
+            float height = groundHeight(body.position.x, body.position.z);
+            if (!body.underwater) height = (std::max)(height, waterLevel(body.position.x, body.position.z) - body.collisionHeight * SUBMERGED);
             if (body.collisionRadius <= 0.0f) return height;
 
             forEachSolid(body, [&](const Box& box) {
@@ -199,6 +258,8 @@ namespace Physics {
         }
 
         static constexpr float BOUNCE_MIN_SPEED = 1.5f; // por debajo de esta velocidad de caída ya no bota
+        static constexpr float STICK_DISTANCE = 0.9f;  // cuánto puede bajar el suelo de un paso a otro sin que el personaje se despegue
+        static constexpr float WATER_DRAG = 3.0f;       // frenado horizontal por segundo de lo que flota
         static constexpr float BOUNCE_FRICTION = 0.8f;  // fracción de velocidad horizontal que se conserva en cada bote
     };
 }

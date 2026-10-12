@@ -29,8 +29,10 @@
 #include "spawn/wildSpawn.hpp"
 #include "spawn/wildField.hpp"
 #include "state/exploration.hpp"
+#include "state/fishing.hpp"
 #include "state/inventory.hpp"
 #include "entities/player.hpp"
+#include "entities/playerAction.hpp"
 #include "entities/pokeball.hpp"
 #include "state/pokemonStorage.hpp"
 #include "spawn/resourceSpawn.hpp"
@@ -50,6 +52,11 @@ struct Scene {
     static constexpr float SPAWN_SIDE = 0.35f;        // la pokéball sale por el hombro derecho
     static constexpr float SPAWN_FORWARD = 0.5f;
     static constexpr float SPAWN_HEIGHT = 1.1f;
+    static constexpr float THROW_DELAY = 0.18f;       // la bola sale de la mano a mitad de la animación de lanzar
+    static constexpr float AIM_STEP = 0.5f;           // paso de la marcha del rayo de apuntado contra el relieve
+    static constexpr float TIDE_AMPLITUDE = 0.9f;     // la marea sube y baja esta altura (m) en el mar
+    static constexpr float TIDE_PERIOD = 300.0f;      // segundos que dura un ciclo de marea
+    static constexpr float PORTAL_COOLDOWN = 1.0f;    // tras teletransportarse no se puede volver a usar enseguida
     static constexpr size_t MAX_BALLS = 12;
     static constexpr float MAX_SUBSTEP = 1.0f / 120.0f; // paso máximo de la física de los proyectiles
     static constexpr float NOTICE_TIME = 2.0f;
@@ -67,6 +74,7 @@ struct Scene {
     ChestField chests;        // cofres: aparecen dinámicamente según el hábitat
     std::vector<ResourceNode> nodes; // materiales de recolección, colocados al generar el mundo
     Exploration exploration;  // lo que el jugador ha explorado (el mapa grande lo muestra)
+    Fishing fishing;          // pesca: corcho, picada y pokémon enganchado
     SpawnField<GroundItem> groundItems;
     PokemonStorage storage;   // equipo (6) y PC
     PlayerProgress progress;  // nivel, experiencia y medallas del jugador
@@ -84,17 +92,18 @@ struct Scene {
     // Dos paredes sencillas, más altas que el personaje: bloquean el paso, las pokéballs y la luz.
     explicit Scene(const GameData& gameData = GameData::empty(), unsigned worldSeed = RandomUtil::freshSeed()) : m_data(&gameData) {
         habitats.generate(gameData, worldSeed);
+        habitats.applyTo(world);
         weather.setup(gameData);
         inventory.setData(gameData);
         storage.setData(gameData);
         groundItems.setup(GroundSpawn::COUNT);
-        world.terrain.build(HALF_SIZE, [this](float x, float z) { return habitats.height(x, z); });
         constexpr float BASE = Physics::World::START_HEIGHT; // el inicio es llano: las paredes se apoyan en él
         world.obstacles = {
             { {  6.0f, BASE + 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
             { { -7.0f, BASE + 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
         };
         nodes = ResourceSpawn::generate(gameData, habitats, worldSeed, world);
+        for (const Skill& skill : gameData.skills) if (PlayerActions::parse(skill.animation) == PlayerAction::FISH) m_fishSkill = skill.id;
     }
 
     // Devuelve true si hay que pausar el juego (ESC fuera del modo lanzamiento).
@@ -104,6 +113,8 @@ struct Scene {
             if (aimMode) aimMode = false;
             else pause = true;
         }
+        m_clock += dt;
+        world.tide = TIDE_AMPLITUDE * std::sin(m_clock * 6.2831853f / TIDE_PERIOD);
         if (input.aimToggle) aimMode = !aimMode;
         m_aiming = aimMode || input.aimHold;
         if (input.ballSwitch != 0) {
@@ -139,14 +150,22 @@ struct Scene {
         world.props.push_back(machine.solid());
 
         player.aiming = m_aiming;
-        player.update(dt, input, camera.yaw(), world);
+        InputState moveInput = input;
+        if (fishing.hooked()) moveInput.crouch = moveInput.crouchHeld = false; // los botones de decidir (Liberar) no agachan
+        player.update(dt, moveInput, camera.yaw(), world);
+        m_portalCooldown = (std::max)(0.0f, m_portalCooldown - dt);
 
         weather.update(dt);
         throwCooldown = (std::max)(0.0f, throwCooldown - dt);
         noticeTime = (std::max)(0.0f, noticeTime - dt);
-        if (m_aiming && input.throwBall && throwCooldown <= 0.0f) throwBall();
+        if (m_aiming && input.throwBall && throwCooldown <= 0.0f && m_throwDelay < 0.0f) startThrow();
+        if (m_throwDelay >= 0.0f && (m_throwDelay -= dt) < 0.0f) throwBall();
 
-        for (CaptureTarget* target : wild.loaded()) handleCaptureEvent(*target, target->update(dt, world));
+        for (CaptureTarget* target : wild.loaded()) {
+            const CaptureTarget::Event event = target->update(dt, world);
+            if (event == CaptureTarget::Event::ESCAPED && wild.isHooked(target)) fishing.renewHook(); // sigue enganchado
+            handleCaptureEvent(*target, event);
+        }
         updateBalls(dt);
         chests.update(dt, dayCycle.day(), player.body.position.x, player.body.position.z, *m_data, habitats, world);
         for (ResourceNode& node : nodes) node.update(dt);
@@ -155,10 +174,12 @@ struct Scene {
             [&](GroundItem& item) { world.step(item.body, dt); item.update(dt); },
             [&](int spot) { return GroundSpawn::make(*m_data, spot); });
         updateCompanion(dt);
+        updateWaterfall(dt);
         updateInteraction();
         m_holdClock = (std::max)(0.0f, m_holdClock - dt);
         const bool hold = input.interactHeld && m_interaction.kind == Interaction::NODE && m_holdClock <= 0.0f; // mantener sigue trabajando el recurso
-        if (input.interact || hold) {
+        const bool fished = updateFishing(dt, input);
+        if (!fished && (input.interact || hold)) {
             interact();
             m_holdClock = HOLD_REPEAT;
         }
@@ -190,7 +211,8 @@ struct Scene {
 
     DirectX::XMMATRIX getViewMatrix() const {
         const DirectX::XMFLOAT3 eye = camera.eye(player.body.position);
-        return camera.viewMatrix(player.body.position, world.surfaceHeight(eye.x, eye.z) + 0.35f); // la cámara no se hunde en el terreno
+        const float floor = player.diving() ? world.groundHeight(eye.x, eye.z) : world.surfaceHeight(eye.x, eye.z);
+        return camera.viewMatrix(player.body.position, floor + 0.35f); // la cámara no se hunde en el terreno (bajo el agua sí se sumerge)
     }
 
     GameStatus status() const {
@@ -212,6 +234,7 @@ struct Scene {
         }
         s.interactPos = interactionAnchor();
         fillLocation(s);
+        fillWorldState(s);
         s.habitatMap = &habitats;
         s.exploration = &exploration;
         for (const Physics::World::Box& wall : world.obstacles) s.mapBlocks.push_back({ wall.center.x, wall.center.z, wall.half.x, wall.half.z });
@@ -250,6 +273,9 @@ struct Scene {
         } else if (m_interaction.kind == Interaction::MACHINE) {
             s.interactVerb = USE_VERB;
             s.interactTarget = &MACHINE_NAME;
+        } else if (m_interaction.kind == Interaction::PORTAL) {
+            s.interactVerb = habitats.portals()[m_interaction.index].label.c_str();
+            s.interactTarget = &NO_TARGET;
         }
         if (m_aimTarget) {
             const CaptureTarget& t = *m_aimTarget;
@@ -270,6 +296,66 @@ struct Scene {
         const Weather* current = context.weather.empty() ? nullptr : m_data->weather(context.weather.front().weatherId);
         s.habitatName = &m_data->habitats[habitat].name;
         s.weatherName = current ? &current->name : nullptr;
+    }
+
+    // Temperatura, altura, aire, región y ayudas inferiores.
+    void fillWorldState(GameStatus& s) const {
+        const DirectX::XMFLOAT3& p = player.body.position;
+        const HabitatMap::Region* region = habitats.regionAt(p.x, p.z);
+        s.temperature = temperatureAt(p.x, p.z);
+        s.altitude = (std::max)(0.0f, p.y);
+        s.oxygen = player.oxygen();
+        s.exhausted = player.exhausted();
+        s.showOxygen = player.diving() || player.exhausted() || !player.oxygenFull();
+        const DirectX::XMFLOAT3 eye = camera.eye(p);
+        s.underwater = player.diving() && eye.y < world.waterLevel(eye.x, eye.z);
+        s.dark = region && region->dark();
+        s.climbing = player.climbing();
+        s.swimming = player.swimming();
+        s.diving = player.diving();
+        if (region) s.regionName = &m_data->habitats[region->habitat].name;
+        s.fishing = fishing.active();
+        s.bobber = fishing.bobber();
+        s.biteAlert = fishing.phase() == Fishing::Phase::BITING ? 1.0f - fishing.biteProgress() : 0.0f;
+        fillPrompts(s);
+    }
+
+    // °C donde está el jugador: las regiones tienen su clima y fuera baja con la altura.
+    float temperatureAt(float x, float z) const {
+        if (const HabitatMap::Region* region = habitats.regionAt(x, z)) {
+            switch (region->kind) {
+                case HabitatPlacement::CAVE: return CAVE_TEMPERATURE;
+                case HabitatPlacement::MINE: return MINE_TEMPERATURE;
+                default:                     return SKY_TEMPERATURE;
+            }
+        }
+        return HabitatMap::temperature(world.groundHeight(x, z));
+    }
+
+    // Ayudas inferiores: la pesca (lanzar, recoger, Capturar / Liberar) y el buceo.
+    void fillPrompts(GameStatus& s) const {
+        using Phase = Fishing::Phase;
+        const auto add = [&](PromptAction action, std::string text, bool enabled = true) { s.prompts.push_back({ action, std::move(text), enabled }); };
+        switch (fishing.phase()) {
+            case Phase::CASTING:
+            case Phase::WAITING: add(PromptAction::INTERACT, "Recoger la caña"); break;
+            case Phase::BITING:  add(PromptAction::INTERACT, "¡Pica! Recoger"); break;
+            case Phase::HOOKED:
+                if (hookReady()) {
+                    add(PromptAction::INTERACT, inventory.canThrow() ? "Capturar con " + inventory.selectedBall().type.name : "Capturar (sin pokéballs)", inventory.canThrow());
+                    add(PromptAction::RELEASE, "Liberar");
+                }
+                break;
+            default:
+                if (m_castHint) add(PromptAction::INTERACT, "Pescar");
+                break;
+        }
+        if (player.diving()) {
+            add(PromptAction::JUMP, "Subir");
+            add(PromptAction::CROUCH, "Bajar");
+        } else if (player.swimming() && world.waterDepth(player.body.position.x, player.body.position.z) >= Player::DIVE_MIN_DEPTH) {
+            add(PromptAction::CROUCH, "Bucear");
+        }
     }
 
     // Nombre y nivel sobre cada pokémon visible (los salvajes y el acompañante).
@@ -306,6 +392,10 @@ struct Scene {
             case Interaction::NODE:    return nodeAnchor(nodes[m_interaction.index]);
             case Interaction::GROUND:  return above(groundItems.entities[m_interaction.index].body, 0.9f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
+            case Interaction::PORTAL: {
+                const HabitatMap::Portal& portal = habitats.portals()[m_interaction.index];
+                return { portal.x, world.surfaceHeight(portal.x, portal.z) + 2.0f, portal.z };
+            }
             default:                   return {};
         }
     }
@@ -362,12 +452,13 @@ struct Scene {
     }
 
     // Hábitat, clima y hora de un punto del mundo: lo que decide qué pokémon aparecen ahí.
-    WildSpawn::Context spawnContext(float x, float z) const {
+    WildSpawn::Context spawnContext(float x, float z, int rod = 0) const {
         WildSpawn::Context context;
         habitats.weights(x, z, context.habitats);
         context.weather = weather.at(context.habitats);
         context.night = dayCycle.isNight();
         context.depth = world.waterDepth(x, z);
+        context.rod = rod;
         return context;
     }
 
@@ -379,6 +470,101 @@ struct Scene {
         target.setSpecies(index, m_data->species[index].id, PokemonRules::rollLevel(m_data->species[index]), PokemonRules::rollShiny());
         target.setSwims(m_data->species[index].swims);
         return true;
+    }
+
+    // Pokémon que pica: especie según el agua de donde está el corcho y el nivel de la caña.
+    bool assignFished(CaptureTarget& target) const {
+        const int index = WildSpawn::pick(*m_data, spawnContext(target.body.position.x, target.body.position.z, rodLevel()));
+        if (index < 0) return false;
+        target.setSpecies(index, m_data->species[index].id, PokemonRules::rollLevel(m_data->species[index]), PokemonRules::rollShiny());
+        target.setSwims(true);
+        return true;
+    }
+
+    // --- Pesca ---
+    int rodLevel() const { return m_fishSkill >= 0 ? inventory.skillLevel(m_fishSkill) : 0; }
+    bool hookReady() const { return wild.hookActive() && wild.hooked().hittable() && !wild.hooked().leaving(); }
+
+    // Fin de la pesca (recoge la línea y, si hay pokémon enganchado, lo suelta).
+    void endFishing(bool releaseHooked) {
+        if (releaseHooked && wild.hookActive()) wild.releaseHook(player.body.position.x, player.body.position.z);
+        fishing.reset();
+        player.hold(PlayerAction::NONE);
+    }
+
+    // Capturar al enganchado: la pokéball sale de la mano hacia él (como un lanzamiento normal).
+    void captureHooked() {
+        if (!inventory.canThrow()) {
+            showNotice(Notice::OUT_OF_STOCK);
+            return;
+        }
+        const DirectX::XMFLOAT3 target = wild.hooked().center();
+        const DirectX::XMFLOAT3 hand = handPosition();
+        DirectX::XMFLOAT3 dir = { target.x - hand.x, target.y - hand.y, target.z - hand.z };
+        const float length = (std::max)(std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z), 1.0e-3f);
+        dir = { dir.x / length, dir.y / length, dir.z / length };
+        player.act(PlayerAction::THROW);
+        launch(target, dir);
+    }
+
+    // Entrada y eventos de la pesca. true si la pulsación de interactuar se ha usado aquí.
+    bool updateFishing(float dt, const InputState& input) {
+        using Event = Fishing::Event;
+        bool used = false, reel = false;
+        const float yaw = camera.yaw();
+        const DirectX::XMFLOAT3& p = player.body.position;
+        const bool standing = !player.swimming() && !player.climbing() && player.body.onGround;
+        DirectX::XMFLOAT3 water;
+        m_castHint = !fishing.active() && rodLevel() > 0 && standing && m_interaction.kind == Interaction::NONE && Fishing::findWater(world, p.x, p.z, yaw, water);
+
+        if (fishing.active() && rodLevel() <= 0) endFishing(true);
+        if (fishing.active()) {
+            if (input.interact) {
+                used = true;
+                if (fishing.hooked()) { if (hookReady()) captureHooked(); }
+                else reel = true;
+            }
+            if (input.release && fishing.hooked() && hookReady()) endFishing(true);
+        } else if (input.interact && m_castHint) {
+            used = fishing.cast(world, p.x, p.z, yaw, inventory.skillSpeed(m_fishSkill));
+            if (used) {
+                player.act(PlayerAction::FISH);
+                player.hold(PlayerAction::FISH);
+            }
+        }
+
+        switch (fishing.update(dt, reel, world, p.x, p.z)) {
+            case Event::HOOKED:
+                if (!wild.hook(fishing.bobber().x, fishing.bobber().z, yaw, [this](CaptureTarget& target) { return assignFished(target); })) {
+                    endFishing(false);
+                    showNotice(Notice::ESCAPED);
+                }
+                break;
+            case Event::MISSED:   showNotice(Notice::ESCAPED); endFishing(false); break;
+            case Event::TIMEOUT:
+            case Event::LINE_CUT: endFishing(true); break;
+            default: break;
+        }
+        if (fishing.hooked() && !wild.hookActive()) endFishing(false); // lo capturó o se fue
+        if (!fishing.active() && !wild.hookActive()) player.hold(PlayerAction::NONE);
+        return used;
+    }
+
+    // Un pokémon que evoluciona al remontar una cascada (Magikarp) la remonta junto al jugador: pasado un rato en ella, evoluciona.
+    void updateWaterfall(float dt) {
+        const OwnedPokemon* lead = storage.active();
+        const PokemonSpecies* species = lead ? m_data->speciesById(lead->speciesId) : nullptr;
+        bool climbs = false;
+        if (species) for (const Evolution& e : species->evolutions) climbs = climbs || e.method == Evolution::Method::WATERFALL;
+        const DirectX::XMFLOAT3& p = player.body.position;
+        const bool inFall = climbs && player.swimming() && habitats.nearCascade(p.x, p.z, CASCADE_RANGE);
+        m_cascadeTime = inFall ? m_cascadeTime + dt : (std::max)(0.0f, m_cascadeTime - dt);
+        if (m_cascadeTime < CASCADE_TIME) return;
+        m_cascadeTime = 0.0f;
+        const std::string before = species->name;
+        if (const PokemonSpecies* next = storage.evolveBy(storage.activeIndex(), Evolution::Method::WATERFALL)) {
+            showNotice(Notice::REWARD, "¡" + before + " ha evolucionado a " + next->name + "!");
+        }
     }
 
     // El líder del equipo acompaña al jugador y trabaja solo lo cercano: recoge plantas crecidas y objetos sueltos (cualquier
@@ -467,7 +653,7 @@ struct Scene {
         CaptureTarget* best = nullptr;
         float bestDistance = Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
         for (CaptureTarget* target : wild.loaded()) {
-            if (!target->hittable() || target->speciesIndex() < 0) continue;
+            if (!target->hittable() || target->speciesIndex() < 0 || wild.isHooked(target)) continue; // el pescado es del jugador
             if (mode == CompanionRules::Mode::CAPTURE && target->hpFraction() <= CompanionRules::CAPTURE_STOP_HP) continue;
             const float dx = target->body.position.x - player.body.position.x, dz = target->body.position.z - player.body.position.z;
             if (dx * dx + dz * dz < bestDistance) {
@@ -532,6 +718,15 @@ struct Scene {
             best = d2;
             m_interaction = { Interaction::MACHINE, 0 };
         }
+        const std::vector<HabitatMap::Portal>& portals = habitats.portals();
+        for (size_t i = 0; i < portals.size(); ++i) {
+            const float dx = portals[i].x - player.body.position.x, dz = portals[i].z - player.body.position.z;
+            const float d2 = dx * dx + dz * dz;
+            if (m_portalCooldown <= 0.0f && d2 <= portals[i].radius * portals[i].radius && d2 < best) {
+                best = d2;
+                m_interaction = { Interaction::PORTAL, static_cast<int>(i) };
+            }
+        }
         if (const int i = nearestIn(nodes, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) {
             const ResourceNode& node = nodes[i];
             if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
@@ -545,14 +740,33 @@ struct Scene {
     }
 
     void interact() {
-        if (m_interaction.kind == Interaction::CHEST) openChest(chests.entities[m_interaction.index]);
-        else if (m_interaction.kind == Interaction::GROUND) collect(groundItems.entities[m_interaction.index]);
-        else if (m_interaction.kind == Interaction::MACHINE) researchRequested = true;
+        if (m_interaction.kind == Interaction::CHEST) {
+            player.act(PlayerAction::OPEN);
+            openChest(chests.entities[m_interaction.index]);
+        } else if (m_interaction.kind == Interaction::GROUND) {
+            player.act(PlayerAction::PICK);
+            collect(groundItems.entities[m_interaction.index]);
+        } else if (m_interaction.kind == Interaction::MACHINE) researchRequested = true;
+        else if (m_interaction.kind == Interaction::PORTAL) usePortal(habitats.portals()[m_interaction.index]);
         else if (m_interaction.kind == Interaction::NODE) {
             ResourceNode& node = nodes[m_interaction.index];
+            const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
             const bool tool = node.growing() || !node.plant();
-            workNode(node, true, tool ? inventory.skillSpeed(m_data->nodes[node.typeIndex()].skillId) : 1.0f);
+            const Skill* skill = tool ? m_data->skill(type.skillId) : nullptr;
+            player.act(skill ? PlayerActions::parse(skill->animation) : PlayerAction::PICK); // la animación de su herramienta; recoger una planta: agacharse
+            workNode(node, true, tool ? inventory.skillSpeed(type.skillId) : 1.0f);
         }
+    }
+
+    // Pasa a otro punto del mundo (cueva, mina, isla del cielo...): el acompañante sale de nuevo de su pokéball allí.
+    void usePortal(const HabitatMap::Portal& portal) {
+        player.body.position = { portal.toX, world.surfaceHeight(portal.toX, portal.toZ) + 0.3f, portal.toZ };
+        player.body.velocity = { 0.0f, 0.0f, 0.0f };
+        player.body.onGround = false;
+        lockedTarget = nullptr;
+        endFishing(true);
+        m_shownUid = -1;
+        m_portalCooldown = PORTAL_COOLDOWN;
     }
 
     // Suma 'quantity' unidades de un objeto al inventario y lo anuncia.
@@ -685,38 +899,70 @@ struct Scene {
         m_aimTarget = nearestHit(camera.eye(player.body.position), camera.forward(), distance, true);
     }
 
-    // Lanza la pokéball equipada hacia el punto que señala la cruceta (centro de la pantalla).
-    void throwBall() {
-        using namespace DirectX;
+    // Pulsar lanzar: empieza la animación; la bola sale de la mano un instante después (throwBall).
+    void startThrow() {
         throwCooldown = THROW_COOLDOWN;
         if (!inventory.canThrow()) {
             showNotice(Notice::OUT_OF_STOCK);
             return;
         }
+        m_throwDelay = THROW_DELAY;
+        player.act(PlayerAction::THROW);
+    }
 
-        const XMFLOAT3 eye = camera.eye(player.body.position);
-        const XMFLOAT3 dir = camera.forward();
+    // Distancia a la que el rayo toca el relieve o la superficie del agua (maxDistance si no toca nada).
+    float rayToSurface(const DirectX::XMFLOAT3& eye, const DirectX::XMFLOAT3& dir, float maxDistance) const {
+        const auto below = [&](float t) {
+            const float x = eye.x + dir.x * t, y = eye.y + dir.y * t, z = eye.z + dir.z * t;
+            return y <= world.surfaceHeight(x, z);
+        };
+        float previous = 0.0f;
+        for (float t = AIM_STEP; t <= maxDistance; t += AIM_STEP) {
+            if (below(t)) {
+                float low = previous, high = t;
+                for (int i = 0; i < 6; ++i) { // afina el punto de impacto
+                    const float mid = (low + high) * 0.5f;
+                    (below(mid) ? high : low) = mid;
+                }
+                return high;
+            }
+            previous = t;
+        }
+        return maxDistance;
+    }
 
-        // Punto apuntado: primer impacto del rayo de la cámara con el suelo o un pokémon.
-        float distance = MAX_AIM_DISTANCE;
-        const float ground = world.groundHeight(eye.x, eye.z);
-        if (dir.y < -1.0e-4f) distance = (std::min)(distance, (std::max)((ground - eye.y) / dir.y, 0.0f));
+    // La mano derecha del personaje: de donde sale la pokéball.
+    DirectX::XMFLOAT3 handPosition() const {
+        float sinYaw, cosYaw;
+        DirectX::XMScalarSinCos(&sinYaw, &cosYaw, player.facing());
+        const DirectX::XMFLOAT3& p = player.body.position;
+        return { p.x + cosYaw * SPAWN_SIDE + sinYaw * SPAWN_FORWARD,
+                 p.y + SPAWN_HEIGHT * player.heightScale(),
+                 p.z - sinYaw * SPAWN_SIDE + cosYaw * SPAWN_FORWARD };
+    }
+
+    // Lanza la pokéball equipada hacia el punto que señala la cruceta (centro de la pantalla).
+    void throwBall() {
+        m_throwDelay = -1.0f;
+        if (!inventory.canThrow()) return;
+        const DirectX::XMFLOAT3 eye = camera.eye(player.body.position);
+        const DirectX::XMFLOAT3 dir = camera.forward();
+
+        // Punto apuntado: primer impacto del rayo de la cámara con el relieve, el agua o un pokémon.
+        float distance = rayToSurface(eye, dir, MAX_AIM_DISTANCE);
         float hit = 0.0f;
         if (nearestHit(eye, dir, hit, false)) distance = (std::min)(distance, hit);
-        const XMFLOAT3 aim = { eye.x + dir.x * distance, eye.y + dir.y * distance, eye.z + dir.z * distance };
+        launch({ eye.x + dir.x * distance, eye.y + dir.y * distance, eye.z + dir.z * distance }, dir);
+    }
 
-        float sinYaw, cosYaw;
-        XMScalarSinCos(&sinYaw, &cosYaw, camera.yaw());
-        const XMFLOAT3& p = player.body.position;
-
+    // Sale una pokéball de la mano del jugador hacia 'aim'.
+    void launch(const DirectX::XMFLOAT3& aim, const DirectX::XMFLOAT3& dir) {
         const PokeballType& type = inventory.selectedBall().type;
         Pokeball ball;
         ball.typeId = type.id;
         ball.captureMultiplier = type.captureMultiplier;
         ball.color = PokeballStyle::color(type.id);
-        ball.body.position = { p.x + cosYaw * SPAWN_SIDE + sinYaw * SPAWN_FORWARD,
-                               p.y + SPAWN_HEIGHT * player.heightScale(),
-                               p.z - sinYaw * SPAWN_SIDE + cosYaw * SPAWN_FORWARD };
+        ball.body.position = handPosition();
         ball.body.velocity = launchVelocity(ball.body.position, aim, dir);
 
         if (balls.size() >= MAX_BALLS) {
@@ -782,7 +1028,7 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PORTAL } kind = NONE;
         int index = -1;
     };
 
@@ -796,8 +1042,20 @@ struct Scene {
     static constexpr const char* USE_VERB = "Usar";
     inline static const std::string GROUND_NAME = "objeto brillante";
     inline static const std::string MACHINE_NAME = "máquina de investigación";
+    inline static const std::string NO_TARGET;
+    static constexpr float CAVE_TEMPERATURE = 12.0f;   // °C dentro de la cueva, la mina y la isla del cielo
+    static constexpr float MINE_TEMPERATURE = 14.0f;
+    static constexpr float SKY_TEMPERATURE = 8.0f;
 
     const GameData* m_data;
+    float m_clock = 0.0f;       // segundos de partida (marea)
+    float m_cascadeTime = 0.0f; // segundos que lleva el jugador en una cascada con un pokémon que la remonta
+    static constexpr float CASCADE_RANGE = 5.0f;
+    static constexpr float CASCADE_TIME = 3.0f;
+    float m_portalCooldown = 0.0f;
+    float m_throwDelay = -1.0f; // >= 0: lanzando (la bola sale al llegar a 0)
+    int m_fishSkill = -1;       // habilidad de pesca (la de la animación FISH)
+    bool m_castHint = false;    // se puede lanzar la caña aquí
     static constexpr float SEEN_RANGE = 30.0f;         // a esta distancia (y a la vista) un pokémon cuenta como visto en la Pokédex
     static constexpr float COLLECT_WINDOW = 8.0f;      // segundos seguidos que recolecta cada vez
     static constexpr float COLLECT_WAIT_MIN = 30.0f;   // segundos que pasa siguiendo al jugador entre una recolección y otra

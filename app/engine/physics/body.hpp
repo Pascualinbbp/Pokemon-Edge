@@ -14,5 +14,7 @@ namespace Physics {
         float collisionHeight = 0.0f; // altura del cuerpo desde la parte baja
         bool hitsCreatures = false;   // también choca con los pokémon sólidos (el jugador sí; las pokéballs los capturan)
         bool onGround = true;
+        bool stickToGround = false; // al bajar una cuesta se queda pegado al suelo en vez de caer (personajes)
+        bool underwater = false;    // buceando: sin gravedad ni flotación; quien lo controla fija la velocidad vertical
     };
 }

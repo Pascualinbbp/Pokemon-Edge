@@ -3,6 +3,7 @@
 #include <cstdio>
 #include "imgui.h"
 #include "minimapComponent.hpp"
+#include "../style/guiPopup.hpp"
 #include "../style/guiPrompts.hpp"
 #include "../style/icons/itemIcon.hpp"
 #include "../style/icons/teamCircle.hpp"
@@ -34,14 +35,7 @@ namespace HudComponent {
             return IM_COL32(235, 70, 60, alpha);
         }
 
-        inline void centered(ImDrawList* dl, ImVec2 center, const char* text, float scale, ImU32 color) {
-            ImFont* font = ImGui::GetFont();
-            const float size = ImGui::GetFontSize() * scale;
-            const ImVec2 extent = font->CalcTextSizeA(size, 1.0e9f, 0.0f, text);
-            const ImVec2 pos(center.x - extent.x * 0.5f, center.y);
-            dl->AddText(font, size, ImVec2(pos.x + 1.5f, pos.y + 1.5f), IM_COL32(0, 0, 0, 200), text);
-            dl->AddText(font, size, pos, color, text);
-        }
+        inline void centered(ImDrawList* dl, ImVec2 center, const char* text, float scale, ImU32 color) { GuiPopup::text(dl, center, text, scale, color); }
 
         // Punto del mundo en pantalla. false si queda detrás de la cámara.
         inline bool project(const GameStatus& status, const DirectX::XMFLOAT3& world, ImVec2& out) {
@@ -61,21 +55,58 @@ namespace HudComponent {
             }
         }
 
-        // Ayuda para interactuar, sobre lo que se interactúa (cofre, recurso, objeto suelto, máquina...), y aviso de lo que falta.
+        // Ayuda para interactuar, sobre lo que se interactúa (cofre, recurso, portal...), y aviso de lo que falta.
         inline void drawWorldPrompts(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             ImVec2 at;
             if (status.interactVerb && status.interactTarget && project(status, status.interactPos, at)) {
                 char text[96];
-                std::snprintf(text, sizeof(text), "%s %s", status.interactVerb, status.interactTarget->c_str());
-                constexpr float ICON = 24.0f; // ancho del icono de la tecla o botón
-                const float width = ICON + 8.0f + ImGui::CalcTextSize(text).x;
-                GuiPrompts::draw(dl, ImVec2(at.x - width * 0.5f, at.y - ICON * 0.5f), GuiPrompts::Action::INTERACT, text, device);
+                std::snprintf(text, sizeof(text), status.interactTarget->empty() ? "%s" : "%s %s", status.interactVerb, status.interactTarget->c_str());
+                GuiPopup::at(dl, at, GuiPrompts::Action::INTERACT, text, device);
             }
             if (status.missingSkill && project(status, status.missingPos, at)) {
                 char text[112];
                 std::snprintf(text, sizeof(text), "Necesitas %s de nivel %d (herramienta o pokémon)", status.missingSkill->c_str(), status.missingLevel);
-                centered(dl, at, text, 1.0f, IM_COL32(255, 150, 40, 255));
+                GuiPopup::text(dl, at, text, 1.0f, IM_COL32(255, 150, 40, 255));
             }
+        }
+
+        // Ayudas inferiores que pide la escena (pesca: Capturar | Liberar; buceo...), centradas sobre la barra de pokéballs.
+        inline void drawPrompts(ImDrawList* dl, const GameStatus& status, InputDevice device) {
+            if (status.prompts.empty()) return;
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            GuiPopup::row(dl, screen.x * 0.5f, screen.y - 190.0f, status.prompts, device);
+        }
+
+        // Medidor de aire (solo bajo el agua o recuperándolo) y temperatura / altura / región, bajo el nivel del jugador.
+        inline void drawVitals(ImDrawList* dl, const GameStatus& status) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            constexpr float WIDTH = 150.0f;
+            const ImVec2 at(screen.x - WIDTH - 24.0f, 14.0f);
+            float y = at.y + ImGui::GetFontSize() + 18.0f;
+            char text[64];
+            std::snprintf(text, sizeof(text), "%.0f °C   %.0f m", status.temperature, status.altitude);
+            const ImU32 tone = status.temperature <= 0.0f ? IM_COL32(170, 220, 255, 255) : status.temperature < 10.0f ? IM_COL32(200, 230, 255, 235) : IM_COL32(255, 255, 255, 220);
+            dl->AddText(ImVec2(at.x, y), tone, text);
+            y += ImGui::GetFontSize() + 4.0f;
+            if (status.regionName) {
+                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 215, 90, 235), status.regionName->c_str());
+                y += ImGui::GetFontSize() + 4.0f;
+            }
+            if (status.showOxygen) {
+                const float k = (std::clamp)(status.oxygen, 0.0f, 1.0f);
+                const ImU32 fill = status.exhausted || k < 0.25f ? IM_COL32(235, 70, 60, 255) : IM_COL32(90, 190, 255, 255);
+                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 255, 255, 235), "Aire");
+                const ImVec2 bar(at.x, y + ImGui::GetFontSize() + 2.0f);
+                dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH, bar.y + 8.0f), IM_COL32(255, 255, 255, 50), 4.0f);
+                dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH * k, bar.y + 8.0f), fill, 4.0f);
+            }
+        }
+
+        // Tinte de pantalla: azul bajo el agua, oscuridad en cuevas y minas.
+        inline void drawTint(ImDrawList* dl, const GameStatus& status) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            if (status.underwater) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(20, 70, 120, 110));
+            if (status.dark) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(0, 0, 0, 120)); // cueva y mina: oscuras
         }
 
         // Aviso de autoguardado (esquina inferior derecha): panel translúcido con el contorno de una pokéball
@@ -300,13 +331,16 @@ namespace HudComponent {
         }
 
         detail::drawNameTags(dl, status);
+        detail::drawTint(dl, status);
         detail::drawLevel(dl, status);
+        detail::drawVitals(dl, status);
         MinimapComponent::draw(dl, status, device);
         detail::drawLocation(dl, status);
         detail::drawTeam(dl, status);
         detail::drawHints(dl, status, device);
 
         detail::drawWorldPrompts(dl, status, device);
+        detail::drawPrompts(dl, status, device);
 
         if (status.notice != Notice::NONE) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;

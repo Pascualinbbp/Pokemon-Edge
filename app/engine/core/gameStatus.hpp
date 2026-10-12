@@ -3,6 +3,7 @@
 #include <vector>
 #include <DirectXMath.h>
 #include "../../models/gameData.hpp"
+#include "promptAction.hpp"
 #include "../world/habitat/habitatMap.hpp"
 #include "../world/state/exploration.hpp"
 #include "../world/state/inventory.hpp"
@@ -56,6 +57,23 @@ struct GameStatus {
     int levelCap = 1;
     DirectX::XMFLOAT4X4 viewProj = {};           // vista * proyección (para colocar los nombres en pantalla)
     const std::string* noticeText = nullptr;     // segunda línea del aviso (recompensa obtenida, pokémon capturado...)
+
+    // Mundo vertical: temperatura, altura, aire, región y portales.
+    float temperature = 20.0f;                   // °C donde está el jugador (baja con la altura)
+    float altitude = 0.0f;                       // m sobre el mar
+    float oxygen = 1.0f;                         // aire restante (0..1)
+    bool showOxygen = false;                     // el medidor solo se ve bajo el agua o recuperándose
+    bool exhausted = false;                      // sin aire
+    bool underwater = false;                     // la cámara está bajo el agua (se tiñe la pantalla)
+    bool dark = false;                           // cueva o mina: oscuridad
+    bool climbing = false, swimming = false, diving = false;
+    const std::string* regionName = nullptr;     // cueva, mina o isla del cielo (nullptr = mundo abierto)
+    std::vector<Prompt> prompts;                 // ayudas inferiores (pescar, portales, bucear...)
+
+    // Pesca: el corcho y la línea.
+    bool fishing = false;
+    DirectX::XMFLOAT3 bobber = {};
+    float biteAlert = 0.0f;                      // 0..1 mientras pica (el corcho se hunde)
 
     // Pokémon al que se apunta dentro del rango de lanzamiento.
     bool hasAimTarget = false;

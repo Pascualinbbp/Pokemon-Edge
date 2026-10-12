@@ -7,6 +7,7 @@
 namespace InputBindings {
     inline constexpr uint16_t PAD_JUMP   = Gamepad::SOUTH; // ✕ en PlayStation, A en Xbox
     inline constexpr uint16_t PAD_CROUCH = Gamepad::EAST;  // ○ en PlayStation, B en Xbox
+    inline constexpr uint16_t PAD_RELEASE = Gamepad::EAST; // ○ en PlayStation, B en Xbox: liberar (junto a la acción 'capturar')
     inline constexpr uint16_t PAD_SPRINT = Gamepad::L3;    // pulsar el stick izquierdo
     inline constexpr uint16_t PAD_LOCK   = Gamepad::R3;    // pulsar el stick derecho: fijar / cambiar objetivo
     inline constexpr uint16_t PAD_PAUSE  = Gamepad::START; // Options en PlayStation, Menú en Xbox

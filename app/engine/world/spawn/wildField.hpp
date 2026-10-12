@@ -91,12 +91,47 @@ class WildField {
                 chunk.dormant = !awake;
             }
         }
+
+        if (m_hookActive) {
+            if (m_hooked.gone()) m_hookActive = false; // capturado o ido
+            else {
+                m_hooked.fade(dt, !m_hooked.leaving());
+                if (m_hooked.shown()) m_loaded.push_back(&m_hooked);
+            }
+        }
     }
+
+    WildField() { m_hooked.discard(); }
+
+    // --- Pesca: un único pokémon picado, fuera de los chunks ---
+    // Hace picar a un pokémon en el punto del agua (lo elige 'assign'); false si ahí no pica ninguno.
+    template <typename Assign>
+    bool hook(float x, float z, float yaw, Assign assign) {
+        if (m_hookActive) return false;
+        m_hooked.place(x, z, yaw);
+        if (!assign(m_hooked)) {
+            m_hooked.discard();
+            return false;
+        }
+        m_hooked.setLeash(HOOK_LEASH);
+        m_hooked.setDive(0.0f, true); // flota junto al corcho
+        m_hookActive = true;
+        return true;
+    }
+    // Lo suelta: se aleja nadando y se desvanece.
+    void releaseHook(float fromX, float fromZ) {
+        if (m_hookActive && m_hooked.hittable()) m_hooked.leave(fromX, fromZ);
+    }
+    bool hookActive() const { return m_hookActive; }
+    const CaptureTarget& hooked() const { return m_hooked; }
+    bool isHooked(const CaptureTarget* target) const { return target == &m_hooked; }
 
     // Los pokémon cargados ahora (cerca del jugador): los únicos que se dibujan, se simulan y se pueden capturar.
     const std::vector<CaptureTarget*>& loaded() const { return m_loaded; }
 
     private:
+    static constexpr float HOOK_LEASH = 0.8f;       // el pokémon picado no se aleja del corcho
+
     struct Chunk {
         std::vector<CaptureTarget> wilds;
         float distance = 0.0f;
@@ -140,6 +175,7 @@ class WildField {
     // Cuántos pokémon caben en el chunk: lo que pide cada hábitat, según lo que pesa en el centro del chunk.
     static int countFor(int col, int row, const GameData& data, const HabitatMap& habitats) {
         const float cx = -Physics::World::HALF_SIZE + (col + 0.5f) * CHUNK, cz = -Physics::World::HALF_SIZE + (row + 0.5f) * CHUNK;
+        if (!habitats.playable(cx, cz)) return 0;
         std::vector<float> weights;
         habitats.weights(cx, cz, weights);
         float count = 0.0f;
@@ -169,6 +205,8 @@ class WildField {
         return placed;
     }
 
+    CaptureTarget m_hooked;
+    bool m_hookActive = false;
     DirectX::XMFLOAT2 m_view = { 0.0f, 1.0f }; // hacia dónde mira el jugador (x, z)
     std::vector<Chunk> m_chunks;
     std::vector<CaptureTarget*> m_loaded;

@@ -38,7 +38,7 @@ struct Pokeball {
         body.groundDrag = DRAG;
         body.collisionRadius = RADIUS;
         body.collisionHeight = RADIUS * 2.0f;
-        body.hitsCreatures = true; // choca con los pokémon como cualquier otro cuerpo
+        body.hitsCreatures = false; // no rebota sobre los pokémon: los captura al tocarlos (hitBy)
         body.onGround = false;
     }
 

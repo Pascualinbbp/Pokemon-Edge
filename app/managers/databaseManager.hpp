@@ -13,6 +13,7 @@
 #include "../daos/groundItemDao.hpp"
 #include "../daos/trainingItemDao.hpp"
 #include "../daos/habitatDao.hpp"
+#include "../daos/dexRewardDao.hpp"
 
 class DatabaseManager {
     private:
@@ -27,6 +28,7 @@ class DatabaseManager {
     inline static GroundItemDao groundItemDaoInstance;
     inline static TrainingItemDao trainingItemDaoInstance;
     inline static HabitatDao habitatDaoInstance;
+    inline static DexRewardDao dexRewardDaoInstance;
 
     public:
     static void init() {
@@ -82,6 +84,7 @@ class DatabaseManager {
         data.types = typeDaoInstance.findAll();
         data.groundItems = groundItemDaoInstance.findAll();
         data.trainingItems = trainingItemDaoInstance.findAll();
+        data.dexRewards = dexRewardDaoInstance.findAll();
         data.habitats = habitatDaoInstance.findHabitats();
         data.weathers = habitatDaoInstance.findWeathers();
         data.fusions = habitatDaoInstance.findFusions();

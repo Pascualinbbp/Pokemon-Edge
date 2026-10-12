@@ -395,10 +395,9 @@ namespace PokemonComponent {
 
         // Habilidad activa o pasiva: ficha con su nombre y su descripción al lado, en una línea.
         inline void abilityLine(ImDrawList* dl, const Ability* ability, const char* kind, ImU32 color, bool describe) {
-            if (!ability) return;
             const ImVec2 at = ImGui::GetCursorScreenPos();
-            const float w = GuiCards::chip(dl, at, (std::string(kind) + ": " + ability->name).c_str(), color, 0.85f);
-            if (describe) {
+            const float w = GuiCards::chip(dl, at, (std::string(kind) + ": " + (ability ? ability->name : std::string("ninguna"))).c_str(), color, 0.85f);
+            if (describe && ability) {
                 ImGui::SetCursorScreenPos(ImVec2(at.x + w + 8.0f, at.y + 2.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
                 ImGui::PushTextWrapPos(at.x + DETAIL_WIDTH - 32.0f - ImGui::GetWindowPos().x);
@@ -407,6 +406,27 @@ namespace PokemonComponent {
                 ImGui::PopStyleColor();
             }
             ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + ImGui::GetFontSize() * (describe ? 2.4f : 1.5f)));
+        }
+
+        // Habilidad del mundo (la que usa fuera del combate: talar, picar, regar, pescar...): su nivel y qué puede trabajar.
+        inline void worldSkillLine(ImDrawList* dl, const GameData& data, const PokemonSpecies& species, bool describe) {
+            const Skill* skill = data.skill(species.skillId);
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const std::string label = std::string("Mundo: ") + (skill ? skill->name : std::string("?")) + " nivel " + std::to_string(species.skillLevel);
+            const float w = GuiCards::chip(dl, at, label.c_str(), IM_COL32(60, 140, 90, 255), 0.85f);
+            if (describe && skill) {
+                std::string works;
+                for (const ResourceNodeType& node : data.nodes) {
+                    if (node.skillId == species.skillId && node.level <= species.skillLevel) works += (works.empty() ? "" : ", ") + node.name;
+                }
+                ImGui::SetCursorScreenPos(ImVec2(at.x + w + 8.0f, at.y + 2.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
+                ImGui::PushTextWrapPos(at.x + DETAIL_WIDTH - 32.0f - ImGui::GetWindowPos().x);
+                ImGui::TextUnformatted((skill->description + (works.empty() ? "" : " Trabaja: " + works + ".")).c_str());
+                ImGui::PopTextWrapPos();
+                ImGui::PopStyleColor();
+            }
+            ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + ImGui::GetFontSize() * (describe ? 2.9f : 1.5f)));
         }
 
         inline void drawDetail(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress,
@@ -455,13 +475,6 @@ namespace PokemonComponent {
                 }
             }
 
-            // Modo del equipo entero (solo en la ficha de los del equipo): recolección, captura o combate.
-            if (selection.inTeam) {
-                std::snprintf(text, sizeof(text), "MODO: %s", CompanionRules::label(storage.mode));
-                ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + 106.0f));
-                if (GuiCards::button("##mode", text, ImVec2(200.0f, 28.0f), true, IM_COL32(70, 90, 150, 255))) storage.cycleMode();
-            }
-
             const float left = pos.x + 16.0f, width = size.x - 32.0f;
             float y = pos.y + headerHeight + 10.0f;
             const bool compact = size.y < 640.0f;
@@ -476,7 +489,7 @@ namespace PokemonComponent {
             }
 
             // Abajo: habilidades y habilidad del mundo (alturas fijas); el resto es para el gráfico.
-            const float bottomHeight = compact ? 86.0f : 130.0f;
+            const float bottomHeight = compact ? 96.0f : 150.0f;
             const float statsAvail = pos.y + size.y - bottomHeight - y - 8.0f;
             if (owned.analyzed) drawStats(data, storage, inventory, owned, *species, ImVec2(left, y), statsAvail);
             else {
@@ -487,18 +500,10 @@ namespace PokemonComponent {
             }
 
             ImGui::SetCursorScreenPos(ImVec2(left, pos.y + size.y - bottomHeight));
+            worldSkillLine(dl, data, *species, !compact);
             abilityLine(dl, data.ability(species->abilityId), "Activa", IM_COL32(190, 80, 60, 255), !compact);
             if (species->passiveId >= 0) abilityLine(dl, data.ability(species->passiveId), "Pasiva", IM_COL32(130, 80, 190, 255), !compact);
-
-            const Skill* skill = data.skill(species->skillId);
-            std::snprintf(text, sizeof(text), "%s nivel %d", skill ? skill->name.c_str() : "?", species->skillLevel);
-            std::string works;
-            for (const ResourceNodeType& node : data.nodes) {
-                if (node.skillId == species->skillId && node.level <= species->skillLevel) works += (works.empty() ? "" : ", ") + node.name;
-            }
-            ImGui::PushTextWrapPos(left + width - ImGui::GetWindowPos().x);
-            ImGui::TextUnformatted((std::string(text) + (works.empty() ? "" : "  ·  " + works)).c_str());
-            ImGui::PopTextWrapPos();
+            else abilityLine(dl, nullptr, "Pasiva", IM_COL32(90, 90, 100, 255), !compact);
             if (!message.empty()) {
                 ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::SUCCESS);
                 ImGui::TextUnformatted(message.c_str());

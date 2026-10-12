@@ -53,6 +53,7 @@ class SaveManager {
         j["pokemon"]["pc"] = data.pc;
         j["pokemon"]["dexSeen"] = data.dexSeen;
         j["pokemon"]["dexCaught"] = data.dexCaught;
+        j["pokemon"]["dexProgress"] = data.dexProgress;
         j["pokemon"]["autoReleaseRank"] = data.autoReleaseRank;
         j["pokemon"]["active"] = data.activeIndex;
         j["player"]["level"] = data.playerLevel;
@@ -86,6 +87,7 @@ class SaveManager {
         data.pc = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "pc" }).value_or(std::vector<std::string>{});
         data.dexSeen = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "dexSeen" }).value_or(std::vector<std::string>{});
         data.dexCaught = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "dexCaught" }).value_or(std::vector<std::string>{});
+        data.dexProgress = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "dexProgress" }).value_or(std::vector<std::string>{});
         data.autoReleaseRank = JsonUtil::find<int>(j, { "pokemon", "autoReleaseRank" }).value_or(0);
         data.activeIndex = JsonUtil::find<int>(j, { "pokemon", "active" }).value_or(0);
         data.playerLevel = JsonUtil::find<int>(j, { "player", "level" }).value_or(1);
