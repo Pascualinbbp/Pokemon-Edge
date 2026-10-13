@@ -79,9 +79,9 @@ class ModelCache {
         mesh.vertices = D3dUtil::createBuffer(device, static_cast<UINT>(vertices.size() * sizeof(GpuVertex)), D3D11_BIND_VERTEX_BUFFER,
             vertices.data(), D3D11_USAGE_IMMUTABLE, "CreateBuffer (model vertices)");
         if (vertices.size() <= 65535) {
-            std::vector<uint16_t> small(indices.begin(), indices.end());
-            mesh.indices = D3dUtil::createBuffer(device, static_cast<UINT>(small.size() * sizeof(uint16_t)), D3D11_BIND_INDEX_BUFFER,
-                small.data(), D3D11_USAGE_IMMUTABLE, "CreateBuffer (model indices)");
+            std::vector<uint16_t> narrow(indices.begin(), indices.end());
+            mesh.indices = D3dUtil::createBuffer(device, static_cast<UINT>(narrow.size() * sizeof(uint16_t)), D3D11_BIND_INDEX_BUFFER,
+                narrow.data(), D3D11_USAGE_IMMUTABLE, "CreateBuffer (model indices)");
             mesh.indexFormat = DXGI_FORMAT_R16_UINT;
         } else {
             mesh.indices = D3dUtil::createBuffer(device, static_cast<UINT>(indices.size() * sizeof(uint32_t)), D3D11_BIND_INDEX_BUFFER,

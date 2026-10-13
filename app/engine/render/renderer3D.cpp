@@ -1190,7 +1190,7 @@ void Renderer3D::drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) con
 
 // Dibuja todos los objetos del mundo con la cámara dada (la de la luz o la del jugador).
 void Renderer3D::drawAll(ID3D11DeviceContext* context, CXMMATRIX viewProj, bool shadowPass) const {
-    DrawKind bound = DrawKind::OPAQUE; // shader de píxeles activo (la pasada de sombras no usa ninguno)
+    DrawKind bound = DrawKind::SOLID; // shader de píxeles activo (la pasada de sombras no usa ninguno)
     for (const Draw& draw : m_draws) {
         if (draw.kind == DrawKind::GLOW) continue;
         if (shadowPass) {
@@ -1207,7 +1207,7 @@ void Renderer3D::drawAll(ID3D11DeviceContext* context, CXMMATRIX viewProj, bool 
         setObject(context, world, world * viewProj, draw.tint);
         drawIndexed(context, *draw.mesh);
     }
-    if (!shadowPass && bound != DrawKind::OPAQUE) context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
+    if (!shadowPass && bound != DrawKind::SOLID) context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
 }
 
 // Rayos, siluetas y destellos: se suman al color de lo que hay detrás.

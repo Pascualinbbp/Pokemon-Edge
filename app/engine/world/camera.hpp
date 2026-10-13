@@ -16,7 +16,7 @@ class Camera {
     static constexpr float FOV           = 0.7853982f; // 45°
 
     // Cámara de apuntado
-    static constexpr float DEFAULT_PITCH = 0.6f;    // inclinación de partida: se considera "mirar al frente"
+    static constexpr float LEVEL_PITCH = 0.6f;    // inclinación de partida: se considera "mirar al frente"
     static constexpr float SWIM_MIN_PITCH = -1.0f;  // nadando la cámara puede ir por debajo y mirar hacia arriba
 
     static constexpr float AIM_DISTANCE     = 3.2f;
@@ -72,7 +72,7 @@ class Camera {
     float yaw() const { return m_yaw; }
 
     // Hacia dónde mira respecto a "al frente" (rad): positivo hacia abajo, negativo hacia arriba.
-    float lookAngle() const { return m_pitch - DEFAULT_PITCH; }
+    float lookAngle() const { return m_pitch - LEVEL_PITCH; }
     // En el agua se permite mirar hacia arriba (para subir a la superficie).
     void setSwimming(bool swimming) { m_swimming = swimming; }
 
@@ -129,7 +129,7 @@ class Camera {
     }
 
     float m_yaw = 0.0f;
-    float m_pitch = DEFAULT_PITCH;
+    float m_pitch = LEVEL_PITCH;
     bool m_swimming = false;
     float m_aim = 0.0f; // progreso lineal de la transición (0..1)
 };

@@ -64,7 +64,7 @@ class Renderer3D {
     };
 
     // Cómo se dibuja un objeto: iluminado con el color de sus vértices, con la textura de un modelo, o brillo aditivo (rayos, destellos).
-    enum class DrawKind { OPAQUE, MODEL, GLOW };
+    enum class DrawKind { SOLID, MODEL, GLOW };
 
     // Un objeto del mundo que proyecta y recibe sombras.
     struct Draw {
@@ -72,7 +72,7 @@ class Renderer3D {
         DirectX::XMFLOAT4X4 world;
         DirectX::XMFLOAT4 tint; // rgb = color que se multiplica a los vértices, a = brillo propio (0 = iluminado, 1 = sin sombreado)
         bool castsShadow;
-        DrawKind kind = DrawKind::OPAQUE;
+        DrawKind kind = DrawKind::SOLID;
         ID3D11ShaderResourceView* texture = nullptr; // solo MODEL
     };
 
@@ -99,7 +99,7 @@ class Renderer3D {
 
     void collect(const Scene& scene);
     void add(const Mesh& mesh, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint, bool castsShadow = true,
-        DrawKind kind = DrawKind::OPAQUE, ID3D11ShaderResourceView* texture = nullptr);
+        DrawKind kind = DrawKind::SOLID, ID3D11ShaderResourceView* texture = nullptr);
     // Instancia de un modelo cargado: cada pieza con su apertura (ModelPose) y todo bajo la transformación 'world'.
     void addModel(const RenderModel& model, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint, const ModelPose& pose, bool castsShadow = true);
     void addBall(const DirectX::XMFLOAT3& position, float yaw, float spin, float roll, float lid, float scale, const DirectX::XMFLOAT3& color, float glow);
