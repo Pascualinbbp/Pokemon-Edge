@@ -19,7 +19,7 @@ namespace ResourceSpawn {
     inline constexpr float PLANT_MIN_GROWTH = 0.3f; // una planta de partida nueva tiene al menos este crecimiento
     inline constexpr int PLACE_TRIES = 12;
     inline constexpr float MAX_SLOPE = 0.55f;       // en laderas más empinadas no crece nada
-    inline constexpr float PORTAL_CLEAR = 7.0f;     // zona libre alrededor de cada portal
+    inline constexpr float ENTRANCE_CLEAR = 7.0f;  // zona libre ante la bocana de cada cueva y mina
 
     // Altura a la que se asienta un nodo: la más baja del suelo bajo su base, para que no flote por el lado de cuesta abajo.
     inline float seat(const Physics::World& world, float x, float z, float half) {
@@ -50,9 +50,10 @@ namespace ResourceSpawn {
 
         const auto free = [&](float x, float z) {
             if (world.waterDepth(x, z) > 0.05f || world.groundHeight(x, z) < -50.0f || world.slope(x, z) > MAX_SLOPE) return false; // nunca en el agua ni en una ladera empinada
-            for (const HabitatMap::Portal& portal : habitats.portals()) {
-                const float px = x - portal.x, pz = z - portal.z;
-                if (px * px + pz * pz < PORTAL_CLEAR * PORTAL_CLEAR) return false;
+            for (const HabitatMap::Region& region : habitats.regions()) {
+                if (!region.dark()) continue;
+                const float px = x - region.mouthX, pz = z - region.mouthZ;
+                if (px * px + pz * pz < ENTRANCE_CLEAR * ENTRANCE_CLEAR) return false;
             }
             if (x * x + z * z < CLEAR_RADIUS * CLEAR_RADIUS) return false;
             const float mx = x - ResearchMachine::POSITION.x, mz = z - ResearchMachine::POSITION.z;

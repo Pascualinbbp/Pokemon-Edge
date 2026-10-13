@@ -16,6 +16,9 @@ class Camera {
     static constexpr float FOV           = 0.7853982f; // 45°
 
     // Cámara de apuntado
+    static constexpr float DEFAULT_PITCH = 0.6f;    // inclinación de partida: se considera "mirar al frente"
+    static constexpr float SWIM_MIN_PITCH = -1.0f;  // nadando la cámara puede ir por debajo y mirar hacia arriba
+
     static constexpr float AIM_DISTANCE     = 3.2f;
     static constexpr float AIM_TARGET_HEIGHT = 1.3f;   // altura del hombro
     static constexpr float AIM_SHOULDER     = 0.8f;    // desplazamiento lateral a la derecha
@@ -68,6 +71,11 @@ class Camera {
     // Ángulo horizontal hacia el que mira la cámara (0 = hacia +Z).
     float yaw() const { return m_yaw; }
 
+    // Hacia dónde mira respecto a "al frente" (rad): positivo hacia abajo, negativo hacia arriba.
+    float lookAngle() const { return m_pitch - DEFAULT_PITCH; }
+    // En el agua se permite mirar hacia arriba (para subir a la superficie).
+    void setSwimming(bool swimming) { m_swimming = swimming; }
+
     // 0 = cámara normal, 1 = apuntando (con suavizado).
     float aimBlend() const { return blend(); }
 
@@ -98,7 +106,7 @@ class Camera {
     static float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
     float blend() const { return m_aim * m_aim * (3.0f - 2.0f * m_aim); } // smoothstep
-    float minPitch() const { return lerp(MIN_PITCH, AIM_MIN_PITCH, blend()); }
+    float minPitch() const { return m_swimming ? SWIM_MIN_PITCH : lerp(MIN_PITCH, AIM_MIN_PITCH, blend()); }
 
     void angles(float& sinYaw, float& cosYaw, float& sinPitch, float& cosPitch) const {
         DirectX::XMScalarSinCos(&sinYaw, &cosYaw, m_yaw);
@@ -121,6 +129,7 @@ class Camera {
     }
 
     float m_yaw = 0.0f;
-    float m_pitch = 0.6f;
+    float m_pitch = DEFAULT_PITCH;
+    bool m_swimming = false;
     float m_aim = 0.0f; // progreso lineal de la transición (0..1)
 };

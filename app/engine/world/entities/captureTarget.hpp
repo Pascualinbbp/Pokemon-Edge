@@ -144,17 +144,9 @@ class CaptureTarget {
         }
     }
 
-    // Centro físico (fijo) y centro dibujado (se acerca a la bola mientras entra o sale de ella).
+    // Centro físico: donde está el pokémon (la animación de captura lo reduce o lo convierte en silueta, pero no lo mueve).
     DirectX::XMFLOAT3 center() const { return { body.position.x, body.position.y + HALF, body.position.z }; }
-
-    DirectX::XMFLOAT3 drawCenter() const {
-        const DirectX::XMFLOAT3 c = center();
-        if (m_state != State::CAPTURING) return c;
-
-        const DirectX::XMFLOAT3& b = m_sequence.ball().body.position;
-        const float t = m_sequence.pokemonBlend();
-        return { c.x + (b.x - c.x) * t, c.y + (b.y - c.y) * t, c.z + (b.z - c.z) * t };
-    }
+    DirectX::XMFLOAT3 drawCenter() const { return center(); }
 
     // Animación de captura en curso (nullptr si no hay).
     const CaptureSequence* sequence() const { return m_state == State::CAPTURING ? &m_sequence : nullptr; }
@@ -199,11 +191,13 @@ class CaptureTarget {
     }
 
     // La bola ha tocado al pokémon: empieza la animación del resultado ya decidido.
-    void beginCapture(const Pokeball& ball, const CaptureRules::Result& result) {
+    void beginCapture(const Pokeball& ball, const CaptureRules::Result& result, float cameraYaw, const Physics::World& world) {
         m_state = State::CAPTURING;
         m_ballId = ball.typeId;
-        m_sequence.start(ball, result);
+        m_sequence.start(ball, result, { center(), SIZE }, cameraYaw, world);
     }
+    // La cámara del jugador (la bola acaba de cara a ella).
+    void watch(float cameraYaw) { if (m_state == State::CAPTURING) m_sequence.watch(cameraYaw); }
 
     Event update(float dt, const Physics::World& world) {
         Event event = Event::NONE;

@@ -5,7 +5,7 @@
 #include "../../engine/core/promptAction.hpp"
 
 // Popups del juego: una pastilla translúcida con el botón a pulsar y lo que hace, o un simple aviso de texto.
-// Es lo único que dibuja ayudas flotantes: interactuar con un recurso, pescar (Capturar / Liberar), portales...
+// Es lo único que dibuja ayudas flotantes: interactuar con un recurso, pescar (Capturar / Liberar)..
 namespace GuiPopup {
     inline constexpr float PAD_X = 12.0f, PAD_Y = 6.0f, GAP = 8.0f, ROUNDING = 10.0f;
 

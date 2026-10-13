@@ -58,17 +58,18 @@ struct GameStatus {
     DirectX::XMFLOAT4X4 viewProj = {};           // vista * proyección (para colocar los nombres en pantalla)
     const std::string* noticeText = nullptr;     // segunda línea del aviso (recompensa obtenida, pokémon capturado...)
 
-    // Mundo vertical: temperatura, altura, aire, región y portales.
+    // Mundo vertical: temperatura, altura, aire, región y capa.
     float temperature = 20.0f;                   // °C donde está el jugador (baja con la altura)
     float altitude = 0.0f;                       // m sobre el mar
     float oxygen = 1.0f;                         // aire restante (0..1)
     bool showOxygen = false;                     // el medidor solo se ve bajo el agua o recuperándose
     bool exhausted = false;                      // sin aire
     bool underwater = false;                     // la cámara está bajo el agua (se tiñe la pantalla)
-    bool dark = false;                           // cueva o mina: oscuridad
+    float darkness = 0.0f;                       // 0..1: cueva o mina (se desvanece hacia la bocana)
+    int layer = 1;                               // capa del mapa en que está el jugador (HabitatMap::Layer)
     bool climbing = false, swimming = false, diving = false;
     const std::string* regionName = nullptr;     // cueva, mina o isla del cielo (nullptr = mundo abierto)
-    std::vector<Prompt> prompts;                 // ayudas inferiores (pescar, portales, bucear...)
+    std::vector<Prompt> prompts;                 // ayudas inferiores (pescar, bucear...)
 
     // Pesca: el corcho y la línea.
     bool fishing = false;

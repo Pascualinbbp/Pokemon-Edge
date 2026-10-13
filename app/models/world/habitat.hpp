@@ -16,8 +16,9 @@ struct ResourceChance {
 // Dónde se coloca un hábitat al generar el mundo (columna placement).
 // ANY / COAST: zonas de tierra; BESIDE: orilla de un hábitat de agua (besideId); SEA: mar por profundidad; RIVER / UPPER_RIVER / LAKE /
 // UPPER_LAKE / POND: agua dulce (UPPER = aguas arriba de una cascada; POND = charcas de un pantano, besideId); PEAK: tierra por encima de
-// la línea de nieve; CAVE / MINE / SKY: zonas especiales fuera del mapa principal (cueva, mina, isla del cielo).
-enum class HabitatPlacement { ANY, COAST, BESIDE, SEA, RIVER, UPPER_RIVER, LAKE, UPPER_LAKE, POND, PEAK, CAVE, MINE, SKY };
+// la línea de nieve; CAVE / MINE: regiones dentro de una montaña a las que se entra andando; SKY: suelo de nubes de la isla del cielo; SKY_LAND: islotes de
+// tierra sobre las nubes; SKY_SEA: mar de nubes.
+enum class HabitatPlacement { ANY, COAST, BESIDE, SEA, RIVER, UPPER_RIVER, LAKE, UPPER_LAKE, POND, PEAK, CAVE, MINE, SKY, SKY_LAND, SKY_SEA };
 
 struct Habitat {
     int id = -1;

@@ -4,6 +4,8 @@
 #include <d3d11.h>
 #include <DirectXMath.h>
 #include <wrl/client.h>
+#include "gpuMesh.hpp"
+#include "model/model.hpp"
 #include "../world/dayCycle.hpp"
 #include "../world/scene.hpp"
 
@@ -22,11 +24,8 @@ class Renderer3D {
     private:
     template <typename T> using ComPtr = Microsoft::WRL::ComPtr<T>;
 
-    struct Vertex {
-        DirectX::XMFLOAT3 pos;
-        DirectX::XMFLOAT3 normal;
-        DirectX::XMFLOAT4 color;
-    };
+    using Vertex = GpuVertex;
+    using Mesh = GpuMesh;
 
     // Datos por objeto (registro b0). Se envían traspuestos.
     struct ObjectConstants {
@@ -64,13 +63,8 @@ class Renderer3D {
         float worldRadius = 300.0f;
     };
 
-    // Geometría inmutable e indexada: cada vértice se comparte entre triángulos.
-    struct Mesh {
-        ComPtr<ID3D11Buffer> vertices;
-        ComPtr<ID3D11Buffer> indices;
-        UINT indexCount = 0;
-        UINT stride = 0;
-    };
+    // Cómo se dibuja un objeto: iluminado con el color de sus vértices, con la textura de un modelo, o brillo aditivo (rayos, destellos).
+    enum class DrawKind { OPAQUE, MODEL, GLOW };
 
     // Un objeto del mundo que proyecta y recibe sombras.
     struct Draw {
@@ -78,6 +72,8 @@ class Renderer3D {
         DirectX::XMFLOAT4X4 world;
         DirectX::XMFLOAT4 tint; // rgb = color que se multiplica a los vértices, a = brillo propio (0 = iluminado, 1 = sin sombreado)
         bool castsShadow;
+        DrawKind kind = DrawKind::OPAQUE;
+        ID3D11ShaderResourceView* texture = nullptr; // solo MODEL
     };
 
     static Mesh createMesh(ID3D11Device* device, const void* vertices, UINT vertexCount, UINT stride,
@@ -98,15 +94,21 @@ class Renderer3D {
     static Mesh createCube(ID3D11Device* device);
     static Mesh createSphere(ID3D11Device* device, bool dome = false); // pokéball o, con dome, la semiesfera superior blanca
     static Mesh createStar(ID3D11Device* device);
+    static Mesh createBeam(ID3D11Device* device); // cono abierto a lo largo de +Z: estrecho en z = 0 (la bola) y ancho en z = 1 (el pokémon)
     static DirectX::XMMATRIX lightViewProj(const DirectX::XMFLOAT3& lightDir, const DirectX::XMFLOAT3& focus);
 
     void collect(const Scene& scene);
-    void add(const Mesh& mesh, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint, bool castsShadow = true);
-    void addBall(const Pokeball& ball, float tilt, float scale, float glow);
+    void add(const Mesh& mesh, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint, bool castsShadow = true,
+        DrawKind kind = DrawKind::OPAQUE, ID3D11ShaderResourceView* texture = nullptr);
+    // Instancia de un modelo cargado: cada pieza con su apertura (ModelPose) y todo bajo la transformación 'world'.
+    void addModel(const RenderModel& model, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint, const ModelPose& pose, bool castsShadow = true);
+    void addBall(const DirectX::XMFLOAT3& position, float yaw, float spin, float roll, float lid, float scale, const DirectX::XMFLOAT3& color, float glow);
+    void addBall(const Pokeball& ball, float scale = 1.0f) { addBall(ball.body.position, ball.yaw, ball.spin, 0.0f, 0.0f, scale, ball.color, 0.0f); }
+    void addCapture(const CaptureSequence& sequence);
+    void addGlowBetween(const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to, float width, const DirectX::XMFLOAT4& tint);
     void addPlayer(const Scene& scene);
     void addTool(PlayerAction tool, DirectX::CXMMATRIX hand);
     void addFishingLine(const Scene& scene, const DirectX::XMFLOAT3& rodTip);
-    void addPortal(const HabitatMap::Portal& portal, const Physics::World& world, float time);
     void addSky(const Scene& scene, float time);
     void addChest(const Chest& chest);
     void addNode(const ResourceNode& node);
@@ -117,6 +119,7 @@ class Renderer3D {
         const DirectX::XMFLOAT4& tint) const;
     void drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) const;
     void drawAll(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj, bool shadowPass) const;
+    void drawGlow(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj) const;
     void drawChunks(ID3D11DeviceContext* context, const std::vector<Chunk>& chunks, DirectX::CXMMATRIX viewProj) const;
     void drawWater(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj) const;
     void renderShadowMap(ID3D11DeviceContext* context, DirectX::CXMMATRIX lightViewProj) const;
@@ -141,6 +144,10 @@ class Renderer3D {
     ComPtr<ID3D11BlendState> m_waterBlend;
     ComPtr<ID3D11DepthStencilState> m_waterDepth;   // el agua prueba la profundidad pero no la escribe
     ComPtr<ID3D11RasterizerState> m_noCull;         // el agua se ve también desde abajo
+    ComPtr<ID3D11PixelShader> m_modelPixelShader;   // modelos con textura
+    ComPtr<ID3D11PixelShader> m_glowPixelShader;    // brillo aditivo
+    ComPtr<ID3D11BlendState> m_additiveBlend;
+    ComPtr<ID3D11SamplerState> m_modelSampler;
 
     std::vector<Chunk> m_terrain; // relieve coloreado según hábitat, altura y pendiente; se rehace cuando cambia el mapa
     std::vector<Chunk> m_water;   // superficie del agua (mar, ríos, lagos, charcas, cascadas)
@@ -156,6 +163,10 @@ class Renderer3D {
     Mesh m_sphere; // pokéball: mitad tintada con el color del tipo, banda oscura y mitad blanca
     Mesh m_dome;   // semiesfera blanca de los objetos sueltos
     Mesh m_star;   // estrella de la animación de captura
+    Mesh m_beam;   // rayo rojo de la captura
+    ModelCache m_models;                  // modelos .glb cargados una sola vez
+    const RenderModel* m_ballModel = nullptr;
+    int m_ballLid = -1;                   // pieza articulada de la pokéball (la tapa)
 
     std::vector<Draw> m_draws; // se reutiliza entre frames
 

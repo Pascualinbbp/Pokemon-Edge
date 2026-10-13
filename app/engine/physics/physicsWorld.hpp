@@ -34,7 +34,11 @@ namespace Physics {
         std::vector<Box> props;     // objetos sólidos del mundo (cofres, rocas, árboles...): la escena los rehace cada frame
 
         // Zona jugable: un disco (el archipiélago) más las regiones especiales (cueva, mina, isla del cielo).
-        struct Disc { float x = 0.0f, z = 0.0f, radius = 0.0f; };
+        // trigger: a menos de esta distancia del centro el punto queda atado al disco (0 = el radio más 40 m).
+        struct Disc { float x = 0.0f, z = 0.0f, radius = 0.0f, trigger = 0.0f; };
+
+        // Corriente ascendente: una columna que sube hasta topY y deja caer en (toX, toZ).
+        struct Updraft { float x = 0.0f, z = 0.0f, radius = 6.0f, topY = 0.0f, toX = 0.0f, toZ = 0.0f; };
 
         Heightfield terrain;  // relieve del mundo (lo rellena la escena al generarlo)
         Heightfield water;    // altura de la superficie del agua (= el terreno donde no hay agua)
@@ -43,6 +47,7 @@ namespace Physics {
         float tide = 0.0f;    // desviación de la marea (m), la fija la escena cada frame
         Disc archipelago{ 0.0f, 0.0f, HALF_SIZE };
         std::vector<Disc> regions;
+        std::vector<Updraft> updrafts;
 
         // Altura del terreno en (x, z) (bajo el agua es el fondo).
         float groundHeight(float x, float z) const { return terrain.sample(x, z); }
@@ -61,11 +66,21 @@ namespace Physics {
             fz = flowZ.empty() ? 0.0f : flowZ.sample(x, z);
         }
 
+        // Corriente ascendente que abarca el punto (nullptr = ninguna).
+        const Updraft* updraftAt(float x, float z) const {
+            for (const Updraft& u : updrafts) {
+                const float dx = x - u.x, dz = z - u.z;
+                if (dx * dx + dz * dz <= u.radius * u.radius) return &u;
+            }
+            return nullptr;
+        }
+
         // Deja un punto dentro de la zona jugable: la región en la que está o, si no, el archipiélago.
         void clampToWorld(float& x, float& z, float margin = 2.0f) const {
             for (const Disc& region : regions) {
                 const float dx = x - region.x, dz = z - region.z;
-                if (dx * dx + dz * dz > (region.radius + 40.0f) * (region.radius + 40.0f)) continue;
+                const float reach = region.trigger > 0.0f ? region.trigger : region.radius + 40.0f;
+                if (dx * dx + dz * dz > reach * reach) continue;
                 limit(x, z, region, margin);
                 return;
             }
@@ -110,6 +125,13 @@ namespace Physics {
         void step(Body& body, float dt) const {
             const float previousLow = body.position.y - body.groundOffset; // altura de los pies al empezar el paso
             if (!body.onGround && !body.underwater) body.velocity.y -= GRAVITY * body.gravityScale * dt;
+            if (body.rolls && body.onGround && !body.underwater && waterDepth(body.position.x, body.position.z) <= 0.05f) { // rueda cuesta abajo
+                float gx, gz;
+                terrain.gradient(body.position.x, body.position.z, gx, gz);
+                const float pull = GRAVITY * body.gravityScale * ROLL_FACTOR * dt;
+                body.velocity.x -= gx * pull;
+                body.velocity.z -= gz * pull;
+            }
 
             body.position.x += body.velocity.x * dt;
             body.position.z += body.velocity.z * dt;
@@ -257,6 +279,7 @@ namespace Physics {
             }
         }
 
+        static constexpr float ROLL_FACTOR = 0.6f;      // fracción de la gravedad que empuja a lo que rueda por una cuesta
         static constexpr float BOUNCE_MIN_SPEED = 1.5f; // por debajo de esta velocidad de caída ya no bota
         static constexpr float STICK_DISTANCE = 0.9f;  // cuánto puede bajar el suelo de un paso a otro sin que el personaje se despegue
         static constexpr float WATER_DRAG = 3.0f;       // frenado horizontal por segundo de lo que flota

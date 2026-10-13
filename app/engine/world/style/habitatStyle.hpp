@@ -23,6 +23,11 @@ namespace HabitatStyle {
         if (name == "Pantano") return { 0.30f, 0.38f, 0.22f };
         if (name == "Desierto") return { 0.82f, 0.66f, 0.36f };
         if (name == "Tundra") return { 0.86f, 0.92f, 0.96f };
+        if (name == "Cueva") return { 0.32f, 0.30f, 0.30f };
+        if (name == "Mina") return { 0.38f, 0.33f, 0.28f };
+        if (name == "Isla del cielo") return { 0.96f, 0.97f, 1.0f };      // suelo de nube
+        if (name == "Tierra del cielo") return { 0.52f, 0.78f, 0.38f };   // islotes de tierra
+        if (name == "Mar de nubes") return { 0.78f, 0.86f, 1.0f };
         uint32_t hash = 2166136261u;
         for (const char c : name) hash = (hash ^ static_cast<unsigned char>(c)) * 16777619u;
         return { 0.3f + 0.5f * static_cast<float>(hash & 0xFF) / 255.0f, 0.3f + 0.5f * static_cast<float>((hash >> 8) & 0xFF) / 255.0f,

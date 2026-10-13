@@ -137,6 +137,31 @@ namespace {
             return float4(ApplyEnv(saturate(lerp(shaded, albedo, Tint.a)), input.wpos), 1.0f);
         }
 
+        // --- Modelos con textura (coordenadas de textura en col.xy; col.z = 1 si las zonas rojas toman el color del tinte) ---
+        Texture2D ModelTexture : register(t1);
+        SamplerState ModelSampler : register(s1);
+
+        float4 PS_MODEL(PS_IN input) : SV_Target {
+            float3 n = normalize(input.nrm);
+            float diffuse = saturate(dot(n, LightDir.xyz));
+            float lit = 0.0f;
+            if (diffuse > 0.0f) lit = Shadow(input.wpos, n);
+            float3 ambient = lerp(AmbientGround.rgb, AmbientSky.rgb, n.y * 0.5f + 0.5f);
+            float3 tex = ModelTexture.Sample(ModelSampler, input.col.xy).rgb;
+            float redness = saturate((tex.r - max(tex.g, tex.b)) * 3.0f) * input.col.z;
+            float3 albedo = lerp(tex, Tint.rgb * saturate(tex.r * 1.1f + 0.05f), redness);
+            float3 shaded = albedo * (ambient + LightColor.rgb * diffuse * lit);
+            return float4(ApplyEnv(saturate(lerp(shaded, albedo, Tint.a)), input.wpos), 1.0f);
+        }
+
+        // --- Brillo aditivo (rayo, silueta, destellos): más intenso en el borde; col.r atenúa a lo largo del rayo ---
+        float4 PS_GLOW(PS_IN input) : SV_Target {
+            float3 v = normalize(CameraPos.xyz - input.wpos);
+            float rim = pow(1.0f - saturate(abs(dot(normalize(input.nrm), v))), 1.5f);
+            float k = input.col.r * (0.55f + 0.9f * rim);
+            return float4(Tint.rgb * Tint.a * k, 1.0f);
+        }
+
         // --- Mapa de sombras: solo profundidad ---
         float4 VS_SHADOW(VS_IN input) : SV_POSITION {
             return mul(float4(input.pos, 1.0f), WorldViewProj);
@@ -204,7 +229,7 @@ namespace {
 
         // --- Agua: olas, marea, corriente, transparencia según la profundidad, espuma y reflejo del cielo ---
         // Por vértice: pos = superficie base, nrm = (profundidad, corriente x, corriente z), col.a = tipo
-        // (0 mar, 1 río, 2 lago, 3 charca de pantano, 4 cascada, 5 mar abierto hasta el horizonte).
+        // (0 mar, 1 río, 2 lago, 3 charca de pantano, 4 cascada, 5 mar abierto hasta el horizonte, 6 agua de nube).
         struct WATER_IN { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 info : TEXCOORD1; float kind : TEXCOORD2; };
 
         float WaveHeight(float2 p, float kind, float t) {
@@ -218,9 +243,9 @@ namespace {
         WATER_IN VS_WATER(VS_IN input) {
             WATER_IN output;
             float kind = floor(input.col.a + 0.5f);
-            bool sea = kind < 0.5f || kind > 4.5f;
+            bool sea = kind < 0.5f || (kind > 4.5f && kind < 5.5f);
             float3 p = input.pos;
-            p.y += (sea ? CameraPos.w : 0.0f) + WaveHeight(p.xz, kind > 4.5f ? 0.0f : kind, SkyParams.w);
+            p.y += (sea ? CameraPos.w : 0.0f) + WaveHeight(p.xz, kind > 5.5f ? 3.0f : kind > 4.5f ? 0.0f : kind, SkyParams.w);
             output.pos = mul(float4(p, 1.0f), WorldViewProj);
             output.wpos = p;
             output.info = float3(input.nrm.x + (sea ? CameraPos.w : 0.0f), input.nrm.y, input.nrm.z);
@@ -231,9 +256,10 @@ namespace {
         float4 PS_WATER(WATER_IN input) : SV_Target {
             float k = floor(input.kind + 0.5f);
             float2 pxz = input.wpos.xz;
-            if (k > 4.5f) clip(length(pxz) - (Env.w - 8.0f)); // el mar abierto solo fuera del archipiélago
+            bool open = k > 4.5f && k < 5.5f, cloud = k > 5.5f;
+            if (open) clip(length(pxz) - (Env.w - 8.0f)); // el mar abierto solo fuera del archipiélago
             float t = SkyParams.w;
-            float kk = k > 4.5f ? 0.0f : k;
+            float kk = cloud ? 3.0f : open ? 0.0f : k;
 
             float e = 0.35f;
             float h0 = WaveHeight(pxz, kk, t);
@@ -246,16 +272,17 @@ namespace {
 
             float3 shallow, deep;
             float full;
-            if (k < 0.5f || k > 4.5f) { shallow = float3(0.30f, 0.80f, 0.84f); deep = float3(0.03f, 0.18f, 0.42f); full = 7.0f; }
+            if (cloud)                { shallow = float3(0.93f, 0.96f, 1.0f); deep = float3(0.60f, 0.73f, 0.95f); full = 2.0f; }
+            else if (k < 0.5f || open) { shallow = float3(0.30f, 0.80f, 0.84f); deep = float3(0.03f, 0.18f, 0.42f); full = 7.0f; }
             else if (k < 1.5f)        { shallow = float3(0.38f, 0.74f, 0.74f); deep = float3(0.10f, 0.36f, 0.52f); full = 2.5f; }
             else if (k < 2.5f)        { shallow = float3(0.30f, 0.68f, 0.74f); deep = float3(0.06f, 0.28f, 0.46f); full = 4.0f; }
             else if (k < 3.5f)        { shallow = float3(0.30f, 0.46f, 0.16f); deep = float3(0.10f, 0.24f, 0.10f); full = 0.8f; }
             else                      { shallow = float3(0.80f, 0.92f, 0.96f); deep = float3(0.45f, 0.70f, 0.85f); full = 1.5f; }
             float tdep = saturate(depth / full);
             float3 base = lerp(shallow, deep, sqrt(tdep));
-            float alpha = (k > 2.5f && k < 3.5f) ? lerp(0.55f, 0.92f, tdep) : (k > 3.5f && k < 4.5f) ? 0.85f : lerp(0.28f, 0.96f, sqrt(tdep));
+            float alpha = cloud ? lerp(0.55f, 0.88f, sqrt(tdep)) : (k > 2.5f && k < 3.5f) ? lerp(0.55f, 0.92f, tdep) : (k > 3.5f && k < 4.5f) ? 0.85f : lerp(0.28f, 0.96f, sqrt(tdep));
             alpha *= smoothstep(0.0f, 0.25f, depth); // en la orilla es transparente
-            if (k > 4.5f) alpha = 1.0f;
+            if (open) alpha = 1.0f;
 
             float diff = saturate(dot(n, LightDir.xyz));
             float3 color = base * (AmbientSky.rgb + LightColor.rgb * diff * 0.8f);
@@ -420,6 +447,7 @@ std::vector<Renderer3D::Chunk> Renderer3D::createWater(ID3D11Device* device, con
             case HabitatMap::LAKE: case HabitatMap::UPPER_LAKE:   return 2.0f;
             case HabitatMap::POND:                                return 3.0f;
             case HabitatMap::CASCADE:                             return 4.0f;
+            case HabitatMap::CLOUD:                               return 6.0f;
             default:                                              return 0.0f;
         }
     };
@@ -603,6 +631,28 @@ Renderer3D::Mesh Renderer3D::createStar(ID3D11Device* device) {
     return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
 }
 
+// Rayo: cono abierto de 1 de largo a lo largo de +Z (radio 0.12 en z = 0, 1 en z = 1). col.r es la intensidad a lo largo del rayo.
+Renderer3D::Mesh Renderer3D::createBeam(ID3D11Device* device) {
+    constexpr int segments = 20;
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+    for (int ring = 0; ring < 2; ++ring) {
+        const float z = static_cast<float>(ring), radius = ring == 0 ? 0.12f : 1.0f;
+        const float shade = ring == 0 ? 1.0f : 0.35f;
+        for (int s = 0; s < segments; ++s) {
+            const float theta = static_cast<float>(s) / segments * XM_2PI;
+            const float x = std::cos(theta), y = std::sin(theta);
+            vertices.push_back({ { x * radius, y * radius, z }, { x, y, 0.0f }, { shade, shade, shade, 1.0f } });
+        }
+    }
+    for (int s = 0; s < segments; ++s) {
+        const int next = (s + 1) % segments;
+        indices.insert(indices.end(), { static_cast<uint16_t>(s), static_cast<uint16_t>(next), static_cast<uint16_t>(segments + s),
+                                        static_cast<uint16_t>(segments + s), static_cast<uint16_t>(next), static_cast<uint16_t>(segments + next) });
+    }
+    return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
+}
+
 void Renderer3D::init(ID3D11Device* device) {
     // 1. Shaders
     const ComPtr<ID3DBlob> vsBlob = D3dUtil::compileShader(kShaderCode, "VS", "vs_4_0");
@@ -622,6 +672,11 @@ void Renderer3D::init(ID3D11Device* device) {
     const ComPtr<ID3DBlob> waterPsBlob = D3dUtil::compileShader(kShaderCode, "PS_WATER", "ps_4_0");
     D3dUtil::check(device->CreateVertexShader(waterVsBlob->GetBufferPointer(), waterVsBlob->GetBufferSize(), nullptr, &m_waterVertexShader), "CreateVertexShader (water)");
     D3dUtil::check(device->CreatePixelShader(waterPsBlob->GetBufferPointer(), waterPsBlob->GetBufferSize(), nullptr, &m_waterPixelShader), "CreatePixelShader (water)");
+
+    const ComPtr<ID3DBlob> modelPsBlob = D3dUtil::compileShader(kShaderCode, "PS_MODEL", "ps_4_0");
+    D3dUtil::check(device->CreatePixelShader(modelPsBlob->GetBufferPointer(), modelPsBlob->GetBufferSize(), nullptr, &m_modelPixelShader), "CreatePixelShader (model)");
+    const ComPtr<ID3DBlob> glowPsBlob = D3dUtil::compileShader(kShaderCode, "PS_GLOW", "ps_4_0");
+    D3dUtil::check(device->CreatePixelShader(glowPsBlob->GetBufferPointer(), glowPsBlob->GetBufferSize(), nullptr, &m_glowPixelShader), "CreatePixelShader (glow)");
 
     // 2. Input layout (el mapa de sombras reutiliza el de los objetos)
     const D3D11_INPUT_ELEMENT_DESC layout[] = {
@@ -655,6 +710,21 @@ void Renderer3D::init(ID3D11Device* device) {
     blend.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
     D3dUtil::check(device->CreateBlendState(&blend, &m_waterBlend), "CreateBlendState (water)");
+
+    // El brillo suma su color a lo que hay detrás (sin escribir profundidad).
+    D3D11_BLEND_DESC additive = blend;
+    additive.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+    additive.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+    additive.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
+    additive.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    D3dUtil::check(device->CreateBlendState(&additive, &m_additiveBlend), "CreateBlendState (additive)");
+
+    D3D11_SAMPLER_DESC modelSampler = {};
+    modelSampler.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    modelSampler.AddressU = modelSampler.AddressV = modelSampler.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    modelSampler.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    modelSampler.MaxLOD = D3D11_FLOAT32_MAX;
+    D3dUtil::check(device->CreateSamplerState(&modelSampler, &m_modelSampler), "CreateSamplerState (model)");
 
     D3D11_DEPTH_STENCIL_DESC waterDepth = {};
     waterDepth.DepthEnable = TRUE;
@@ -714,6 +784,9 @@ void Renderer3D::init(ID3D11Device* device) {
     m_sphere = createSphere(device);
     m_dome = createSphere(device, true);
     m_star = createStar(device);
+    m_beam = createBeam(device);
+    m_ballModel = m_models.get(device, "pokeball", true); // si falta el archivo se dibuja la esfera sencilla
+    m_ballLid = m_ballModel ? m_ballModel->part("movable") : -1;
     m_draws.reserve(256);
 }
 
@@ -729,10 +802,17 @@ XMMATRIX Renderer3D::lightViewProj(const XMFLOAT3& lightDir, const XMFLOAT3& foc
                                                   f.z - kLightDepth * 0.5f, f.z + kLightDepth * 0.5f);
 }
 
-void Renderer3D::add(const Mesh& mesh, CXMMATRIX world, const XMFLOAT4& tint, bool castsShadow) {
-    Draw draw = { &mesh, {}, tint, castsShadow };
+void Renderer3D::add(const Mesh& mesh, CXMMATRIX world, const XMFLOAT4& tint, bool castsShadow, DrawKind kind, ID3D11ShaderResourceView* texture) {
+    Draw draw = { &mesh, {}, tint, castsShadow, kind, texture };
     XMStoreFloat4x4(&draw.world, world);
     m_draws.push_back(draw);
+}
+
+void Renderer3D::addModel(const RenderModel& model, CXMMATRIX world, const XMFLOAT4& tint, const ModelPose& pose, bool castsShadow) {
+    for (size_t i = 0; i < model.parts.size(); ++i) {
+        add(model.parts[i].mesh, model.partMatrix(static_cast<int>(i), pose.get(static_cast<int>(i))) * world, tint, castsShadow,
+            DrawKind::MODEL, model.texture.Get());
+    }
 }
 
 // Lista única de lo que hay en el mundo: la usan el mapa de sombras y la pantalla.
@@ -746,10 +826,6 @@ void Renderer3D::collect(const Scene& scene) {
     const XMFLOAT3& p = scene.player.body.position;
     addPlayer(scene);
     const float time = scene.dayCycle.lighting().time;
-    for (const HabitatMap::Portal& portal : scene.habitats.portals()) {
-        const float dx = portal.x - p.x, dz = portal.z - p.z;
-        if (dx * dx + dz * dz < 160.0f * 160.0f) addPortal(portal, scene.world, time);
-    }
     addSky(scene, time);
 
     for (const CaptureTarget* wild : scene.wild.loaded()) {
@@ -757,21 +833,7 @@ void Renderer3D::collect(const Scene& scene) {
         const float size = target.scale();
         if (size > 0.001f) addCreature(target.drawCenter(), size, target.yaw(), target.speciesId(), target.shiny());
 
-        // Animación de captura: la bola (tambaleándose) y las estrellas, que brillan y no proyectan sombra.
-        if (const CaptureSequence* sequence = target.sequence()) {
-            addBall(sequence->ball(), sequence->ballTilt(), sequence->ballScale(), sequence->ballGlow());
-
-            const XMFLOAT3 color = sequence->starColor();
-            for (int i = 0; i < sequence->starCount(); ++i) {
-                XMFLOAT3 position;
-                float scale, spin;
-                sequence->star(i, position, scale, spin);
-                if (scale > 0.001f) {
-                    add(m_star, XMMatrixScaling(scale, scale, scale) * XMMatrixRotationY(spin) * XMMatrixTranslation(position.x, position.y, position.z),
-                        { color.x, color.y, color.z, 1.0f }, false);
-                }
-            }
-        }
+        if (const CaptureSequence* sequence = target.sequence()) addCapture(*sequence);
     }
 
     if (scene.companion.active()) {
@@ -781,7 +843,7 @@ void Renderer3D::collect(const Scene& scene) {
             addCreature({ pet.body.position.x, pet.body.position.y + size * 0.5f + pet.bob(), pet.body.position.z },
                         size, pet.yaw(), pet.speciesId(), scene.storage.active() && scene.storage.active()->shiny);
         }
-        if (const Pokeball* ball = pet.ball()) addBall(*ball, 0.0f, pet.ballScale(), 0.3f); // cambio de pokémon
+        if (const Pokeball* ball = pet.ball()) addBall(*ball, pet.ballScale()); // cambio de pokémon
     }
 
     for (const Chest& chest : scene.chests.entities) addChest(chest);
@@ -792,7 +854,7 @@ void Renderer3D::collect(const Scene& scene) {
     for (const GroundItem& item : scene.groundItems.entities) addGroundItem(item);
     addMachine();
 
-    for (const Pokeball& ball : scene.balls) addBall(ball, 0.0f, 1.0f, 0.0f);
+    for (const Pokeball& ball : scene.balls) addBall(ball);
 }
 
 // Jugador: torso, cabeza, dos brazos y dos piernas (cubos) con la postura de PlayerPose (andar, trepar, nadar, bucear, usar una
@@ -880,31 +942,6 @@ void Renderer3D::addFishingLine(const Scene& scene, const XMFLOAT3& rodTip) {
     add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(b.x, b.y + r * 0.4f, b.z), { 0.95f, 0.15f, 0.12f, 0.2f }, false);
 }
 
-// Portal: entrada de cueva o mina (un arco de roca con el hueco oscuro, mirando al centro de la isla) o columna de luz giratoria.
-void Renderer3D::addPortal(const HabitatMap::Portal& portal, const Physics::World& world, float time) {
-    const float y = world.groundHeight(portal.x, portal.z);
-    const bool entrance = portal.kind == HabitatPlacement::CAVE || portal.kind == HabitatPlacement::MINE;
-    if (entrance) {
-        static const XMFLOAT4 rock = { 0.42f, 0.40f, 0.38f, 0.0f }, dark = { 0.01f, 0.01f, 0.01f, 1.0f };
-        const XMMATRIX base = XMMatrixRotationY(std::atan2(-portal.x, -portal.z)) * XMMatrixTranslation(portal.x, y, portal.z);
-        const auto part = [&](const XMFLOAT4& tint, float sx, float sy, float sz, float x, float py) { add(m_cube, XMMatrixScaling(sx, sy, sz) * XMMatrixTranslation(x, py, 0.0f) * base, tint); };
-        part(rock, 0.9f, 3.4f, 1.1f, -1.8f, 1.7f);
-        part(rock, 0.9f, 3.4f, 1.1f, 1.8f, 1.7f);
-        part(rock, 4.6f, 0.9f, 1.1f, 0.0f, 3.6f);
-        part(dark, 2.7f, 3.2f, 0.3f, 0.0f, 1.6f);
-        return;
-    }
-    // Columna de luz: color según adónde lleva (arriba = cielo, "Salir" = verde, "Bajar" = amarillo).
-    const bool sky = portal.kind == HabitatPlacement::SKY;
-    const XMFLOAT4 color = sky ? XMFLOAT4{ 0.55f, 0.90f, 1.0f, 1.0f } : portal.kind == HabitatPlacement::ANY ? XMFLOAT4{ 1.0f, 0.90f, 0.40f, 1.0f } : XMFLOAT4{ 0.5f, 1.0f, 0.6f, 1.0f };
-    const float base = (std::max)(y, world.waterLevel(portal.x, portal.z));
-    add(m_cube, XMMatrixScaling(0.35f, 9.0f, 0.35f) * XMMatrixTranslation(portal.x, base + 4.5f, portal.z), color, false);
-    for (int i = 0; i < 6; ++i) {
-        const float a = time * 1.5f + i * XM_2PI / 6.0f;
-        add(m_cube, XMMatrixScaling(0.3f, 0.3f, 0.3f) * XMMatrixRotationY(a) * XMMatrixTranslation(portal.x + std::cos(a) * 1.6f, base + 0.8f + std::fmod(time * 1.2f + i, 4.0f), portal.z + std::sin(a) * 1.6f), color, false);
-    }
-}
-
 // Isla del cielo: la base rocosa, las nubes alrededor y, en el mar, la corriente ascendente que lleva hasta ella.
 void Renderer3D::addSky(const Scene& scene, float time) {
     const XMFLOAT3& p = scene.player.body.position;
@@ -912,7 +949,7 @@ void Renderer3D::addSky(const Scene& scene, float time) {
         if (region.kind != HabitatPlacement::SKY) continue;
         const float dx = region.x - p.x, dz = region.z - p.z;
         if (dx * dx + dz * dz > 520.0f * 520.0f) continue;
-        const float floorY = scene.world.groundHeight(region.x, region.z);
+        const float floorY = region.floorY;
         const float radius = region.radius - 2.0f;
         add(m_cone, XMMatrixScaling(radius, 62.0f, radius) * XMMatrixTranslation(region.x, floorY - 0.5f, region.z), kWhite, false);
 
@@ -928,14 +965,14 @@ void Renderer3D::addSky(const Scene& scene, float time) {
             }
         }
     }
-    if (scene.habitats.hasUpdraft()) {
-        const float ux = scene.habitats.updraftX(), uz = scene.habitats.updraftZ();
-        const float dx = ux - p.x, dz = uz - p.z;
-        if (dx * dx + dz * dz < 300.0f * 300.0f) {
-            for (int i = 0; i < 48; ++i) {
-                const float a = time * 1.2f + i * 0.6f, r = 2.4f + i * 0.05f;
-                add(m_cube, XMMatrixScaling(0.8f, 0.8f, 0.8f) * XMMatrixRotationY(a) * XMMatrixTranslation(ux + std::cos(a) * r, i * 3.2f + 1.0f, uz + std::sin(a) * r), { 0.82f, 0.95f, 1.0f, 1.0f }, false);
-            }
+    for (const Physics::World::Updraft& stream : scene.habitats.updrafts()) { // la corriente: una espiral de bloques claros que sube del mar al cielo
+        const float dx = stream.x - p.x, dz = stream.z - p.z;
+        if (dx * dx + dz * dz > 300.0f * 300.0f) continue;
+        const float base = (std::max)(scene.world.waterLevel(stream.x, stream.z), scene.world.groundHeight(stream.x, stream.z));
+        const int count = static_cast<int>((stream.topY - base) / 3.0f);
+        for (int i = 0; i < count; ++i) {
+            const float a = time * 1.2f + i * 0.6f, r = stream.radius * (0.35f + 0.5f * std::fabs(std::sin(i * 1.3f)));
+            add(m_cube, XMMatrixScaling(0.8f, 0.8f, 0.8f) * XMMatrixRotationY(a) * XMMatrixTranslation(stream.x + std::cos(a) * r, base + std::fmod(i * 3.0f + time * 14.0f, stream.topY - base), stream.z + std::sin(a) * r), { 0.82f, 0.95f, 1.0f, 1.0f }, false);
         }
     }
 }
@@ -1080,13 +1117,59 @@ void Renderer3D::addChest(const Chest& chest) {
     }
 }
 
-void Renderer3D::addBall(const Pokeball& ball, float tilt, float scale, float glow) {
+// Pokéball: el modelo .glb (o una esfera si no se pudo cargar), centrado en 'position', del tamaño de la física, orientado según
+// yaw (hacia dónde mira el botón), spin (rodando) y roll (balanceo sobre el eje del botón), con la tapa abierta 'lid' (0..1).
+void Renderer3D::addBall(const XMFLOAT3& position, float yaw, float spin, float roll, float lid, float scale, const XMFLOAT3& color, float glow) {
     if (scale <= 0.001f) return;
+    const XMMATRIX orient = XMMatrixRotationZ(roll) * XMMatrixRotationX(spin) * XMMatrixRotationY(yaw) * XMMatrixTranslation(position.x, position.y, position.z);
+    if (!m_ballModel) {
+        const float r = Pokeball::RADIUS * scale;
+        add(m_sphere, XMMatrixScaling(r, r, r) * orient, { color.x, color.y, color.z, glow });
+        return;
+    }
+    const XMFLOAT3 c = m_ballModel->center();
+    const float s = Pokeball::RADIUS * 2.0f * scale / m_ballModel->height();
+    ModelPose pose;
+    pose.set(m_ballLid, lid);
+    addModel(*m_ballModel, XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(s, s, s) * orient, { color.x, color.y, color.z, glow }, pose);
+}
 
-    const XMFLOAT3& b = ball.body.position;
-    const float r = Pokeball::RADIUS * scale;
-    add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixRotationZ(tilt) * XMMatrixTranslation(b.x, b.y, b.z),
-        { ball.color.x, ball.color.y, ball.color.z, glow });
+// Segmento entre dos puntos como cubo largo y fino orientado (el hilo de la caña) o, con GLOW, el rayo de la captura.
+void Renderer3D::addGlowBetween(const XMFLOAT3& from, const XMFLOAT3& to, float width, const XMFLOAT4& tint) {
+    const XMFLOAT3 d = { to.x - from.x, to.y - from.y, to.z - from.z };
+    const float length = (std::max)(std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z), 0.01f);
+    const float yaw = std::atan2(d.x, d.z), pitch = -std::asin((std::clamp)(d.y / length, -1.0f, 1.0f));
+    add(m_beam, XMMatrixScaling(width, width, length) * XMMatrixRotationX(pitch) * XMMatrixRotationY(yaw) * XMMatrixTranslation(from.x, from.y, from.z), tint, false, DrawKind::GLOW);
+}
+
+// Todo lo que se ve de una captura: la bola con su tapa, el rayo rojo, la silueta del pokémon, destellos y partículas.
+void Renderer3D::addCapture(const CaptureSequence& sequence) {
+    const CaptureSequence::BallPose pose = sequence.ballPose();
+    addBall(pose.position, pose.yaw, pose.spin, pose.roll, pose.lid, pose.scale, sequence.ball().color, pose.glow);
+
+    static const XMFLOAT3 red = { 1.0f, 0.16f, 0.10f };
+    const CaptureSequence::Beam beam = sequence.beam();
+    if (beam.active && beam.intensity > 0.01f) addGlowBetween(beam.from, beam.to, beam.width, { red.x, red.y, red.z, 0.9f * beam.intensity });
+    const CaptureSequence::Silhouette silhouette = sequence.silhouette();
+    if (silhouette.active && silhouette.size > 0.01f) {
+        const float k = silhouette.size;
+        add(m_cube, XMMatrixScaling(k, k, k) * XMMatrixTranslation(silhouette.center.x, silhouette.center.y, silhouette.center.z),
+            { red.x, red.y, red.z, 1.1f * silhouette.intensity }, false, DrawKind::GLOW);
+    }
+    const CaptureSequence::Flash flash = sequence.flash();
+    if (flash.active) {
+        const float r = flash.radius;
+        add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(flash.center.x, flash.center.y, flash.center.z),
+            { flash.color.x, flash.color.y, flash.color.z, 1.4f * flash.intensity }, false, DrawKind::GLOW);
+    }
+    for (const Anim::Particle& p : sequence.particles().particles()) {
+        const float size = p.size();
+        if (size <= 0.001f) continue;
+        const XMFLOAT3 color = p.color();
+        const XMMATRIX place = XMMatrixTranslation(p.position.x, p.position.y, p.position.z);
+        if (p.shape == Anim::Shape::STAR) add(m_star, XMMatrixScaling(size, size, size) * XMMatrixRotationY(p.angle) * place, { color.x, color.y, color.z, 1.0f }, false);
+        else add(m_cube, XMMatrixScaling(size, size, size) * XMMatrixRotationY(p.angle) * XMMatrixRotationX(p.angle * 0.7f) * place, { color.x, color.y, color.z, 1.0f }, false);
+    }
 }
 
 void Renderer3D::setObject(ID3D11DeviceContext* context, CXMMATRIX world, CXMMATRIX worldViewProj, const XMFLOAT4& tint) const {
@@ -1101,18 +1184,49 @@ void Renderer3D::drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) con
     ID3D11Buffer* vb = mesh.vertices.Get();
     const UINT offset = 0;
     context->IASetVertexBuffers(0, 1, &vb, &mesh.stride, &offset);
-    context->IASetIndexBuffer(mesh.indices.Get(), DXGI_FORMAT_R16_UINT, 0);
+    context->IASetIndexBuffer(mesh.indices.Get(), mesh.indexFormat, 0);
     context->DrawIndexed(mesh.indexCount, 0, 0);
 }
 
 // Dibuja todos los objetos del mundo con la cámara dada (la de la luz o la del jugador).
 void Renderer3D::drawAll(ID3D11DeviceContext* context, CXMMATRIX viewProj, bool shadowPass) const {
+    DrawKind bound = DrawKind::OPAQUE; // shader de píxeles activo (la pasada de sombras no usa ninguno)
     for (const Draw& draw : m_draws) {
-        if (shadowPass && !draw.castsShadow) continue;
+        if (draw.kind == DrawKind::GLOW) continue;
+        if (shadowPass) {
+            if (!draw.castsShadow) continue;
+        } else if (draw.kind != bound) {
+            context->PSSetShader(draw.kind == DrawKind::MODEL ? m_modelPixelShader.Get() : m_pixelShader.Get(), nullptr, 0);
+            bound = draw.kind;
+        }
+        if (!shadowPass && draw.kind == DrawKind::MODEL) {
+            ID3D11ShaderResourceView* texture = draw.texture;
+            context->PSSetShaderResources(1, 1, &texture);
+        }
         const XMMATRIX world = XMLoadFloat4x4(&draw.world);
         setObject(context, world, world * viewProj, draw.tint);
         drawIndexed(context, *draw.mesh);
     }
+    if (!shadowPass && bound != DrawKind::OPAQUE) context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
+}
+
+// Rayos, siluetas y destellos: se suman al color de lo que hay detrás.
+void Renderer3D::drawGlow(ID3D11DeviceContext* context, CXMMATRIX viewProj) const {
+    const float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    context->OMSetBlendState(m_additiveBlend.Get(), blendFactor, 0xFFFFFFFF);
+    context->OMSetDepthStencilState(m_waterDepth.Get(), 0);
+    context->RSSetState(m_noCull.Get());
+    context->VSSetShader(m_vertexShader.Get(), nullptr, 0);
+    context->PSSetShader(m_glowPixelShader.Get(), nullptr, 0);
+    for (const Draw& draw : m_draws) {
+        if (draw.kind != DrawKind::GLOW) continue;
+        const XMMATRIX world = XMLoadFloat4x4(&draw.world);
+        setObject(context, world, world * viewProj, draw.tint);
+        drawIndexed(context, *draw.mesh);
+    }
+    context->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFF);
+    context->OMSetDepthStencilState(nullptr, 0);
+    context->RSSetState(nullptr);
 }
 
 // Pasada de profundidad desde la luz. El suelo no proyecta sombra (solo la recibe).
@@ -1224,8 +1338,7 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     env.tide = scene.world.tide;
     env.underwater = scene.player.diving() && env.eye.y < scene.world.waterLevel(env.eye.x, env.eye.z);
     env.worldRadius = scene.habitats.radius();
-    const HabitatMap::Region* region = scene.habitats.regionAt(player.x, player.z);
-    m_darkness += ((region && region->dark() ? 1.0f : 0.0f) - m_darkness) * 0.08f;
+    m_darkness += (scene.habitats.darkness(player.x, player.z) - m_darkness) * 0.08f;
     env.darkness = m_darkness;
     m_eye = env.eye;
 
@@ -1256,7 +1369,9 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     ID3D11ShaderResourceView* shadowSrv = m_shadowSrv.Get();
     ID3D11SamplerState* shadowSampler = m_shadowSampler.Get();
     context->PSSetShaderResources(0, 1, &shadowSrv);
+    ID3D11SamplerState* modelSampler = m_modelSampler.Get();
     context->PSSetSamplers(0, 1, &shadowSampler);
+    context->PSSetSamplers(1, 1, &modelSampler);
     context->IASetInputLayout(m_inputLayout.Get());
     context->VSSetShader(m_vertexShader.Get(), nullptr, 0);
     context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
@@ -1266,10 +1381,20 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
 
     // 4. El agua, translúcida, encima de todo lo anterior.
     drawWater(context, viewProj);
+
+    // 5. Brillos aditivos (rayo de captura, destellos).
+    drawGlow(context, viewProj);
 }
 
 void Renderer3D::cleanup() {
     m_draws.clear();
+    m_models.clear();
+    m_ballModel = nullptr;
+    m_beam = {};
+    m_modelSampler.Reset();
+    m_additiveBlend.Reset();
+    m_glowPixelShader.Reset();
+    m_modelPixelShader.Reset();
     m_noCull.Reset();
     m_waterDepth.Reset();
     m_waterBlend.Reset();

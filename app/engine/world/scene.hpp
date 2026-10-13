@@ -56,7 +56,6 @@ struct Scene {
     static constexpr float AIM_STEP = 0.5f;           // paso de la marcha del rayo de apuntado contra el relieve
     static constexpr float TIDE_AMPLITUDE = 0.9f;     // la marea sube y baja esta altura (m) en el mar
     static constexpr float TIDE_PERIOD = 300.0f;      // segundos que dura un ciclo de marea
-    static constexpr float PORTAL_COOLDOWN = 1.0f;    // tras teletransportarse no se puede volver a usar enseguida
     static constexpr size_t MAX_BALLS = 12;
     static constexpr float MAX_SUBSTEP = 1.0f / 120.0f; // paso máximo de la física de los proyectiles
     static constexpr float NOTICE_TIME = 2.0f;
@@ -137,6 +136,7 @@ struct Scene {
         else if (input.lockTap) cycleLock();
         validateLock(dt);
 
+        camera.setSwimming(player.swimming());
         camera.update(dt, m_aiming);
         if (lockedTarget) camera.trackToward(player.body.position, lockedTarget->center(), dt);
         else camera.rotate(input.lookX, input.lookY);
@@ -152,8 +152,7 @@ struct Scene {
         player.aiming = m_aiming;
         InputState moveInput = input;
         if (fishing.hooked()) moveInput.crouch = moveInput.crouchHeld = false; // los botones de decidir (Liberar) no agachan
-        player.update(dt, moveInput, camera.yaw(), world);
-        m_portalCooldown = (std::max)(0.0f, m_portalCooldown - dt);
+        player.update(dt, moveInput, camera.yaw(), camera.lookAngle(), world);
 
         weather.update(dt);
         throwCooldown = (std::max)(0.0f, throwCooldown - dt);
@@ -162,6 +161,7 @@ struct Scene {
         if (m_throwDelay >= 0.0f && (m_throwDelay -= dt) < 0.0f) throwBall();
 
         for (CaptureTarget* target : wild.loaded()) {
+            target->watch(camera.yaw());
             const CaptureTarget::Event event = target->update(dt, world);
             if (event == CaptureTarget::Event::ESCAPED && wild.isHooked(target)) fishing.renewHook(); // sigue enganchado
             handleCaptureEvent(*target, event);
@@ -273,9 +273,6 @@ struct Scene {
         } else if (m_interaction.kind == Interaction::MACHINE) {
             s.interactVerb = USE_VERB;
             s.interactTarget = &MACHINE_NAME;
-        } else if (m_interaction.kind == Interaction::PORTAL) {
-            s.interactVerb = habitats.portals()[m_interaction.index].label.c_str();
-            s.interactTarget = &NO_TARGET;
         }
         if (m_aimTarget) {
             const CaptureTarget& t = *m_aimTarget;
@@ -309,11 +306,12 @@ struct Scene {
         s.showOxygen = player.diving() || player.exhausted() || !player.oxygenFull();
         const DirectX::XMFLOAT3 eye = camera.eye(p);
         s.underwater = player.diving() && eye.y < world.waterLevel(eye.x, eye.z);
-        s.dark = region && region->dark();
+        s.darkness = habitats.darkness(p.x, p.z);
+        s.layer = static_cast<int>(habitats.layerAt(p.x, p.z));
         s.climbing = player.climbing();
         s.swimming = player.swimming();
         s.diving = player.diving();
-        if (region) s.regionName = &m_data->habitats[region->habitat].name;
+        if (region && (!region->dark() || s.darkness > 0.5f)) s.regionName = &m_data->habitats[region->habitat].name;
         s.fishing = fishing.active();
         s.bobber = fishing.bobber();
         s.biteAlert = fishing.phase() == Fishing::Phase::BITING ? 1.0f - fishing.biteProgress() : 0.0f;
@@ -350,11 +348,9 @@ struct Scene {
                 if (m_castHint) add(PromptAction::INTERACT, "Pescar");
                 break;
         }
-        if (player.diving()) {
-            add(PromptAction::JUMP, "Subir");
-            add(PromptAction::CROUCH, "Bajar");
-        } else if (player.swimming() && world.waterDepth(player.body.position.x, player.body.position.z) >= Player::DIVE_MIN_DEPTH) {
-            add(PromptAction::CROUCH, "Bucear");
+        if (player.swimming() && !player.diving()) {
+            add(PromptAction::JUMP, "Saltar");
+            if (world.waterDepth(player.body.position.x, player.body.position.z) >= Player::DIVE_MIN_DEPTH) add(PromptAction::CROUCH, "Bucear");
         }
     }
 
@@ -392,10 +388,6 @@ struct Scene {
             case Interaction::NODE:    return nodeAnchor(nodes[m_interaction.index]);
             case Interaction::GROUND:  return above(groundItems.entities[m_interaction.index].body, 0.9f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
-            case Interaction::PORTAL: {
-                const HabitatMap::Portal& portal = habitats.portals()[m_interaction.index];
-                return { portal.x, world.surfaceHeight(portal.x, portal.z) + 2.0f, portal.z };
-            }
             default:                   return {};
         }
     }
@@ -718,15 +710,6 @@ struct Scene {
             best = d2;
             m_interaction = { Interaction::MACHINE, 0 };
         }
-        const std::vector<HabitatMap::Portal>& portals = habitats.portals();
-        for (size_t i = 0; i < portals.size(); ++i) {
-            const float dx = portals[i].x - player.body.position.x, dz = portals[i].z - player.body.position.z;
-            const float d2 = dx * dx + dz * dz;
-            if (m_portalCooldown <= 0.0f && d2 <= portals[i].radius * portals[i].radius && d2 < best) {
-                best = d2;
-                m_interaction = { Interaction::PORTAL, static_cast<int>(i) };
-            }
-        }
         if (const int i = nearestIn(nodes, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) {
             const ResourceNode& node = nodes[i];
             if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
@@ -747,7 +730,6 @@ struct Scene {
             player.act(PlayerAction::PICK);
             collect(groundItems.entities[m_interaction.index]);
         } else if (m_interaction.kind == Interaction::MACHINE) researchRequested = true;
-        else if (m_interaction.kind == Interaction::PORTAL) usePortal(habitats.portals()[m_interaction.index]);
         else if (m_interaction.kind == Interaction::NODE) {
             ResourceNode& node = nodes[m_interaction.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -756,17 +738,6 @@ struct Scene {
             player.act(skill ? PlayerActions::parse(skill->animation) : PlayerAction::PICK); // la animación de su herramienta; recoger una planta: agacharse
             workNode(node, true, tool ? inventory.skillSpeed(type.skillId) : 1.0f);
         }
-    }
-
-    // Pasa a otro punto del mundo (cueva, mina, isla del cielo...): el acompañante sale de nuevo de su pokéball allí.
-    void usePortal(const HabitatMap::Portal& portal) {
-        player.body.position = { portal.toX, world.surfaceHeight(portal.toX, portal.toZ) + 0.3f, portal.toZ };
-        player.body.velocity = { 0.0f, 0.0f, 0.0f };
-        player.body.onGround = false;
-        lockedTarget = nullptr;
-        endFishing(true);
-        m_shownUid = -1;
-        m_portalCooldown = PORTAL_COOLDOWN;
     }
 
     // Suma 'quantity' unidades de un objeto al inventario y lo anuncia.
@@ -1005,10 +976,11 @@ struct Scene {
                 if (ball.expired()) continue;
 
                 world.step(ball.body, h);
+                ball.roll(h);
                 ball.age += h;
                 for (CaptureTarget* target : wild.loaded()) {
                     if (!target->hitBy(ball.body.position, Pokeball::RADIUS + Pokeball::CONTACT_MARGIN)) continue;
-                    target->beginCapture(ball, CaptureRules::roll(chancePercent(*target, ball.captureMultiplier)));
+                    target->beginCapture(ball, CaptureRules::roll(chancePercent(*target, ball.captureMultiplier)), camera.yaw(), world);
                     ball.spent = true;
                     ball.age = Pokeball::LIFETIME; // la bola pasa a ser la de la animación de captura
                     break;
@@ -1028,7 +1000,7 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PORTAL } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE } kind = NONE;
         int index = -1;
     };
 
@@ -1042,7 +1014,6 @@ struct Scene {
     static constexpr const char* USE_VERB = "Usar";
     inline static const std::string GROUND_NAME = "objeto brillante";
     inline static const std::string MACHINE_NAME = "máquina de investigación";
-    inline static const std::string NO_TARGET;
     static constexpr float CAVE_TEMPERATURE = 12.0f;   // °C dentro de la cueva, la mina y la isla del cielo
     static constexpr float MINE_TEMPERATURE = 14.0f;
     static constexpr float SKY_TEMPERATURE = 8.0f;
@@ -1052,7 +1023,6 @@ struct Scene {
     float m_cascadeTime = 0.0f; // segundos que lleva el jugador en una cascada con un pokémon que la remonta
     static constexpr float CASCADE_RANGE = 5.0f;
     static constexpr float CASCADE_TIME = 3.0f;
-    float m_portalCooldown = 0.0f;
     float m_throwDelay = -1.0f; // >= 0: lanzando (la bola sale al llegar a 0)
     int m_fishSkill = -1;       // habilidad de pesca (la de la animación FISH)
     bool m_castHint = false;    // se puede lanzar la caña aquí

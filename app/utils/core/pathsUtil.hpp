@@ -42,6 +42,13 @@ class PathsUtil {
     static constexpr const wchar_t* LATEST_ZIP_URL = L"https://github.com/Pascualinbbp/Pokemon-Edge/releases/latest/download/PokemonEdge.zip";
     static constexpr const wchar_t* POWERSHELL_EXE = L"powershell.exe";
 
+    // --- Assets incrustados en el ejecutable (rutas dentro de assets/) ---
+    static constexpr const char* MODELS_ASSET_DIR = "models";
+    // Modelo 3D por nombre: assets/models/<nombre>/<nombre>.glb
+    static std::string modelAssetPath(const std::string& name) {
+        return std::string(MODELS_ASSET_DIR) + "/" + name + "/" + name + ".glb";
+    }
+
     // Archivo de una ranura de partida (slot empieza en 0): slot1.json, slot2.json...
     static fs::path saveSlotPath(int slot) {
         return SAVE_DIR / ("slot" + std::to_string(slot + 1) + ".json");

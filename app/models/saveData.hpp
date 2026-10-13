@@ -5,7 +5,24 @@
 #include <vector>
 
 // Datos persistidos de una partida. Se irá ampliando a medida que avance el juego.
+// Un pokémon del equipo tal como se enseña en la lista de partidas.
+struct SaveTeamMember {
+    int speciesId = 0;
+    int level = 1;
+    bool shiny = false;
+};
+
+// Datos que enseña la lista de partidas guardadas (se guardan aparte para no tener que cargar la partida entera).
+struct SaveSummary {
+    std::vector<SaveTeamMember> team;
+    int playerLevel = 1;
+    int badges = 0;
+    int money = 0;
+    int dexCaught = 0;
+};
+
 struct SaveData {
+    SaveSummary summary;
     std::array<float, 3> playerPosition = { 0.0f, 0.0f, 0.0f };
     unsigned worldSeed = 0;  // semilla del mapa de hábitats; 0 = sin dato (partidas antiguas: se genera uno nuevo)
     float worldTime = -1.0f; // segundos dentro del ciclo día/noche; negativo = sin dato (se usa el inicio por defecto)
@@ -29,4 +46,6 @@ struct SaveData {
 struct SaveSlotInfo {
     bool used = false;
     std::string savedAtText; // fecha y hora ya formateadas (se calculan al guardar, no en cada frame)
+    SaveSummary summary;     // equipo, nivel, medallas...: vacío en partidas guardadas antes de existir el resumen
+    bool hasSummary = false;
 };

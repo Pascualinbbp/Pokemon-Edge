@@ -59,9 +59,12 @@ class SaveManager {
         j["player"]["level"] = data.playerLevel;
         j["player"]["xp"] = data.playerXp;
         j["player"]["badges"] = data.badges;
+        json team = json::array();
+        for (const SaveTeamMember& member : data.summary.team) team.push_back({ { "id", member.speciesId }, { "level", member.level }, { "shiny", member.shiny } });
+        j["summary"] = { { "team", team }, { "level", data.summary.playerLevel }, { "badges", data.summary.badges }, { "money", data.summary.money }, { "caught", data.summary.dexCaught } };
 
         if (!JsonUtil::saveToFile(PathsUtil::saveSlotPath(slot), j)) return false;
-        s_slots[slot] = { true, TimeUtil::formatLocal(now) };
+        s_slots[slot] = { true, TimeUtil::formatLocal(now), data.summary, true };
         return true;
     }
 
@@ -123,6 +126,18 @@ class SaveManager {
         // Si el archivo está dañado la ranura sigue contando como ocupada, solo que sin fecha.
         const json j = JsonUtil::loadFromFile(path);
         const long long savedAt = JsonUtil::find<long long>(j, { "savedAt" }).value_or(0);
-        s_slots[slot] = { true, TimeUtil::formatLocal(static_cast<std::time_t>(savedAt)) };
+        SaveSlotInfo info{ true, TimeUtil::formatLocal(static_cast<std::time_t>(savedAt)), {}, false };
+        if (j.contains("summary") && j["summary"].is_object()) {
+            const json& summary = j["summary"];
+            info.hasSummary = true;
+            info.summary.playerLevel = summary.value("level", 1);
+            info.summary.badges = summary.value("badges", 0);
+            info.summary.money = summary.value("money", 0);
+            info.summary.dexCaught = summary.value("caught", 0);
+            if (summary.contains("team") && summary["team"].is_array()) {
+                for (const json& member : summary["team"]) info.summary.team.push_back({ member.value("id", 0), member.value("level", 1), member.value("shiny", false) });
+            }
+        }
+        s_slots[slot] = info;
     }
 };

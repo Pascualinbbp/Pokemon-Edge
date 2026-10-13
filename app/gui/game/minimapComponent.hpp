@@ -106,7 +106,7 @@ namespace MinimapComponent {
         const int firstRow = (std::max)(Exploration::cellOf(status.playerZ - VIEW), 0), lastRow = (std::min)(Exploration::cellOf(status.playerZ + VIEW), Exploration::SIZE - 1);
         for (int row = firstRow; row <= lastRow; ++row) {
             for (int col = firstCol; col <= lastCol; ++col) {
-                if (!terrain.valid[static_cast<size_t>(row) * Exploration::SIZE + col]) continue; // fuera del mundo: se ve el fondo
+                if (!MapTerrain::shown(terrain, static_cast<size_t>(row) * Exploration::SIZE + col, status.layer)) continue; // fuera del mundo o de esta capa: se ve el fondo
                 const ImVec2 corner = toScreen(Exploration::centerOf(col) - Exploration::CELL * 0.5f, Exploration::centerOf(row) + Exploration::CELL * 0.5f);
                 const float dx = corner.x + cell * 0.5f - mid.x, dy = corner.y + cell * 0.5f - mid.y;
                 if (dx * dx + dy * dy > (RADIUS - 1.0f) * (RADIUS - 1.0f)) continue;

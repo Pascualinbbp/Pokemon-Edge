@@ -15,7 +15,16 @@ namespace MapTerrain {
         std::vector<ImU32> colors;
         std::vector<signed char> habitat; // hábitat dominante de la celda (-1 = ninguno)
         std::vector<unsigned char> valid; // 1 = la celda es mundo jugable (el archipiélago o una región); el resto no se dibuja
+        std::vector<unsigned char> layer; // capa de la celda (HabitatMap::Layer)
     };
+
+    inline constexpr const char* LAYER_NAMES[HabitatMap::LAYERS] = { "Subsuelo", "Superficie", "Cielo" };
+
+    // ¿Se dibuja la celda en esa capa? La superficie incluye las montañas con cueva o mina encima; el subsuelo y el cielo solo lo suyo.
+    inline bool shown(const Data& data, size_t index, int layer) {
+        if (!data.valid[index]) return false;
+        return layer == HabitatMap::SURFACE ? data.layer[index] != HabitatMap::SKY : data.layer[index] == layer;
+    }
 
     inline const Data& get(const GameStatus& status) {
         static Data data;
@@ -28,6 +37,7 @@ namespace MapTerrain {
         data.colors.assign(cells, IM_COL32(40, 60, 40, 255));
         data.habitat.assign(cells, -1);
         data.valid.assign(cells, 0);
+        data.layer.assign(cells, static_cast<unsigned char>(HabitatMap::SURFACE));
 
         std::vector<DirectX::XMFLOAT3> colors;
         for (const Habitat& habitat : status.data->habitats) colors.push_back(HabitatStyle::color(habitat.name));
@@ -37,6 +47,7 @@ namespace MapTerrain {
                 const size_t index = static_cast<size_t>(row) * Exploration::SIZE + col;
                 if (!map.playable(Exploration::centerOf(col), Exploration::centerOf(row))) continue;
                 data.valid[index] = 1;
+                data.layer[index] = static_cast<unsigned char>(map.layerAt(Exploration::centerOf(col), Exploration::centerOf(row)));
                 map.weights(Exploration::centerOf(col), Exploration::centerOf(row), weights);
                 if (weights.empty()) continue;
                 float r = 0.0f, g = 0.0f, b = 0.0f, best = -1.0f;
@@ -50,8 +61,14 @@ namespace MapTerrain {
                     }
                 }
                 const float height = map.height(Exploration::centerOf(col), Exploration::centerOf(row));
-                const float shade = height > 0.0f ? 0.8f + 0.35f * (std::min)(height / 16.0f, 1.0f) : 1.0f; // la tierra alta se ve más clara
-                const float snow = (std::clamp)((height - HabitatMap::SNOW_LINE) / 6.0f, 0.0f, 1.0f); // las cumbres nevadas se ven blancas
+                float shade = height > 0.0f ? 0.8f + 0.35f * (std::min)(height / 16.0f, 1.0f) : 1.0f; // la tierra alta se ve más clara
+                if (data.layer[index] == HabitatMap::UNDERGROUND) { // bajo tierra: el suelo claro y las paredes de roca oscuras
+                    const HabitatMap::Region* region = map.regionAt(Exploration::centerOf(col), Exploration::centerOf(row));
+                    shade = region && height - region->floorY < 4.0f ? 1.25f : 0.45f;
+                } else if (data.layer[index] == HabitatMap::SKY) {
+                    shade = 1.0f; // sin relieve de montaña ni nieve a esa altura
+                }
+                const float snow = data.layer[index] == HabitatMap::SURFACE ? (std::clamp)((height - HabitatMap::SNOW_LINE) / 6.0f, 0.0f, 1.0f) : 0.0f; // las cumbres nevadas se ven blancas
                 const auto mix = [&](float c) { return (std::min)(255, int((c * shade * (1.0f - snow) + snow * 0.95f) * 255)); };
                 data.colors[index] = IM_COL32(mix(r), mix(g), mix(b), 255);
             }

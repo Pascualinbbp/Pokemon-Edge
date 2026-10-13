@@ -55,7 +55,7 @@ namespace HudComponent {
             }
         }
 
-        // Ayuda para interactuar, sobre lo que se interactúa (cofre, recurso, portal...), y aviso de lo que falta.
+        // Ayuda para interactuar, sobre lo que se interactúa (cofre, recurso...), y aviso de lo que falta.
         inline void drawWorldPrompts(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             ImVec2 at;
             if (status.interactVerb && status.interactTarget && project(status, status.interactPos, at)) {
@@ -106,7 +106,7 @@ namespace HudComponent {
         inline void drawTint(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
             if (status.underwater) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(20, 70, 120, 110));
-            if (status.dark) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(0, 0, 0, 120)); // cueva y mina: oscuras
+            if (status.darkness > 0.0f) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(0, 0, 0, static_cast<int>(120.0f * status.darkness))); // cueva y mina: oscuras
         }
 
         // Aviso de autoguardado (esquina inferior derecha): panel translúcido con el contorno de una pokéball

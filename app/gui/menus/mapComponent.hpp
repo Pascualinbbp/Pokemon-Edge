@@ -86,6 +86,8 @@ namespace MapComponent {
         }
 
         inline int g_selected = -1; // hábitat elegido en la lista
+        inline int g_layer = -1;    // capa que se ve (-1 = la del jugador)
+        inline int g_playerLayer = -1; // capa en la que estaba el jugador la última vez: al cambiar, el mapa la sigue
     }
 
     // ESC o el botón de volver devuelven a donde se abrió (juego o pausa).
@@ -100,6 +102,8 @@ namespace MapComponent {
         if (GuiInput::backPressed()) state = back;
         if (!status.habitatMap || !status.data || !status.exploration) return;
 
+        if (g_layer < 0 || status.layer != g_playerLayer) g_layer = status.layer;
+        g_playerLayer = status.layer;
         const MapTerrain::Data& terrain = MapTerrain::get(status);
         const Exploration& explored = *status.exploration;
         const GameData& data = *status.data;
@@ -128,7 +132,7 @@ namespace MapComponent {
         const float cell = side / static_cast<float>(cells);
         for (int row = 0; row < cells; ++row) {
             for (int col = 0; col < cells; ++col) {
-                if (!terrain.valid[static_cast<size_t>(row) * cells + col]) continue; // el mapa solo dibuja el archipiélago y las regiones
+                if (!MapTerrain::shown(terrain, static_cast<size_t>(row) * cells + col, g_layer)) continue; // solo la capa elegida
                 const bool seen = explored.seen(col, row);
                 if (!seen) {
                     if (((row + col) & 1) == 0) continue; // tablero tenue: la zona oculta no es un bloque liso
@@ -152,13 +156,31 @@ namespace MapComponent {
             dl->AddRectFilled(lo, hi, IM_COL32(60, 52, 48, 255));
             dl->AddRect(lo, hi, IM_COL32(0, 0, 0, 220), 0.0f, 0, 1.0f);
         }
-        const ImVec2 me = toScreen(status.playerX, status.playerZ);
-        const float dirX = std::sin(status.playerYaw), dirY = -std::cos(status.playerYaw);
-        const ImVec2 tip(me.x + dirX * 11.0f, me.y + dirY * 11.0f);
-        const ImVec2 left(me.x - dirY * 7.0f - dirX * 6.0f, me.y + dirX * 7.0f - dirY * 6.0f);
-        const ImVec2 right(me.x + dirY * 7.0f - dirX * 6.0f, me.y - dirX * 7.0f - dirY * 6.0f);
-        dl->AddTriangleFilled(tip, left, right, IM_COL32(255, 255, 255, 255));
-        dl->AddTriangle(tip, left, right, IM_COL32(0, 0, 0, 230), 2.0f);
+        if (g_layer == status.layer) {
+            const ImVec2 me = toScreen(status.playerX, status.playerZ);
+            const float dirX = std::sin(status.playerYaw), dirY = -std::cos(status.playerYaw);
+            const ImVec2 tip(me.x + dirX * 11.0f, me.y + dirY * 11.0f);
+            const ImVec2 left(me.x - dirY * 7.0f - dirX * 6.0f, me.y + dirX * 7.0f - dirY * 6.0f);
+            const ImVec2 right(me.x + dirY * 7.0f - dirX * 6.0f, me.y - dirX * 7.0f - dirY * 6.0f);
+            dl->AddTriangleFilled(tip, left, right, IM_COL32(255, 255, 255, 255));
+            dl->AddTriangle(tip, left, right, IM_COL32(0, 0, 0, 230), 2.0f);
+        }
+
+        // Selector de capa (arriba, junto al título).
+        float layerX = MARGIN + 260.0f;
+        for (int layer = HabitatMap::LAYERS - 1; layer >= 0; --layer) {
+            const char* name = MapTerrain::LAYER_NAMES[layer];
+            const float w = GuiCards::textWidth(name, 0.95f) + 28.0f;
+            ImGui::SetCursorScreenPos(ImVec2(layerX, MARGIN - 6.0f));
+            ImGui::PushID(layer);
+            const bool clicked = ImGui::InvisibleButton("##layer", ImVec2(w, 30.0f));
+            const bool hovered = ImGui::IsItemHovered();
+            ImGui::PopID();
+            if (clicked) g_layer = layer;
+            dl->AddRectFilled(ImVec2(layerX, MARGIN - 6.0f), ImVec2(layerX + w, MARGIN + 24.0f), layer == g_layer ? IM_COL32(70, 90, 160, 235) : hovered ? IM_COL32(60, 64, 90, 235) : IM_COL32(44, 46, 66, 225), 15.0f);
+            GuiCards::text(dl, ImVec2(layerX + 14.0f, MARGIN), IM_COL32(255, 255, 255, 255), name, 0.95f);
+            layerX += w + 8.0f;
+        }
 
         // Panel de información.
         const ImVec2 pa(b.x + 24.0f, a.y - 6.0f), pb(screen.x - MARGIN, b.y + 6.0f);
