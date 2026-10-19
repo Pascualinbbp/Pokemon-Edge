@@ -44,8 +44,9 @@ class PathsUtil {
 
     // --- Assets incrustados en el ejecutable (rutas dentro de assets/) ---
     static constexpr const char* MODELS_ASSET_DIR = "models";
-    // Modelo 3D por nombre: assets/models/<nombre>/<nombre>.glb
+    // Modelo 3D por nombre: assets/models/<nombre>/<nombre>.glb o, si el nombre lleva carpeta ("pokeball/starterball"), assets/models/<nombre>.glb
     static std::string modelAssetPath(const std::string& name) {
+        if (name.find('/') != std::string::npos) return std::string(MODELS_ASSET_DIR) + "/" + name + ".glb";
         return std::string(MODELS_ASSET_DIR) + "/" + name + "/" + name + ".glb";
     }
 

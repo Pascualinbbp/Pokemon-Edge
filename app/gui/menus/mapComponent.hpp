@@ -113,8 +113,10 @@ namespace MapComponent {
         std::vector<bool> found(data.habitats.size(), false);
         for (int row = 0; row < cells; ++row) {
             for (int col = 0; col < cells; ++col) {
-                const int habitat = terrain.habitat[static_cast<size_t>(row) * cells + col];
-                if (habitat >= 0 && habitat < static_cast<int>(found.size()) && explored.seen(col, row)) found[habitat] = true;
+                const size_t index = static_cast<size_t>(row) * cells + col;
+                for (const int habitat : { static_cast<int>(terrain.habitat[index]), static_cast<int>(terrain.deepHabitat[index]) }) {
+                    if (habitat >= 0 && habitat < static_cast<int>(found.size()) && explored.seen(col, row)) found[habitat] = true;
+                }
             }
         }
         if (g_selected < 0 || g_selected >= static_cast<int>(found.size()) || !found[g_selected]) {
@@ -140,8 +142,8 @@ namespace MapComponent {
                     continue;
                 }
                 const size_t index = static_cast<size_t>(row) * cells + col;
-                ImU32 color = terrain.colors[index];
-                if (g_selected >= 0 && terrain.habitat[index] != g_selected) color = IM_COL32(((color >> IM_COL32_R_SHIFT) & 0xFF) * 6 / 10, ((color >> IM_COL32_G_SHIFT) & 0xFF) * 6 / 10, ((color >> IM_COL32_B_SHIFT) & 0xFF) * 6 / 10, 255); // los demás hábitats, atenuados
+                ImU32 color = MapTerrain::color(terrain, index, g_layer);
+                if (g_selected >= 0 && MapTerrain::habitat(terrain, index, g_layer) != g_selected) color = IM_COL32(((color >> IM_COL32_R_SHIFT) & 0xFF) * 6 / 10, ((color >> IM_COL32_G_SHIFT) & 0xFF) * 6 / 10, ((color >> IM_COL32_B_SHIFT) & 0xFF) * 6 / 10, 255); // los demás hábitats, atenuados
                 dl->AddRectFilled(ImVec2(a.x + col * cell, b.y - (row + 1) * cell), ImVec2(a.x + (col + 1) * cell + 0.5f, b.y - row * cell + 0.5f), color);
             }
         }

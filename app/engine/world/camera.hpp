@@ -95,10 +95,19 @@ class Camera {
         return eyePos;
     }
 
-    DirectX::XMMATRIX viewMatrix(const DirectX::XMFLOAT3& target, float minEyeY = -1.0e9f) const {
+    // Punto al que mira la cámara.
+    DirectX::XMFLOAT3 focus(const DirectX::XMFLOAT3& target) const {
         DirectX::XMFLOAT3 at, eyePos;
         compute(target, at, eyePos);
-        eyePos.y = (std::max)(eyePos.y, minEyeY);
+        return at;
+    }
+
+    // pull: fracción (0..1) de la distancia normal a la que queda la cámara (menos de 1 cuando una pared se interpone).
+    DirectX::XMMATRIX viewMatrix(const DirectX::XMFLOAT3& target, float minEyeY = -1.0e9f, float maxEyeY = 1.0e9f, float pull = 1.0f) const {
+        DirectX::XMFLOAT3 at, eyePos;
+        compute(target, at, eyePos);
+        eyePos = { at.x + (eyePos.x - at.x) * pull, at.y + (eyePos.y - at.y) * pull, at.z + (eyePos.z - at.z) * pull };
+        eyePos.y = (std::min)((std::max)(eyePos.y, minEyeY), maxEyeY);
         return DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&eyePos), DirectX::XMLoadFloat3(&at), DirectX::g_XMIdentityR1);
     }
 

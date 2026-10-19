@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 #include "worldNoise.hpp"
+#include "underground.hpp"
 #include "../../physics/physicsWorld.hpp"
 #include "../../../models/gameData.hpp"
 
@@ -17,9 +18,9 @@
 //    corte: cada hábitat tiene un peso que baja suavemente al alejarse, así el relieve pasa gradualmente (montaña → bosque → pradera → playa).
 //  - Hay lagos (en cuencas con su propio nivel de agua), ríos que bajan de las montañas al mar, con una cascada en el primer tramo
 //    (aguas arriba: río y lago "altos"), y charcas dentro de los pantanos.
-//  - Sin portales ni pantallas de carga: la cueva y la mina son recintos de roca dentro de una montaña, con una bocana por la que
-//    se entra andando; la isla del cielo flota más allá del archipiélago y se llega a ella por la Corriente Ascendente del mar.
-//    La isla del cielo tiene suelo de nube, islotes de tierra y mar de nubes (agua de nube).
+//  - Sin portales ni pantallas de carga: las cuevas y minas (muchas, de todos los tamaños) se extienden BAJO el terreno (Underground) y
+//    se entra andando por una boca tallada en una ladera; las islas del cielo (también de varios tamaños) son islas de nube en las
+//    nubes, más allá del archipiélago, y se llega a ellas por una Corriente Ascendente del mar.
 // Todo se calcula una vez en mallas (Physics::Heightfield) que la física, el render y el minimapa consultan.
 class HabitatMap {
     public:
@@ -36,12 +37,10 @@ class HabitatMap {
     static constexpr int LOBES = 4;
     static constexpr float LOBE_AMPLITUDE[LOBES] = { 0.20f, 0.14f, 0.10f, 0.06f };
     static constexpr int LOBE_HARMONIC[LOBES] = { 2, 3, 5, 8 };
-    static constexpr float ROCK_HEIGHT = 28.0f;    // altura de las paredes de roca de cueva y mina sobre su suelo
-    static constexpr float MOUTH_FADE = 16.0f;     // tramo en que el recinto se funde con la montaña (la bocana)
-    static constexpr float LANE_RAMP = 14.0f;      // tramo, pasada la bocana, en que el pasillo vuelve a la altura de la ladera
-    static constexpr float LANE_WIDTH = 5.0f;      // semianchura del pasillo de entrada
     static constexpr float STREAM_RADIUS = 6.0f;   // radio de la Corriente Ascendente
     static constexpr float STREAM_CLIMB = 26.0f;   // metros sobre el suelo de nube hasta los que sube la corriente
+    static constexpr float DARK_DEPTH = 14.0f;     // roca (m) sobre los pies desde la que la oscuridad es total
+    static constexpr float MAX_WORLD_RADIUS = 322.0f; // radio máximo del archipiélago (el resto de la malla es mar y las islas del cielo)
     static constexpr float SKY_VOID = -100.0f;     // altura de lo que no existe alrededor de la isla del cielo (no se dibuja)
 
     struct Zone {
@@ -51,15 +50,18 @@ class HabitatMap {
         float altitude = 3.0f;
         float roughness = 0.5f;
         float lobe[LOBES] = {};
+        bool deep = false; // zona subterránea (sistema de cueva o mina)
     };
 
-    // Región especial: cueva y mina (recinto de roca en una montaña, con una bocana en (mouthX, mouthZ)) o isla del cielo.
+    // Región especial: sistema de cueva o mina (bajo tierra, con su boca en (mouthX, mouthZ)) o isla del cielo.
     struct Region {
         int habitat = 0;
         HabitatPlacement kind = HabitatPlacement::CAVE;
         float x = 0.0f, z = 0.0f, radius = 60.0f;
-        float mouthX = 0.0f, mouthZ = 0.0f, dirX = 1.0f, dirZ = 0.0f; // bocana y dirección hacia ella (solo cueva y mina)
-        float floorY = 0.0f;                                           // altura del suelo
+        float mouthX = 0.0f, mouthZ = 0.0f, dirX = 1.0f, dirZ = 0.0f; // boca y dirección hacia dentro (solo cueva y mina)
+        float floorY = 0.0f;                                           // altura del suelo (en la boca, en cueva y mina; en el cielo, la del suelo de nube)
+        float floorRadius = 0.0f, seaRadius = 0.0f;                    // isla del cielo: radio del suelo de nube y del mar de nubes (radius incluye además el talud)
+        float lobe[LOBES] = {};                                        // isla del cielo: fases del contorno irregular
         bool dark() const { return kind == HabitatPlacement::CAVE || kind == HabitatPlacement::MINE; }
         Layer layer() const { return kind == HabitatPlacement::SKY ? SKY : UNDERGROUND; }
     };
@@ -74,6 +76,8 @@ class HabitatMap {
         m_skyZones.clear();
         m_updrafts.clear();
         m_islands.clear();
+        m_hallHabitats.clear();
+        m_deepWater = -1;
         m_basins.clear();
         m_bandHabitat.clear();
         for (int& index : m_waterHabitat) index = -1;
@@ -98,6 +102,7 @@ class HabitatMap {
     // Lugares donde pueden salir cofres: las zonas de tierra y las regiones.
     const std::vector<Zone>& chestSites() const { return m_sites; }
     const std::vector<Region>& regions() const { return m_regions; }
+    const Underground& under() const { return m_under; }
     const std::vector<Zone>& skyZones() const { return m_skyZones; }
     const std::vector<Physics::World::Updraft>& updrafts() const { return m_updrafts; }
     int habitatCount() const { return m_habitats; }
@@ -125,28 +130,28 @@ class HabitatMap {
     // Región en la que está el punto (nullptr = mundo principal).
     const Region* regionAt(float x, float z) const {
         for (const Region& r : m_regions) {
+            if (r.dark()) continue; // cuevas y minas no ocupan la superficie
             const float dx = x - r.x, dz = z - r.z;
-            if (dx * dx + dz * dz < (r.radius + 8.0f) * (r.radius + 8.0f)) return &r;
+            const float shape = skyShape(r, dx, dz);
+            if (dx * dx + dz * dz < (r.radius * shape + 8.0f) * (r.radius * shape + 8.0f)) return &r;
         }
         return nullptr;
     }
 
-    // Oscuridad (0..1) en un punto: total dentro de la cueva o la mina y se desvanece por el pasillo de entrada hasta la bocana.
-    float darkness(float x, float z) const {
-        float dark = 0.0f;
-        for (const Region& r : m_regions) {
-            if (!r.dark()) continue;
-            const float dx = x - r.x, dz = z - r.z;
-            dark = (std::max)(dark, 1.0f - smooth(r.radius - 2.0f, r.radius + MOUTH_FADE - 2.0f, std::sqrt(dx * dx + dz * dz)));
-        }
-        return dark;
-    }
+    // Capa del mapa en la que está el punto de la superficie: el cielo (islas de nube) o la superficie.
+    Layer surfaceLayerAt(float x, float z) const { return regionAt(x, z) ? SKY : SURFACE; }
 
-    // Capa del mapa en la que está el punto.
-    Layer layerAt(float x, float z) const {
-        const Region* region = regionAt(x, z);
-        if (!region) return SURFACE;
-        return region->kind == HabitatPlacement::SKY ? SKY : (darkness(x, z) > 0.5f ? UNDERGROUND : SURFACE);
+    // Capa del mapa de quien está en (x, z) a la altura 'feet': bajo tierra (galería), el cielo o la superficie.
+    Layer layerAt(float x, float z, float feet) const { return m_under.under(x, z, feet) ? UNDERGROUND : surfaceLayerAt(x, z); }
+    // Oscuridad (0..1) de quien está en (x, z) a la altura 'feet': crece con la roca que tiene encima, así entrar es gradual.
+    float darkness(float x, float z, float feet) const {
+        if (!m_under.under(x, z, feet)) return 0.0f;
+        return smooth(0.5f, DARK_DEPTH, m_ground.sample(x, z) - feet);
+    }
+    // Sistema de cueva o mina que contiene el punto (nullptr = ninguno).
+    const Underground::System* systemAt(float x, float z) const {
+        for (const Underground::System& s : m_under.systems()) if (x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ && m_under.cell(x, z)) return &s;
+        return nullptr;
     }
 
     // Tipo de agua dulce o marina en el nodo más cercano (DRY = no hay).
@@ -178,14 +183,19 @@ class HabitatMap {
     }
 
     // Peso de cada hábitat en (x, z): suman 1. Vacío si no hay hábitats.
-    void weights(float x, float z, std::vector<float>& out) const {
+    // Con 'underground' el punto es de la galería que hay bajo (x, z), no de la superficie.
+    void weights(float x, float z, std::vector<float>& out, bool underground = false) const {
         out.assign(m_habitats, 0.0f);
+        if (underground) {
+            const int h = m_under.habitatAt(x, z);
+            if (h >= 0 && h < m_habitats) out[h] = 1.0f;
+            return;
+        }
         if (m_zones.empty() && m_regions.empty()) return;
         const float g = m_ground.sample(x, z);
         const Water kind = waterKind(x, z);
         const float depth = m_surface.sample(x, z) - g;
         if (const Region* region = regionAt(x, z)) {
-            if (region->kind != HabitatPlacement::SKY) { out[region->habitat] = 1.0f; return; }
             if (kind == CLOUD && depth > WET && m_waterHabitat[CLOUD] >= 0) { out[m_waterHabitat[CLOUD]] = 1.0f; return; }
             float land = 0.0f; // islotes de tierra sobre el suelo de nube
             int landHabitat = -1;
@@ -218,9 +228,9 @@ class HabitatMap {
     }
 
     // Índice del hábitat que más pesa en (x, z) (-1 si no hay hábitats).
-    int dominant(float x, float z) const {
+    int dominant(float x, float z, bool underground = false) const {
         std::vector<float> w;
-        weights(x, z, w);
+        weights(x, z, w, underground);
         return w.empty() ? -1 : static_cast<int>(std::max_element(w.begin(), w.end()) - w.begin());
     }
 
@@ -232,14 +242,21 @@ class HabitatMap {
         world.flowX = m_flowX;
         world.flowZ = m_flowZ;
         world.archipelago = { 0.0f, 0.0f, m_worldRadius };
-        world.regions.clear(); // solo la isla del cielo limita al jugador: cueva y mina están dentro del archipiélago
-        for (const Region& region : m_regions) if (!region.dark()) world.regions.push_back({ region.x, region.z, region.radius, region.radius + SKY_TRIGGER });
+        world.caveFloor = m_under.floorField();
+        world.caveCeil = m_under.ceilField();
+        world.caveWater = m_under.waterField();
+        world.caveRects.clear();
+        for (const Underground::System& system : m_under.systems()) world.caveRects.push_back({ system.minX - 4.0f, system.maxX + 4.0f, system.minZ - 4.0f, system.maxZ + 4.0f });
+        world.regions.clear(); // solo las islas del cielo limitan al jugador: cuevas y minas están dentro del archipiélago
+        for (const Region& region : m_regions) if (!region.dark()) world.regions.push_back({ region.x, region.z, region.radius * 1.35f + SKY_EXIT, region.radius * 1.35f + SKY_EXIT + SKY_TRIGGER, region.floorY - SKY_FALL });
         world.updrafts = m_updrafts;
     }
 
     private:
     static constexpr int MAX_ZONES = 160;
     static constexpr float SKY_TRIGGER = 14.0f; // a menos de esto fuera del borde de la isla del cielo, el jugador queda dentro de ella
+    static constexpr float SKY_EXIT = 6.0f;     // margen más allá del talud: el jugador puede salir del suelo de nube y caer
+    static constexpr float SKY_FALL = 70.0f;    // por debajo de esta altura bajo el suelo de nube deja de pertenecer a la isla
     static constexpr float WET = 0.25f; // con menos agua que esto cuenta como orilla/tierra
 
     struct Island { float x, z, r, ox, oz, phase1, phase2; };
@@ -273,6 +290,8 @@ class HabitatMap {
                 case HabitatPlacement::POND: m_waterHabitat[POND] = h; break;
                 case HabitatPlacement::PEAK: m_peakHabitat = h; break;
                 case HabitatPlacement::SKY_SEA: m_waterHabitat[CLOUD] = h; break;
+                case HabitatPlacement::HALL: m_hallHabitats.push_back(h); break;
+                case HabitatPlacement::UNDERGROUND_WATER: if (m_deepWater < 0) m_deepWater = h; break;
                 case HabitatPlacement::BESIDE: {
                     const int host = data.habitatIndex(habitat.besideId);
                     const bool river = host >= 0 && (data.habitats[host].placement == HabitatPlacement::RIVER || data.habitats[host].placement == HabitatPlacement::UPPER_RIVER);
@@ -315,7 +334,7 @@ class HabitatMap {
             area += zones * 3.14159f * r * r * 0.5f * (habitat.minStretch + habitat.maxStretch);
         }
         const float mainRadius = (std::clamp)(std::sqrt(area * 0.8f / 3.14159f) * 1.05f, 140.0f, 195.0f);
-        m_worldRadius = (std::min)(mainRadius * 2.05f, Physics::World::HALF_SIZE - 62.0f);
+        m_worldRadius = (std::min)(mainRadius * 2.05f, MAX_WORLD_RADIUS);
         m_islands.push_back({ 0.0f, 0.0f, mainRadius, between(0, 100), between(0, 100), between(0, 6.28f), between(0, 6.28f) });
         const int satellites = (std::clamp)(static_cast<int>(mainRadius / 28.0f), 3, 8);
         for (int i = 0, tries = 0; i < satellites && tries < 400; ++tries) {
@@ -789,64 +808,71 @@ class HabitatMap {
     static float averageRadius(const Habitat& habitat) { return 0.5f * (habitat.minRadius + habitat.maxRadius); }
 
     void buildRegions(const GameData& data) {
+        m_under.init(m_ground);
         for (const HabitatPlacement kind : { HabitatPlacement::CAVE, HabitatPlacement::MINE }) {
-            for (int h = 0; h < m_habitats; ++h) if (data.habitats[h].placement == kind) buildEnclosure(data, h, kind);
+            for (int h = 0; h < m_habitats; ++h) {
+                if (data.habitats[h].placement != kind) continue;
+                const int count = betweenInt(data.habitats[h].minZones, data.habitats[h].maxZones);
+                for (int i = 0; i < count; ++i) buildSystem(data, h, kind);
+            }
         }
-        for (int h = 0; h < m_habitats; ++h) if (data.habitats[h].placement == HabitatPlacement::SKY) buildSky(data, h);
+        buildSky(data);
     }
 
-    // Recinto de roca (cueva o mina) en una montaña: se elige un sitio alto y seco de la isla principal, lejos del inicio y de otras regiones.
-    void buildEnclosure(const GameData& data, int habitat, HabitatPlacement kind) {
-        Region region;
-        region.habitat = habitat;
-        region.kind = kind;
-        region.radius = averageRadius(data.habitats[habitat]);
-        const float R = region.radius;
-        float bestScore = -1.0e9f;
-        for (const float tier : { 1.0f, 0.7f, 0.4f, 0.1f }) { // si no hay sitio ideal, se relajan las condiciones poco a poco
-            for (int i = 0; i < 600; ++i) {
-                const Island& island = m_islands.front();
-                const float a = between(0.0f, 6.2831853f), r = std::sqrt(between(0.0f, 1.0f)) * island.r * 0.9f;
+    // Un sistema de cuevas o minas: la boca se elige en una ladera de la isla principal (mejor cuanto más empinada), lejos de la costa, del
+    // inicio y de otros sistemas; las galerías (Underground) se extienden hacia dentro de la montaña.
+    void buildSystem(const GameData& data, int habitat, HabitatPlacement kind) {
+        const Habitat& info = data.habitats[habitat];
+        Underground::Plan plan;
+        plan.kind = kind == HabitatPlacement::CAVE ? Underground::Kind::CAVE : Underground::Kind::MINE;
+        plan.habitat = habitat;
+        plan.radius = between(info.minRadius, info.maxRadius);
+        plan.water = m_deepWater;
+        for (const int hall : m_hallHabitats) { // las salas de este sistema: las de su hábitat, las de su clase (cueva o mina) y las de cualquiera
+            const int host = data.habitatIndex(data.habitats[hall].besideId);
+            if (host < 0 || host == habitat || data.habitats[host].placement == kind) plan.halls.push_back(hall);
+        }
+        const Island& island = m_islands.front();
+        struct Candidate { float x, z, dirX, dirZ, score; };
+        std::vector<Candidate> candidates;
+        for (const float tier : { 1.0f, 0.6f, 0.25f }) { // si no hay sitio ideal, se relajan las condiciones
+            candidates.clear();
+            for (int i = 0; i < 900; ++i) {
+                const float a = between(0.0f, 6.2831853f), r = std::sqrt(between(0.0f, 1.0f)) * island.r * 0.95f;
                 const float x = island.x + std::cos(a) * r, z = island.z + std::sin(a) * r;
                 const float h = ground(x, z);
-                if (h < 8.0f * tier || h > 22.0f + 8.0f * (1.0f - tier)) continue;
-                if (coastSigned(x, z) < tier * (R + 30.0f)) continue;
-                if (std::sqrt(x * x + z * z) < PLATEAU_FADE + R * 0.6f) continue; // nunca sobre la zona de inicio
-                if (!dryAround(x, z, (R + MOUTH_FADE) * tier)) continue;
+                if (h < 5.0f || h > 38.0f || coastSigned(x, z) < 30.0f * tier || std::sqrt(x * x + z * z) < PLATEAU_FADE + 10.0f || !dryAround(x, z, 9.0f)) continue;
                 bool apart = true;
                 for (const Region& other : m_regions) {
-                    const float dx = x - other.x, dz = z - other.z, need = (R + other.radius) * 0.95f; // recintos separados siempre
+                    if (!other.dark()) continue;
+                    const float dx = x - other.mouthX, dz = z - other.mouthZ, need = (plan.radius + other.radius) * 0.7f * tier;
                     if (dx * dx + dz * dz < need * need) apart = false;
                 }
                 if (!apart) continue;
-                const float score = h + between(0.0f, 6.0f);
-                if (score > bestScore) { bestScore = score; region.x = x; region.z = z; }
+                float gx, gz;
+                m_ground.gradient(x, z, gx, gz);
+                const float slope = std::sqrt(gx * gx + gz * gz);
+                const float dirAngle = slope > 0.15f ? std::atan2(gz, gx) : between(0.0f, 6.2831853f); // hacia lo alto de la ladera
+                candidates.push_back({ x, z, std::cos(dirAngle), std::sin(dirAngle), (std::min)(slope, 0.9f) * 10.0f + between(0.0f, 4.0f) + h * 0.05f });
             }
-            if (bestScore > -1.0e8f) break;
-        }
-        if (bestScore < -1.0e8f) { // sin sitio: el punto más alto de la isla
-            for (int i = 0; i < 300; ++i) {
-                const float a = between(0.0f, 6.2831853f), r = std::sqrt(between(0.0f, 1.0f)) * m_islands.front().r * 0.6f;
-                const float x = std::cos(a) * r, z = std::sin(a) * r;
-                if (ground(x, z) > bestScore) { bestScore = ground(x, z); region.x = x; region.z = z; }
+            std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
+            for (size_t i = 0; i < candidates.size() && i < 10; ++i) {
+                Underground::System system;
+                const Candidate& c = candidates[i];
+                if (!m_under.carve(plan, { c.x, c.z, c.dirX, c.dirZ }, { m_ground, m_surface, m_kind }, m_noise, *m_random, system) || system.radius < 6.0f) continue;
+                Region region;
+                region.habitat = habitat;
+                region.kind = kind;
+                region.x = system.x; region.z = system.z; region.radius = system.radius;
+                region.mouthX = system.mouthX; region.mouthZ = system.mouthZ; region.dirX = system.dirX; region.dirZ = system.dirZ;
+                region.floorY = system.floorY;
+                m_regions.push_back(region);
+                Zone site;
+                site.habitat = habitat; site.x = system.x; site.z = system.z; site.radius = system.radius * 0.7f; site.deep = true;
+                m_sites.push_back(site);
+                return;
             }
         }
-        // la bocana mira hacia la ladera más baja
-        float low = 1.0e9f, angle = 0.0f;
-        for (int k = 0; k < 24; ++k) {
-            const float a = k * 0.261799f, mx = region.x + std::cos(a) * (R + MOUTH_FADE), mz = region.z + std::sin(a) * (R + MOUTH_FADE);
-            const float t = ground(mx, mz);
-            if (t >= 1.5f && m_kind[nearestNode(mx, mz)] == DRY && t < low) { low = t; angle = a; } // la más baja que siga siendo tierra firme
-        }
-        region.dirX = std::cos(angle); region.dirZ = std::sin(angle);
-        region.mouthX = region.x + region.dirX * (R + MOUTH_FADE);
-        region.mouthZ = region.z + region.dirZ * (R + MOUTH_FADE);
-        region.floorY = (std::max)(ground(region.mouthX, region.mouthZ), 1.5f);
-        bakeEnclosure(region);
-        m_regions.push_back(region);
-        Zone site;
-        site.habitat = habitat; site.x = region.x; site.z = region.z; site.radius = R * 0.8f;
-        m_sites.push_back(site);
     }
 
     bool dryAround(float cx, float cz, float radius) const {
@@ -858,167 +884,154 @@ class HabitatMap {
         return true;
     }
 
-    // Suelo del recinto a la altura de la bocana, paredes de roca por encima y, entre ambos, galerías; se funde con la montaña hacia fuera.
-    void bakeEnclosure(const Region& region) {
-        const int n = m_ground.count();
-        const float R = region.radius, reach = R + MOUTH_FADE + LANE_RAMP + 2.0f;
-        const int c0 = nearestCol(region.x - reach), c1 = nearestCol(region.x + reach), r0 = nearestCol(region.z - reach), r1 = nearestCol(region.z + reach);
-        const float rotation = between(0.0f, 3.14159f);
-        for (int row = r0; row <= r1; ++row) {
-            for (int col = c0; col <= c1; ++col) {
-                const float x = m_ground.nodeCoord(col) - region.x, z = m_ground.nodeCoord(row) - region.z;
-                const float d = std::sqrt(x * x + z * z);
-                if (d > reach) continue;
-                const size_t index = static_cast<size_t>(row) * n + col;
-                const float along = x * region.dirX + z * region.dirZ, across = -x * region.dirZ + z * region.dirX;
-                const float lane = along > 0.0f ? 1.0f - smooth(LANE_WIDTH - 0.8f, LANE_WIDTH + 0.8f, std::fabs(across)) : 0.0f;
-                const float inner = region.kind == HabitatPlacement::CAVE ? caveOpen(x, z, d, rotation, R) : mineOpen(x, z, d, R);
-                const float open = (std::max)(inner, lane);
-                const float wall = region.floorY + ROCK_HEIGHT + 6.0f * m_noise.fbm(x * 0.05f, z * 0.05f, 3);
-                const float floorY = region.floorY + 0.35f * m_noise.fbm(x * 0.12f, z * 0.12f, 2);
-                const float cave = wall + (floorY - wall) * open;
-                const float blend = 1.0f - smooth(R, R + MOUTH_FADE, d);
-                float& g = m_ground.at(col, row);
-                g += (cave - g) * blend;
-                // el pasillo de entrada va siempre a la altura del suelo y, pasada la bocana, se funde con la ladera
-                const float cut = lane * (1.0f - smooth(R + MOUTH_FADE - 2.0f, R + MOUTH_FADE + LANE_RAMP, d));
-                g += (floorY - g) * cut;
-                m_surface.at(col, row) = g;
-                if (blend > 0.0f || cut > 0.0f) {
-                    m_kind[index] = DRY;
-                    m_level[index] = -1.0e9f;
-                    m_flowX.at(col, row) = m_flowZ.at(col, row) = 0.0f;
-                    m_sea.at(col, row) = 0.0f;
-                    if (d < R) m_coast.at(col, row) = 50.0f;
-                }
-            }
-        }
-    }
+    // ---- Islas del cielo ----
+    // Islas de nube de varios tamaños, más allá del archipiélago. Cada una: un suelo de nube (hábitat SKY) que termina en una orilla y un mar de
+    // nubes (SKY_SEA) que la rodea; en el mar hay parcelas de tierra (SKY_LAND, de hábitats distintos) a las que se llega nadando; más allá, la
+    // nube se hunde en un abismo blanco (el renderizador lo tapa con nubes). Se baja caminando o nadando hasta el borde y dejándose caer. Para
+    // subir, cada isla tiene su propia Corriente Ascendente en el mar del archipiélago.
+    public:
+    static constexpr float SKY_SHORE = 7.0f;      // ancho (m) de la orilla del suelo de nube al mar de nubes
+    static constexpr float SKY_SEA_DEPTH = 3.2f;  // profundidad del mar de nubes bajo el suelo
+    static constexpr float SKY_ABYSS = 12.0f;     // ancho (m) del talud blanco más allá del mar
+    static constexpr float SKY_ABYSS_DROP = 55.0f;
 
-    // Cueva: caverna central y pasillos de ruido.
-    float caveOpen(float x, float z, float d, float rotation, float R) const {
-        float open = 1.0f - smooth(16.0f, 24.0f, d);
-        open = (std::max)(open, 1.0f - smooth(0.16f, 0.30f, std::fabs(m_noise.value(x * 0.032f + 11.0f, z * 0.032f + 3.0f))));
-        open = (std::max)(open, smooth(0.30f, 0.42f, m_noise.fbm(x * 0.045f, z * 0.045f, 2)));
-        for (int k = 0; k < 4; ++k) { // túneles que salen de la caverna central
-            const float a = rotation + k * 1.5708f + 0.4f * m_noise.value(x * 0.02f + k * 9.0f, z * 0.02f);
-            const float along = x * std::cos(a) + z * std::sin(a), across = -x * std::sin(a) + z * std::cos(a);
-            if (along > 0.0f) open = (std::max)(open, 1.0f - smooth(2.6f, 4.2f, std::fabs(across)));
-        }
-        return open * (1.0f - smooth(R - 12.0f, R - 3.0f, d));
+    // Contorno irregular de una isla: factor (≈1) por el que se divide la distancia al centro según la dirección (dx, dz: desde su centro).
+    static float skyShape(const Region& region, float dx, float dz) {
+        const float angle = std::atan2(dz, dx);
+        float f = 1.0f;
+        for (int i = 0; i < LOBES; ++i) f += 0.6f * LOBE_AMPLITUDE[i] * std::sin(LOBE_HARMONIC[i] * angle + region.lobe[i]);
+        return f;
     }
+    private:
 
-    // Mina: cuadrícula de galerías con salas en algunos cruces.
-    float mineOpen(float x, float z, float d, float R) const {
-        const auto lane = [](float v) { const float m = std::fmod(std::fabs(v) + 16.0f, 32.0f) - 16.0f; return 1.0f - smooth(3.0f, 4.4f, std::fabs(m)); };
-        float open = (std::max)(lane(x), lane(z));
-        for (int i = -2; i <= 2; ++i) {
-            for (int j = -2; j <= 2; ++j) {
-                if ((i != 0 || j != 0) && m_noise.value(i * 3.7f + 0.5f, j * 5.1f + 0.5f) < 0.1f) continue;
-                const float dx = x - i * 32.0f, dz = z - j * 32.0f;
-                open = (std::max)(open, 1.0f - smooth(8.0f, 11.0f, std::sqrt(dx * dx + dz * dz)));
-            }
-        }
-        return open * (1.0f - smooth(R - 12.0f, R - 3.0f, d));
-    }
-
-    // ---- Isla del cielo ----
-    // Más allá del archipiélago, en la diagonal: suelo de nube, islotes de tierra, mar de nubes y, en el mar, la corriente que sube hasta ella.
-    void buildSky(const GameData& data, int habitat) {
-        const Habitat& info = data.habitats[habitat];
-        Region region;
-        region.habitat = habitat;
-        region.kind = HabitatPlacement::SKY;
-        region.radius = averageRadius(info);
-        region.floorY = info.minAltitude;
-        const float R = region.radius;
+    void buildSky(const GameData& data) {
+        int sea = -1;
+        for (int h = 0; h < m_habitats; ++h) if (data.habitats[h].placement == HabitatPlacement::SKY_SEA) { sea = h; break; }
         const float half = Physics::World::HALF_SIZE - 2.0f;
-        const float distance = (std::min)(m_worldRadius + R + 28.0f, (half - R) * 1.4142f);
-        region.x = region.z = distance * 0.70711f;
-        bakeSky(data, region);
-        m_regions.push_back(region);
-        Zone site;
-        site.habitat = habitat; site.x = region.x; site.z = region.z; site.radius = R * 0.8f;
-        m_sites.push_back(site);
-        placeUpdraft(region);
+        for (int h = 0; h < m_habitats; ++h) {
+            const Habitat& info = data.habitats[h];
+            if (info.placement != HabitatPlacement::SKY) continue;
+            const int count = betweenInt(info.minZones, info.maxZones);
+            for (int i = 0; i < count; ++i) {
+                Region region;
+                region.habitat = h;
+                region.kind = HabitatPlacement::SKY;
+                region.floorRadius = between(info.minRadius, info.maxRadius);
+                const float ring = sea >= 0 ? between(data.habitats[sea].minRadius, data.habitats[sea].maxRadius) : 0.0f;
+                region.seaRadius = region.floorRadius + ring;
+                region.radius = region.seaRadius + SKY_ABYSS;
+                region.floorY = between(info.minAltitude, (std::max)(info.minAltitude, info.maxAltitude));
+                for (float& phase : region.lobe) phase = between(0.0f, 6.2831853f);
+                float widest = 1.0f;
+                for (int k = 0; k < 90; ++k) widest = (std::max)(widest, skyShape(region, std::cos(k * 0.0698f), std::sin(k * 0.0698f)));
+                bool placed = false;
+                for (int attempt = 0; attempt < 500 && !placed; ++attempt) {
+                    const float R = region.radius * widest; // contorno irregular incluido
+                    const float limit = half - R;
+                    if (limit <= 0.0f) break;
+                    region.x = between(-limit, limit);
+                    region.z = between(-limit, limit);
+                    if (std::sqrt(region.x * region.x + region.z * region.z) < m_worldRadius + R + 6.0f) continue; // no pisa el archipiélago
+                    placed = true;
+                    for (const Region& other : m_regions) {
+                        if (other.kind != HabitatPlacement::SKY) continue;
+                        const float dx = region.x - other.x, dz = region.z - other.z, need = R + other.radius * 1.15f + 6.0f;
+                        if (dx * dx + dz * dz < need * need) placed = false;
+                    }
+                }
+                if (!placed) continue;
+                m_regions.push_back(region);
+                bakeSky(m_regions.back());
+                Zone site;
+                site.habitat = h; site.x = region.x; site.z = region.z; site.radius = region.floorRadius * 0.9f;
+                m_sites.push_back(site);
+            }
+        }
+        // Parcelas de tierra en los mares de nubes (de cada hábitat SKY_LAND, repartidas entre las islas), y una corriente ascendente por isla.
+        for (int h = 0; h < m_habitats; ++h) {
+            if (data.habitats[h].placement == HabitatPlacement::SKY_LAND) scatterPatches(data, h);
+        }
+        for (const Region& region : m_regions) if (region.kind == HabitatPlacement::SKY) placeUpdraft(region);
     }
 
-    void bakeSky(const GameData& data, const Region& region) {
+    // Suelo, mar y abismo de una isla: el relieve, el agua de nube (nivel un poco bajo el suelo) y lo que no existe fuera de ella.
+    void bakeSky(const Region& region) {
         const int n = m_ground.count();
-        const float R = region.radius, reach = R + 14.0f;
+        const float reach = region.radius * 1.35f + 6.0f;
         const int c0 = nearestCol(region.x - reach), c1 = nearestCol(region.x + reach), r0 = nearestCol(region.z - reach), r1 = nearestCol(region.z + reach);
+        const float H = region.floorY, level = H - 0.35f;
         for (int row = r0; row <= r1; ++row) {
             for (int col = c0; col <= c1; ++col) {
-                const float x = m_ground.nodeCoord(col) - region.x, z = m_ground.nodeCoord(row) - region.z;
-                const float d = std::sqrt(x * x + z * z);
+                const float x = m_ground.nodeCoord(col), z = m_ground.nodeCoord(row);
+                const float d = std::sqrt((x - region.x) * (x - region.x) + (z - region.z) * (z - region.z)) / skyShape(region, x - region.x, z - region.z);
                 const size_t index = static_cast<size_t>(row) * n + col;
                 m_kind[index] = DRY;
                 m_level[index] = -1.0e9f;
                 m_flowX.at(col, row) = m_flowZ.at(col, row) = 0.0f;
                 m_sea.at(col, row) = 0.0f;
-                const float g = d > R ? SKY_VOID : region.floorY + 0.6f * m_noise.fbm(x * 0.03f + 7.0f, z * 0.03f, 3) + 1.6f * smooth(R - 8.0f, R - 1.0f, d);
+                m_coast.at(col, row) = 50.0f;
+                float g;
+                if (d > region.radius) {
+                    g = SKY_VOID;
+                } else {
+                    const float floorG = H + 0.3f * std::fabs(m_noise.fbm(x * 0.05f + 3.0f, z * 0.05f, 3));
+                    const float seaG = H - SKY_SEA_DEPTH + 0.5f * m_noise.fbm(x * 0.08f, z * 0.08f + 9.0f, 3);
+                    const float shore = smooth(region.floorRadius, region.floorRadius + SKY_SHORE, d);
+                    g = floorG + (seaG - floorG) * shore;
+                    if (d > region.seaRadius) { // el abismo: la nube blanca se hunde
+                        const float t = smooth(region.seaRadius, region.radius, d);
+                        g = seaG - SKY_ABYSS_DROP * std::pow(t, 1.4f);
+                    } else if (g < level - 0.05f) {
+                        m_kind[index] = CLOUD;
+                        m_level[index] = level;
+                    }
+                }
                 m_ground.at(col, row) = g;
                 m_surface.at(col, row) = g;
-                m_coast.at(col, row) = 50.0f;
             }
-        }
-        // islotes de tierra y cuencas de mar de nubes, repartidos por el suelo de nube sin pisarse
-        struct Spot { float x, z, radius, extent; };
-        std::vector<Spot> placed;
-        const auto place = [&](const Habitat& habitat, float reachFactor, float extentFactor, Spot& out) {
-            const float radius = between(habitat.minRadius, habitat.maxRadius);
-            for (int attempt = 0; attempt < 120; ++attempt) {
-                const float limit = (std::max)(0.0f, R - reachFactor * radius - 2.0f);
-                const float a = between(0.0f, 6.2831853f), r = std::sqrt(between(0.0f, 1.0f)) * limit;
-                const float x = region.x + std::cos(a) * r, z = region.z + std::sin(a) * r;
-                bool apart = true;
-                for (const Spot& other : placed) {
-                    const float dx = x - other.x, dz = z - other.z, need = radius * extentFactor + other.extent + 2.0f;
-                    if (dx * dx + dz * dz < need * need) apart = false;
-                }
-                if (!apart) continue;
-                out = { x, z, radius, radius * extentFactor };
-                return true;
-            }
-            return false;
-        };
-        for (const HabitatPlacement pass : { HabitatPlacement::SKY_SEA, HabitatPlacement::SKY_LAND }) { // primero el mar, luego la tierra
-          for (int h = 0; h < m_habitats; ++h) {
-            const Habitat& habitat = data.habitats[h];
-            if (habitat.placement != pass) continue;
-            if (habitat.placement == HabitatPlacement::SKY_SEA) {
-                const int count = betweenInt((std::max)(1, habitat.minZones), (std::max)(1, habitat.maxZones));
-                for (int i = 0; i < count; ++i) {
-                    Spot spot;
-                    if (!place(habitat, 2.4f, 1.1f, spot)) continue;
-                    placed.push_back(spot);
-                    carveBasin(spot.x, spot.z, spot.radius, -between(habitat.minAltitude, habitat.maxAltitude), region.floorY - 0.4f, CLOUD, region.floorY);
-                    m_basins.push_back({ spot.x, spot.z, spot.radius, region.floorY - 0.4f, CLOUD });
-                }
-            } else if (habitat.placement == HabitatPlacement::SKY_LAND) {
-                const int count = betweenInt((std::max)(1, habitat.minZones), (std::max)(1, habitat.maxZones));
-                for (int i = 0; i < count; ++i) {
-                    Spot spot;
-                    if (!place(habitat, 1.5f, 1.3f, spot)) continue;
-                    placed.push_back(spot);
-                    Zone zone;
-                    zone.habitat = h; zone.x = spot.x; zone.z = spot.z; zone.radius = spot.radius;
-                    zone.stretch = between(habitat.minStretch, (std::max)(habitat.minStretch, habitat.maxStretch));
-                    zone.altitude = between(habitat.minAltitude, habitat.maxAltitude);
-                    zone.roughness = habitat.roughness;
-                    const float angle = between(0.0f, 6.2831853f);
-                    zone.cosA = std::cos(angle); zone.sinA = std::sin(angle);
-                    for (float& phase : zone.lobe) phase = between(0.0f, 6.2831853f);
-                    raiseIslet(zone, region.floorY);
-                    m_skyZones.push_back(zone);
-                    m_sites.push_back(zone);
-                }
-            }
-          }
         }
     }
 
-    // Eleva un islote de tierra sobre el suelo de nube: sube con suavidad desde el borde.
+    // Reparte las zonas de un hábitat SKY_LAND por los mares de nubes de las islas.
+    void scatterPatches(const GameData& data, int habitat) {
+        const Habitat& info = data.habitats[habitat];
+        const int count = betweenInt((std::max)(1, info.minZones), (std::max)(1, info.maxZones));
+        std::vector<size_t> islands;
+        for (size_t i = 0; i < m_regions.size(); ++i) if (m_regions[i].kind == HabitatPlacement::SKY && m_regions[i].seaRadius - m_regions[i].floorRadius > 24.0f) islands.push_back(i);
+        if (islands.empty()) return;
+        for (int i = 0; i < count; ++i) {
+            for (int attempt = 0; attempt < 80; ++attempt) {
+                const Region& region = m_regions[islands[static_cast<size_t>(betweenInt(0, static_cast<int>(islands.size()) - 1))]];
+                const float radius = (std::min)(between(info.minRadius, info.maxRadius), (region.seaRadius - region.floorRadius - SKY_SHORE) * 0.3f);
+                const float inner = region.floorRadius + SKY_SHORE + radius * 1.3f + 2.0f, outer = region.seaRadius - radius * 1.3f - 2.0f;
+                if (radius < 3.0f || outer <= inner) continue;
+                const float angle = between(0.0f, 6.2831853f), dist = between(inner, outer);
+                const float shape = skyShape(region, std::cos(angle), std::sin(angle));
+                Zone zone;
+                zone.habitat = habitat;
+                zone.x = region.x + std::cos(angle) * dist * shape; zone.z = region.z + std::sin(angle) * dist * shape;
+                zone.radius = radius;
+                zone.stretch = between(info.minStretch, (std::max)(info.minStretch, info.maxStretch));
+                zone.altitude = between(info.minAltitude, info.maxAltitude);
+                zone.roughness = info.roughness;
+                const float tilt = between(0.0f, 6.2831853f);
+                zone.cosA = std::cos(tilt); zone.sinA = std::sin(tilt);
+                for (float& phase : zone.lobe) phase = between(0.0f, 6.2831853f);
+                bool apart = true;
+                for (const Zone& other : m_skyZones) {
+                    const float dx = zone.x - other.x, dz = zone.z - other.z, need = (zone.radius * zone.stretch + other.radius * other.stretch) * 1.1f + 3.0f;
+                    if (dx * dx + dz * dz < need * need) apart = false;
+                }
+                if (!apart) continue;
+                raiseIslet(zone, region.floorY);
+                m_skyZones.push_back(zone);
+                m_sites.push_back(zone);
+                break;
+            }
+        }
+    }
+
+    // Eleva una parcela de tierra desde el fondo del mar de nubes: sube con suavidad desde su borde hasta 'altitude' sobre el suelo de nube.
     void raiseIslet(const Zone& zone, float floorY) {
         const float reach = zone.radius * zone.stretch * 1.8f + 4.0f;
         const int c0 = nearestCol(zone.x - reach), c1 = nearestCol(zone.x + reach), r0 = nearestCol(zone.z - reach), r1 = nearestCol(zone.z + reach);
@@ -1027,34 +1040,40 @@ class HabitatMap {
                 const float x = m_ground.nodeCoord(col), z = m_ground.nodeCoord(row);
                 const float w = 1.0f - smooth(0.35f, 1.3f, distance2(zone, x, z));
                 if (w <= 0.0f) continue;
-                const float bump = zone.altitude + zone.roughness * m_noise.fbm(x * 0.06f, z * 0.06f, 3);
+                const float top = floorY + zone.altitude + zone.roughness * m_noise.fbm(x * 0.06f, z * 0.06f, 3);
                 float& g = m_ground.at(col, row);
-                g = (std::max)(g, floorY + bump * w);
+                g += (top - g) * w;
                 m_surface.at(col, row) = g;
             }
         }
     }
 
-    // Corriente Ascendente: una columna en el mar, dentro del archipiélago y lo más cerca posible de la isla del cielo.
+    // Corriente Ascendente de una isla: una columna en el mar del archipiélago, lo más cerca posible de ella y lejos de las demás corrientes.
     void placeUpdraft(const Region& sky) {
         float bestX = 0.0f, bestZ = 0.0f, bestScore = -1.0e9f;
-        for (int i = 0; i < 900; ++i) {
+        for (int i = 0; i < 1200; ++i) {
             const float a = between(0.0f, 6.2831853f), r = between(m_islands.front().r * 0.6f, m_worldRadius - 8.0f);
             const float x = std::cos(a) * r, z = std::sin(a) * r;
             const float s = coastSigned(x, z);
             if (s > -25.0f || s < -110.0f || ground(x, z) > -4.0f) continue;
+            bool apart = true;
+            for (const Physics::World::Updraft& other : m_updrafts) {
+                const float ux = x - other.x, uz = z - other.z;
+                if (ux * ux + uz * uz < 30.0f * 30.0f) apart = false;
+            }
+            if (!apart) continue;
             const float dx = x - sky.x, dz = z - sky.z;
             const float score = -std::sqrt(dx * dx + dz * dz) + between(0.0f, 12.0f);
             if (score > bestScore) { bestScore = score; bestX = x; bestZ = z; }
         }
-        if (bestScore < -1.0e8f) { // no hay mar en el archipiélago: junto a su borde, en la dirección de la isla del cielo
-            const float k = (m_worldRadius - 14.0f) / std::sqrt(sky.x * sky.x + sky.z * sky.z);
+        if (bestScore < -1.0e8f) { // no hay mar libre: junto al borde del archipiélago, en la dirección de la isla
+            const float k = (m_worldRadius - 14.0f) / (std::max)(std::sqrt(sky.x * sky.x + sky.z * sky.z), 1.0f);
             bestX = sky.x * k; bestZ = sky.z * k;
         }
         float dx = bestX - sky.x, dz = bestZ - sky.z;
         const float length = (std::max)(std::sqrt(dx * dx + dz * dz), 1.0f);
         dx /= length; dz /= length;
-        const float inland = sky.radius * 0.5f; // aterriza hacia el borde de la isla que mira a la corriente
+        const float inland = sky.floorRadius * 0.5f; // aterriza hacia el borde de la isla que mira a la corriente
         m_updrafts.push_back({ bestX, bestZ, STREAM_RADIUS, sky.floorY + STREAM_CLIMB, sky.x + dx * inland, sky.z + dz * inland });
     }
 
@@ -1078,6 +1097,9 @@ class HabitatMap {
     std::vector<Zone> m_zones, m_sites;
     std::vector<Region> m_regions;
     std::vector<Zone> m_skyZones;
+    Underground m_under;
+    std::vector<int> m_hallHabitats; // hábitats de salas (HALL) de cuevas y minas
+    int m_deepWater = -1;            // hábitat del agua subterránea
     std::vector<Physics::World::Updraft> m_updrafts;
     std::vector<Island> m_islands;
     std::vector<Basin> m_basins;

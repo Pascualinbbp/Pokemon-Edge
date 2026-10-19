@@ -210,9 +210,13 @@ struct Scene {
     }
 
     DirectX::XMMATRIX getViewMatrix() const {
-        const DirectX::XMFLOAT3 eye = camera.eye(player.body.position);
-        const float floor = player.diving() ? world.groundHeight(eye.x, eye.z) : world.surfaceHeight(eye.x, eye.z);
-        return camera.viewMatrix(player.body.position, floor + 0.35f); // la cámara no se hunde en el terreno (bajo el agua sí se sumerge)
+        const DirectX::XMFLOAT3 at = camera.focus(player.body.position), full = camera.eye(player.body.position);
+        const float pull = world.clearFraction(at, full, 0.5f); // una pared (galerías) acerca la cámara
+        const DirectX::XMFLOAT3 eye = { at.x + (full.x - at.x) * pull, at.y + (full.y - at.y) * pull, at.z + (full.z - at.z) * pull };
+        const float feet = player.body.feet();
+        const float floor = player.swimming() ? world.groundHeight(eye.x, eye.z, feet) : world.surfaceHeight(eye.x, eye.z, feet);
+        const float ceiling = world.under(eye.x, eye.z, feet) ? world.ceiling(eye.x, eye.z) - 0.3f : Physics::World::ABOVE;
+        return camera.viewMatrix(player.body.position, floor + 0.35f, ceiling, pull); // la cámara no se hunde en el terreno (bajo el agua sí se sumerge)
     }
 
     GameStatus status() const {
@@ -287,7 +291,7 @@ struct Scene {
     private:
     // "Pradera · Arcoíris": hábitat que más pesa donde está el jugador y el clima más fuerte.
     void fillLocation(GameStatus& s) const {
-        const WildSpawn::Context context = spawnContext(player.body.position.x, player.body.position.z);
+        const WildSpawn::Context context = spawnContext(player.body.position.x, player.body.position.z, 0, player.body.underground);
         if (context.habitats.empty()) return;
         const int habitat = static_cast<int>(std::max_element(context.habitats.begin(), context.habitats.end()) - context.habitats.begin());
         const Weather* current = context.weather.empty() ? nullptr : m_data->weather(context.weather.front().weatherId);
@@ -305,13 +309,17 @@ struct Scene {
         s.exhausted = player.exhausted();
         s.showOxygen = player.diving() || player.exhausted() || !player.oxygenFull();
         const DirectX::XMFLOAT3 eye = camera.eye(p);
-        s.underwater = player.diving() && eye.y < world.waterLevel(eye.x, eye.z);
-        s.darkness = habitats.darkness(p.x, p.z);
-        s.layer = static_cast<int>(habitats.layerAt(p.x, p.z));
+        s.underwater = player.diving() && eye.y < world.waterLevel(eye.x, eye.z, player.body.feet());
+        s.darkness = habitats.darkness(p.x, p.z, player.body.feet());
+        s.layer = static_cast<int>(habitats.layerAt(p.x, p.z, player.body.feet()));
         s.climbing = player.climbing();
         s.swimming = player.swimming();
         s.diving = player.diving();
-        if (region && (!region->dark() || s.darkness > 0.5f)) s.regionName = &m_data->habitats[region->habitat].name;
+        if (player.body.underground) {
+            if (const Underground::System* system = habitats.systemAt(p.x, p.z)) s.regionName = &m_data->habitats[system->habitat].name;
+        } else if (region) {
+            s.regionName = &m_data->habitats[region->habitat].name;
+        }
         s.fishing = fishing.active();
         s.bobber = fishing.bobber();
         s.biteAlert = fishing.phase() == Fishing::Phase::BITING ? 1.0f - fishing.biteProgress() : 0.0f;
@@ -320,11 +328,13 @@ struct Scene {
 
     // °C donde está el jugador: las regiones tienen su clima y fuera baja con la altura.
     float temperatureAt(float x, float z) const {
+        if (player.body.underground) {
+            const Underground::System* system = habitats.systemAt(x, z);
+            return system && system->kind == Underground::Kind::MINE ? MINE_TEMPERATURE : CAVE_TEMPERATURE;
+        }
         if (const HabitatMap::Region* region = habitats.regionAt(x, z)) {
             switch (region->kind) {
-                case HabitatPlacement::CAVE: return CAVE_TEMPERATURE;
-                case HabitatPlacement::MINE: return MINE_TEMPERATURE;
-                default:                     return SKY_TEMPERATURE;
+                default: return SKY_TEMPERATURE;
             }
         }
         return HabitatMap::temperature(world.groundHeight(x, z));
@@ -347,10 +357,6 @@ struct Scene {
             default:
                 if (m_castHint) add(PromptAction::INTERACT, "Pescar");
                 break;
-        }
-        if (player.swimming() && !player.diving()) {
-            add(PromptAction::JUMP, "Saltar");
-            if (world.waterDepth(player.body.position.x, player.body.position.z) >= Player::DIVE_MIN_DEPTH) add(PromptAction::CROUCH, "Bucear");
         }
     }
 
@@ -444,12 +450,12 @@ struct Scene {
     }
 
     // Hábitat, clima y hora de un punto del mundo: lo que decide qué pokémon aparecen ahí.
-    WildSpawn::Context spawnContext(float x, float z, int rod = 0) const {
+    WildSpawn::Context spawnContext(float x, float z, int rod = 0, bool underground = false) const {
         WildSpawn::Context context;
-        habitats.weights(x, z, context.habitats);
+        habitats.weights(x, z, context.habitats, underground);
         context.weather = weather.at(context.habitats);
         context.night = dayCycle.isNight();
-        context.depth = world.waterDepth(x, z);
+        context.depth = underground ? habitats.under().depthAt(x, z) : world.waterDepth(x, z);
         context.rod = rod;
         return context;
     }
@@ -457,7 +463,7 @@ struct Scene {
     // Especie de un pokémon salvaje que acaba de aparecer, según el hábitat, el clima y la hora de donde sale.
     // false si ahí no puede vivir ninguno (el sitio se descarta).
     bool assignSpecies(CaptureTarget& target) const {
-        const int index = WildSpawn::pick(*m_data, spawnContext(target.body.position.x, target.body.position.z));
+        const int index = WildSpawn::pick(*m_data, spawnContext(target.body.position.x, target.body.position.z, 0, target.deepSlot()));
         if (index < 0) return false;
         target.setSpecies(index, m_data->species[index].id, PokemonRules::rollLevel(m_data->species[index]), PokemonRules::rollShiny());
         target.setSwims(m_data->species[index].swims);
@@ -507,7 +513,7 @@ struct Scene {
         const DirectX::XMFLOAT3& p = player.body.position;
         const bool standing = !player.swimming() && !player.climbing() && player.body.onGround;
         DirectX::XMFLOAT3 water;
-        m_castHint = !fishing.active() && rodLevel() > 0 && standing && m_interaction.kind == Interaction::NONE && Fishing::findWater(world, p.x, p.z, yaw, water);
+        m_castHint = !fishing.active() && rodLevel() > 0 && standing && m_interaction.kind == Interaction::NONE && Fishing::findWater(world, p.x, p.z, yaw, water, player.body.feet());
 
         if (fishing.active() && rodLevel() <= 0) endFishing(true);
         if (fishing.active()) {
@@ -518,7 +524,7 @@ struct Scene {
             }
             if (input.release && fishing.hooked() && hookReady()) endFishing(true);
         } else if (input.interact && m_castHint) {
-            used = fishing.cast(world, p.x, p.z, yaw, inventory.skillSpeed(m_fishSkill));
+            used = fishing.cast(world, p.x, p.z, yaw, inventory.skillSpeed(m_fishSkill), player.body.feet());
             if (used) {
                 player.act(PlayerAction::FISH);
                 player.hold(PlayerAction::FISH);
@@ -527,7 +533,7 @@ struct Scene {
 
         switch (fishing.update(dt, reel, world, p.x, p.z)) {
             case Event::HOOKED:
-                if (!wild.hook(fishing.bobber().x, fishing.bobber().z, yaw, [this](CaptureTarget& target) { return assignFished(target); })) {
+                if (!wild.hook(fishing.bobber().x, fishing.bobber().y, fishing.bobber().z, yaw, [this](CaptureTarget& target) { return assignFished(target); })) {
                     endFishing(false);
                     showNotice(Notice::ESCAPED);
                 }
@@ -568,7 +574,7 @@ struct Scene {
         else if (lead && species && (lead->uid != m_shownUid || lead->speciesId != m_shownSpecies)) {
             m_shownUid = lead->uid; // otro pokémon (o ha evolucionado): vuelve el que está fuera y sale su pokéball
             m_shownSpecies = lead->speciesId;
-            companion.swap(species->id, m_data->levitates(*species), PokeballStyle::color(lead->ballId), player.body.position, camera.yaw());
+            companion.swap(species->id, m_data->levitates(*species), lead->ballId, player.body.position, camera.yaw());
         }
         if (companion.changing()) species = nullptr; // durante el cambio no trabaja
 
@@ -645,7 +651,7 @@ struct Scene {
         CaptureTarget* best = nullptr;
         float bestDistance = Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
         for (CaptureTarget* target : wild.loaded()) {
-            if (!target->hittable() || target->speciesIndex() < 0 || wild.isHooked(target)) continue; // el pescado es del jugador
+            if (!target->hittable() || target->speciesIndex() < 0 || wild.isHooked(target) || target->body.underground != player.body.underground) continue; // el pescado es del jugador
             if (mode == CompanionRules::Mode::CAPTURE && target->hpFraction() <= CompanionRules::CAPTURE_STOP_HP) continue;
             const float dx = target->body.position.x - player.body.position.x, dz = target->body.position.z - player.body.position.z;
             if (dx * dx + dz * dz < bestDistance) {
@@ -680,7 +686,7 @@ struct Scene {
     int nearestIn(const std::vector<Entity>& list, Usable usable, float& best) const {
         int index = -1;
         for (size_t i = 0; i < list.size(); ++i) {
-            if (!usable(list[i])) continue;
+            if (!usable(list[i]) || list[i].body.underground != player.body.underground) continue; // bajo tierra y en la superficie no se alcanzan
             const float dx = list[i].body.position.x - player.body.position.x;
             const float dz = list[i].body.position.z - player.body.position.z;
             const float d2 = dx * dx + dz * dz;
@@ -885,7 +891,7 @@ struct Scene {
     float rayToSurface(const DirectX::XMFLOAT3& eye, const DirectX::XMFLOAT3& dir, float maxDistance) const {
         const auto below = [&](float t) {
             const float x = eye.x + dir.x * t, y = eye.y + dir.y * t, z = eye.z + dir.z * t;
-            return y <= world.surfaceHeight(x, z);
+            return y <= world.surfaceHeight(x, z, y) || world.solid(x, y, z);
         };
         float previous = 0.0f;
         for (float t = AIM_STEP; t <= maxDistance; t += AIM_STEP) {
@@ -932,7 +938,6 @@ struct Scene {
         Pokeball ball;
         ball.typeId = type.id;
         ball.captureMultiplier = type.captureMultiplier;
-        ball.color = PokeballStyle::color(type.id);
         ball.body.position = handPosition();
         ball.body.velocity = launchVelocity(ball.body.position, aim, dir);
 

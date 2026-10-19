@@ -68,7 +68,7 @@ class Player {
         const float amount = direction(input.moveX, input.moveY, m_moveYaw, dirX, dirZ);
 
         const bool streaming = updateStream(dt, world);
-        const bool inWater = !streaming && world.waterDepth(body.position.x, body.position.z) > Physics::World::SWIM_DEPTH;
+        const bool inWater = !streaming && world.waterDepth(body.position.x, body.position.z, body.feet()) > Physics::World::SWIM_DEPTH;
         if (streaming) {
             // la corriente lo lleva: no hay entrada que valga
         } else if (inWater) {
@@ -202,19 +202,19 @@ class Player {
         return true;
     }
 
-    // Nadar en la superficie o sumergirse: con la tecla de agacharse o avanzando mientras se mira hacia abajo. Sumergido el cuerpo
+    // Nadar en la superficie o sumergirse: avanzando mientras la cámara mira hacia abajo (no hay tecla de bucear). Sumergido el cuerpo
     // sigue hacia donde mira la cámara. Correr también vale en el agua; "saltar" en la superficie da un impulso. Bajo el agua se gasta
     // aire; sin aire el cuerpo sube solo a la superficie.
     void updateWater(float dt, const InputState& input, float look, const Physics::World& world, float dirX, float dirZ, float amount, bool forward) {
         m_swimming = true;
         m_climbing = m_sliding = m_crouching = m_crouchQueued = false;
         updateSprint(input, true, forward);
-        const float level = world.waterLevel(body.position.x, body.position.z);
-        const float depth = world.waterDepth(body.position.x, body.position.z);
+        const float level = world.waterLevel(body.position.x, body.position.z, body.feet());
+        const float depth = world.waterDepth(body.position.x, body.position.z, body.feet());
         const float surfaceY = level - body.collisionHeight * Physics::World::SUBMERGED;
         if (m_oxygen > oxygenCapacity) m_oxygen = oxygenCapacity;
         const bool lookingDown = forward && look > DIVE_LOOK && m_oxygen > DIVE_START_AIR * oxygenCapacity;
-        if (!m_diving && (input.crouch || lookingDown) && depth >= DIVE_MIN_DEPTH && !m_exhausted) {
+        if (!m_diving && lookingDown && depth >= DIVE_MIN_DEPTH && !m_exhausted) {
             m_diving = true;
             body.onGround = false;
             body.velocity.y = -1.0f;

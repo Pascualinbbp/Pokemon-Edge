@@ -49,6 +49,17 @@ namespace Physics {
             return row1[1] + (1.0f - tx) * (row1[0] - row1[1]) + (1.0f - tz) * (row0[1] - row1[1]);
         }
 
+        // ¿Están definidos (por encima de 'limit') los cuatro nodos de la celda que contiene el punto? (capas con huecos: cuevas)
+        bool covers(float x, float z, float limit) const {
+            if (m_values.empty()) return false;
+            const float fx = (x + m_half) / CELL, fz = (z + m_half) / CELL;
+            if (fx < 0.0f || fz < 0.0f || fx > static_cast<float>(m_count - 1) || fz > static_cast<float>(m_count - 1)) return false;
+            const int c0 = (std::min)(static_cast<int>(fx), m_count - 2), r0 = (std::min)(static_cast<int>(fz), m_count - 2);
+            const float* row0 = &m_values[static_cast<size_t>(r0) * m_count + c0];
+            const float* row1 = row0 + m_count;
+            return row0[0] > limit && row0[1] > limit && row1[0] > limit && row1[1] > limit;
+        }
+
         // Pendiente (derivada en x y en z) en un punto, por diferencias centradas.
         void gradient(float x, float z, float& gx, float& gz) const {
             constexpr float STEP = CELL * 0.5f;

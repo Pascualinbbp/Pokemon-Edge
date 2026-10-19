@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <string>
+#include <unordered_map>
 #include <vector>
 #include <d3d11.h>
 #include <DirectXMath.h>
@@ -51,7 +53,10 @@ class Renderer3D {
         DirectX::XMFLOAT4 cameraPos;    // xyz = posición de la cámara, w = marea (m)
         DirectX::XMFLOAT4 env;          // x = oscuridad (cueva, mina), y = densidad de la niebla, z = bajo el agua, w = radio del archipiélago
         DirectX::XMFLOAT4 fogColor;
+        DirectX::XMFLOAT4 lampPos[8];   // luces del subsuelo (lámparas y cristales) más cercanas: xyz = posición, w = alcance
+        DirectX::XMFLOAT4 lampColor[8]; // rgb = color de cada una
     };
+    static constexpr int kLamps = 8;
 
     // Entorno del frame que no sale de la luz del día: dónde está la cámara, la marea, la niebla y la oscuridad.
     struct Environment {
@@ -89,6 +94,8 @@ class Renderer3D {
     static std::vector<Chunk> buildChunks(ID3D11Device* device, int nodes, VertexFn vertexAt, KeepFn keepCell);
     static std::vector<Chunk> createTerrain(ID3D11Device* device, const HabitatMap& habitats, const Physics::World& world, const GameData& data);
     static std::vector<Chunk> createWater(ID3D11Device* device, const HabitatMap& habitats, const Physics::World& world);
+    static std::vector<Chunk> createUnderground(ID3D11Device* device, const HabitatMap& habitats, const GameData& data); // suelo, techo y paredes de las galerías
+    static std::vector<Chunk> createCaveWater(ID3D11Device* device, const HabitatMap& habitats); // lagos subterráneos
     static Mesh createOcean(ID3D11Device* device);
     static Mesh createCone(ID3D11Device* device);
     static Mesh createCube(ID3D11Device* device);
@@ -102,14 +109,16 @@ class Renderer3D {
         DrawKind kind = DrawKind::SOLID, ID3D11ShaderResourceView* texture = nullptr);
     // Instancia de un modelo cargado: cada pieza con su apertura (ModelPose) y todo bajo la transformación 'world'.
     void addModel(const RenderModel& model, DirectX::CXMMATRIX world, const DirectX::XMFLOAT4& tint, const ModelPose& pose, bool castsShadow = true);
-    void addBall(const DirectX::XMFLOAT3& position, float yaw, float spin, float roll, float lid, float scale, const DirectX::XMFLOAT3& color, float glow);
-    void addBall(const Pokeball& ball, float scale = 1.0f) { addBall(ball.body.position, ball.yaw, ball.spin, 0.0f, 0.0f, scale, ball.color, 0.0f); }
+    void addBall(int ballType, const DirectX::XMFLOAT3& position, float yaw, float spin, float roll, float lid, float scale, float glow);
+    void addTransfer(const BallTransfer& transfer, const DirectX::XMFLOAT3& creature, float creatureSize);
+    void addBall(const Pokeball& ball, float scale = 1.0f) { addBall(ball.typeId, ball.body.position, ball.yaw, ball.spin, ball.twist, 0.0f, scale, 0.0f); }
     void addCapture(const CaptureSequence& sequence);
     void addGlowBetween(const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to, float width, const DirectX::XMFLOAT4& tint);
     void addPlayer(const Scene& scene);
     void addTool(PlayerAction tool, DirectX::CXMMATRIX hand);
     void addFishingLine(const Scene& scene, const DirectX::XMFLOAT3& rodTip);
     void addSky(const Scene& scene, float time);
+    void addUnderground(const Scene& scene); // decorado de las galerías cercanas (estalactitas, raíles, lámparas...) y sus luces
     void addChest(const Chest& chest);
     void addNode(const ResourceNode& node);
     void addGroundItem(const GroundItem& item);
@@ -120,7 +129,7 @@ class Renderer3D {
     void drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) const;
     void drawAll(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj, bool shadowPass) const;
     void drawGlow(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj) const;
-    void drawChunks(ID3D11DeviceContext* context, const std::vector<Chunk>& chunks, DirectX::CXMMATRIX viewProj) const;
+    void drawChunks(ID3D11DeviceContext* context, const std::vector<Chunk>& chunks, DirectX::CXMMATRIX viewProj, float range) const;
     void drawWater(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj) const;
     void renderShadowMap(ID3D11DeviceContext* context, DirectX::CXMMATRIX lightViewProj) const;
     void updateFrame(ID3D11DeviceContext* context, const DayCycle::Lighting& light, DirectX::CXMMATRIX view,
@@ -151,6 +160,10 @@ class Renderer3D {
 
     std::vector<Chunk> m_terrain; // relieve coloreado según hábitat, altura y pendiente; se rehace cuando cambia el mapa
     std::vector<Chunk> m_water;   // superficie del agua (mar, ríos, lagos, charcas, cascadas)
+    std::vector<Chunk> m_cave;    // galerías de cuevas y minas
+    std::vector<Chunk> m_caveWater; // agua subterránea
+    struct Lamp { DirectX::XMFLOAT3 position; float reach; DirectX::XMFLOAT3 color; float distance; };
+    std::vector<Lamp> m_lamps;    // luces del subsuelo cercanas a la cámara (las kLamps más próximas se envían al shader)
     Mesh m_ocean;                 // el mar hasta el horizonte, fuera del archipiélago
     Mesh m_cone;                  // la base rocosa de la isla del cielo
     ID3D11Device* m_device = nullptr;
@@ -165,8 +178,10 @@ class Renderer3D {
     Mesh m_star;   // estrella de la animación de captura
     Mesh m_beam;   // rayo rojo de la captura
     ModelCache m_models;                  // modelos .glb cargados una sola vez
-    const RenderModel* m_ballModel = nullptr;
-    int m_ballLid = -1;                   // pieza articulada de la pokéball (la tapa)
+    // Modelo de pokéball de cada tipo (PokeballStyle::look): se carga una sola vez y lo comparten todas las bolas de ese modelo.
+    struct BallModel { const RenderModel* model = nullptr; int lid = -1; };
+    const BallModel& ballModel(int ballType);
+    std::unordered_map<std::string, BallModel> m_ballModels;
 
     std::vector<Draw> m_draws; // se reutiliza entre frames
 

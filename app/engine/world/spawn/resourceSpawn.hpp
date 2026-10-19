@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <random>
 #include <vector>
 #include <DirectXMath.h>
@@ -19,6 +20,7 @@ namespace ResourceSpawn {
     inline constexpr float PLANT_MIN_GROWTH = 0.3f; // una planta de partida nueva tiene al menos este crecimiento
     inline constexpr int PLACE_TRIES = 12;
     inline constexpr float MAX_SLOPE = 0.55f;       // en laderas más empinadas no crece nada
+    inline constexpr float DEEP_AREA_PER_NODE = 90.0f; // m² de caja envolvente de una galería por cada nodo
     inline constexpr float ENTRANCE_CLEAR = 7.0f;  // zona libre ante la bocana de cada cueva y mina
 
     // Altura a la que se asienta un nodo: la más baja del suelo bajo su base, para que no flote por el lado de cuesta abajo.
@@ -48,11 +50,10 @@ namespace ResourceSpawn {
             return -1;
         };
 
-        const auto free = [&](float x, float z) {
+        const auto fits = [&](float x, float z) {
             if (world.waterDepth(x, z) > 0.05f || world.groundHeight(x, z) < -50.0f || world.slope(x, z) > MAX_SLOPE) return false; // nunca en el agua ni en una ladera empinada
-            for (const HabitatMap::Region& region : habitats.regions()) {
-                if (!region.dark()) continue;
-                const float px = x - region.mouthX, pz = z - region.mouthZ;
+            for (const Underground::System& system : habitats.under().systems()) {
+                const float px = x - system.mouthX, pz = z - system.mouthZ;
                 if (px * px + pz * pz < ENTRANCE_CLEAR * ENTRANCE_CLEAR) return false;
             }
             if (x * x + z * z < CLEAR_RADIUS * CLEAR_RADIUS) return false;
@@ -66,6 +67,35 @@ namespace ResourceSpawn {
                 if (dx * dx + dz * dz < MIN_SEPARATION * MIN_SEPARATION) return false;
             }
             return true;
+        };
+
+        // Tipo de nodo que crece en (x, z) (en la galería de debajo si 'deep'): suma de lo que pide cada hábitat del punto, según lo que pesa.
+        const auto pickType = [&](float x, float z, bool deep) -> std::optional<int> {
+            habitats.weights(x, z, weights, deep);
+            std::fill(typeWeights.begin(), typeWeights.end(), 0.0f);
+            for (size_t h = 0; h < weights.size() && h < data.habitats.size(); ++h) {
+                for (const ResourceChance& chance : data.habitats[h].resources) {
+                    if (const int type = nodeIndex(chance.nodeId); type >= 0) typeWeights[type] += weights[h] * chance.weight;
+                }
+            }
+            float total = 0.0f;
+            for (const float w : typeWeights) total += w;
+            if (total <= 0.0f) return std::nullopt;
+            float pick = between(0.0f, total);
+            int type = 0;
+            for (size_t t = 0; t < typeWeights.size(); ++t) {
+                pick -= typeWeights[t];
+                if (pick < 0.0f) { type = static_cast<int>(t); break; }
+            }
+            return type;
+        };
+        const auto place = [&](int type, float x, float z, bool deep) {
+            const ResourceNodeType& node = data.nodes[type];
+            const float growth = node.plant() ? between(PLANT_MIN_GROWTH, 1.0f) : 1.0f;
+            const float y = deep ? habitats.under().floorAt(x, z) - 0.04f : seat(world, x, z, ResourceStyle::look(node.id).half);
+            nodes.emplace_back(type, node.id, node.hits, node.plant(), static_cast<float>(node.plant() ? node.growSeconds : node.regrowSeconds),
+                               growth, DirectX::XMFLOAT3{ x, y, z }, between(0.0f, 6.2831853f));
+            nodes.back().body.underground = deep;
         };
 
         for (int row = 0; row < chunks; ++row) {
@@ -84,33 +114,32 @@ namespace ResourceSpawn {
                     for (int attempt = 0; attempt < PLACE_TRIES && !placed; ++attempt) {
                         x = between(x0 + 1.0f, x0 + CHUNK - 1.0f);
                         z = between(z0 + 1.0f, z0 + CHUNK - 1.0f);
-                        placed = free(x, z);
+                        placed = fits(x, z);
                     }
                     if (!placed) continue;
 
-                    // Peso de cada tipo aquí: suma de lo que pide cada hábitat del punto, según lo que pesa.
-                    habitats.weights(x, z, weights);
-                    std::fill(typeWeights.begin(), typeWeights.end(), 0.0f);
-                    for (size_t h = 0; h < weights.size() && h < data.habitats.size(); ++h) {
-                        for (const ResourceChance& chance : data.habitats[h].resources) {
-                            if (const int type = nodeIndex(chance.nodeId); type >= 0) typeWeights[type] += weights[h] * chance.weight;
-                        }
-                    }
-                    float total = 0.0f;
-                    for (const float w : typeWeights) total += w;
-                    if (total <= 0.0f) continue;
-
-                    float pick = between(0.0f, total);
-                    int type = 0;
-                    for (size_t t = 0; t < typeWeights.size(); ++t) {
-                        pick -= typeWeights[t];
-                        if (pick < 0.0f) { type = static_cast<int>(t); break; }
-                    }
-                    const ResourceNodeType& node = data.nodes[type];
-                    const float growth = node.plant() ? between(PLANT_MIN_GROWTH, 1.0f) : 1.0f;
-                    nodes.emplace_back(type, node.id, node.hits, node.plant(), static_cast<float>(node.plant() ? node.growSeconds : node.regrowSeconds),
-                                       growth, DirectX::XMFLOAT3{ x, seat(world, x, z, ResourceStyle::look(node.id).half), z }, between(0.0f, 6.2831853f));
+                    if (const auto type = pickType(x, z, false)) place(*type, x, z, false);
                 }
+            }
+        }
+
+        // Galerías: cada sistema recibe nodos según el hábitat de cada punto (mena en la mina, setas y cristales en la cueva...).
+        for (const Underground::System& system : habitats.under().systems()) {
+            const float area = (system.maxX - system.minX) * (system.maxZ - system.minZ);
+            const int wanted = static_cast<int>(area / DEEP_AREA_PER_NODE);
+            for (int i = 0, tries = 0; i < wanted && tries < wanted * 12; ++tries) {
+                const float x = between(system.minX, system.maxX), z = between(system.minZ, system.maxZ);
+                if (!habitats.under().covered(x, z) || habitats.under().depthAt(x, z) > 0.05f || habitats.under().floorAt(x, z) < -50.0f) continue;
+                if (habitats.under().ceilAt(x, z) - habitats.under().floorAt(x, z) < 2.0f || habitats.under().floor().slope(x, z) > MAX_SLOPE) continue;
+                const float mx = x - system.mouthX, mz = z - system.mouthZ;
+                if (mx * mx + mz * mz < ENTRANCE_CLEAR * ENTRANCE_CLEAR) continue;
+                bool apart = true;
+                for (const ResourceNode& other : nodes) {
+                    const float dx = x - other.body.position.x, dz = z - other.body.position.z;
+                    if (dx * dx + dz * dz < MIN_SEPARATION * MIN_SEPARATION && other.body.underground) { apart = false; break; }
+                }
+                if (!apart) continue;
+                if (const auto type = pickType(x, z, true)) { place(*type, x, z, true); ++i; }
             }
         }
         return nodes;

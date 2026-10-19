@@ -11,21 +11,21 @@
 
 // Todos los tiempos y distancias de la animación de captura (nada de esto está repartido por el código).
 struct CaptureAnimConfig {
-    // 1. La bola choca con el pokémon y sale rodando hacia un lado (respecto a la cámara) girando.
-    float deflectTime = 0.6f;
-    float deflectDistance = 1.4f;    // m que se aparta
-    float deflectMargin = 0.2f;      // holgura contra paredes y objetos
-    float deflectHop = 2.4f;         // velocidad vertical inicial del saltito
-    float tumbleTurns = 1.0f;        // vueltas sobre sí misma mientras se aparta
-    // 2. Se abre la tapa.
+    // 1. La bola choca con el pokémon y rebota hacia un lado (respecto a la cámara) y hacia arriba, en un arco que acaba en lo alto.
+    float reboundHeight = 1.15f;     // m que sube al rebotar
+    float reboundDistance = 1.5f;    // m que se aparta en horizontal
+    float reboundMargin = 0.2f;      // holgura contra paredes y objetos
+    // 2. En lo alto del rebote queda suspendida y se abre la tapa.
+    float hoverDamping = 10.0f;      // con qué rapidez se frena la deriva horizontal al quedar suspendida
+    float hoverStiffness = 9.0f;     // con qué fuerza mantiene la altura
     float openTime = 0.35f;
-    // 3. El rayo absorbe al pokémon.
+    // 3. El rayo rojo envuelve al pokémon y lo mete en la bola.
     float absorbTime = 0.95f;
-    // 4. Se cierra mientras da un saltito, cae y gira hasta mirar a la cámara.
-    float closeTime = 0.8f;
+    // 4. Se cierra en el aire, cae y va girando hasta mirar al jugador.
+    float closeTime = 0.35f;
     float lidCloseTime = 0.3f;
-    float closeHop = 3.4f;
-    float turnSpeed = 7.0f;          // rad/s máximo al girar hacia la cámara
+    float closeHop = 1.0f;           // pequeño impulso al cerrarse
+    float turnSpeed = 9.0f;          // rad/s máximo al girar hacia el jugador
     float settleTimeout = 2.0f;
     // 5. Tambaleo de lado a lado.
     float leadPause = 0.45f;
@@ -45,12 +45,12 @@ struct CaptureAnimConfig {
 inline const CaptureAnimConfig kCaptureAnim{};
 
 // Animación de captura de un pokémon. El resultado ya está decidido (CaptureRules::Result); aquí solo se reproduce.
-// Fases: DEFLECT (la bola se aparta girando) → OPEN (se abre la tapa) → ABSORB (el rayo rojo mete al pokémon) → CLOSE (se cierra, cae
-// y gira hasta mirar a la cámara) → SETTLE → WOBBLE (tantos giros como indique el resultado) → CLICK (captura: estrellas) o BREAK
+// Fases: REBOUND (la bola rebota hacia un lado y hacia arriba) → OPEN (suspendida en el aire, se abre la tapa) → ABSORB (el rayo rojo
+// envuelve y mete al pokémon) → CLOSE (se cierra en el aire y cae girando hacia el jugador) → SETTLE (toca el suelo) → WOBBLE (tantos giros como indique el resultado) → CLICK (captura: estrellas) o BREAK
 // (se escapa: la bola se abre de golpe y el pokémon sale de nuevo).
 class CaptureSequence {
     public:
-    enum class Phase { NONE, DEFLECT, OPEN, ABSORB, CLOSE, SETTLE, WOBBLE, CLICK, BREAK, DONE };
+    enum class Phase { NONE, REBOUND, OPEN, ABSORB, CLOSE, SETTLE, WOBBLE, CLICK, BREAK, DONE };
 
     // Cómo hay que dibujar la bola: posición, orientación (yaw, giro sobre sí misma y balanceo) y cuánto está abierta la tapa.
     struct BallPose {
@@ -69,22 +69,32 @@ class CaptureSequence {
     struct Subject { DirectX::XMFLOAT3 center = {}; float size = 0.5f; }; // el pokémon capturado
 
     void start(const Pokeball& ball, const CaptureRules::Result& result, const Subject& subject, float cameraYaw, const Physics::World& world) {
+        const CaptureAnimConfig& c = kCaptureAnim;
         m_ball = ball;
         m_ball.body.restitution = 0.0f;
         m_ball.body.rolls = false;
         m_ball.body.groundDrag = 0.0f;
-        m_ball.body.velocity = { 0.0f, 0.0f, 0.0f };
+        m_ball.body.gravityScale = Pokeball::GRAVITY_SCALE;
         m_result = result;
         m_subject = subject;
         m_cameraYaw = cameraYaw;
         m_particles.clear();
         m_flashTime = m_flashDuration = 0.0f;
         m_startYaw = m_yaw = m_ball.yaw;
-        m_spin = 0.0f;
-        chooseDeflection(world);
-        m_machine.reset(Phase::DEFLECT);
-        m_ball.body.velocity.y = kCaptureAnim.deflectHop;
+        m_startSpin = m_spin = DirectX::XMScalarModAngle(m_ball.spin);
+        constexpr float TURN = 6.2831853f;
+        m_startTwist = m_twist = m_ball.twist;
+        m_endTwist = std::round(m_twist / TURN) * TURN; // acaba "derecha": un número entero de vueltas sobre su eje
+        chooseRebound(world);
+
+        // Arco balístico: sube 'reboundHeight' mientras recorre 'm_distance' hacia el lado; la fase acaba en lo más alto.
+        const float g = Physics::World::GRAVITY * Pokeball::GRAVITY_SCALE;
+        const float rise = std::sqrt(2.0f * g * c.reboundHeight);
+        m_reboundTime = rise / g;
+        m_drift = { m_side.x * m_distance / m_reboundTime, m_side.z * m_distance / m_reboundTime };
+        m_ball.body.velocity = { m_drift.x, rise, m_drift.y };
         m_ball.body.onGround = false;
+        m_machine.reset(Phase::REBOUND);
     }
 
     // La cámara puede girar durante la animación: la bola acaba mirándola.
@@ -115,7 +125,7 @@ class CaptureSequence {
     float pokemonScale() const {
         const CaptureAnimConfig& c = kCaptureAnim;
         switch (phase()) {
-            case Phase::DEFLECT:
+            case Phase::REBOUND:
             case Phase::OPEN:   return 1.0f;
             case Phase::ABSORB: return 1.0f - Easing::apply(Easing::Curve::OUT_QUAD, Easing::remap(m_machine.time(), 0.0f, c.absorbTime * 0.12f));
             case Phase::BREAK:  return Easing::apply(Easing::Curve::OUT_QUAD, Easing::remap(m_machine.time(), c.breakEmerge * 0.55f, c.breakEmerge));
@@ -129,7 +139,7 @@ class CaptureSequence {
         pose.position = m_ball.body.position;
         pose.yaw = m_yaw;
         pose.spin = m_spin;
-        pose.roll = tilt();
+        pose.roll = m_twist + tilt();
         pose.lid = lid();
         const float t = m_machine.time();
         switch (phase()) {
@@ -211,17 +221,17 @@ class CaptureSequence {
     float clearance(const DirectX::XMFLOAT3& dir, const Physics::World& world) const {
         const CaptureAnimConfig& c = kCaptureAnim;
         const DirectX::XMFLOAT3& p = m_ball.body.position;
-        const float reach = c.deflectDistance + c.deflectMargin;
+        const float reach = c.reboundDistance + c.reboundMargin;
         float free = reach;
         for (float step = 0.1f; step <= reach; step += 0.1f) { // primer punto con muro, objeto, desnivel brusco o agua
             const DirectX::XMFLOAT3 at = { p.x + dir.x * step, p.y, p.z + dir.z * step };
-            const bool wall = world.blocked(p, at) || world.groundHeight(at.x, at.z) > p.y + 0.35f;
-            if (wall || world.waterDepth(at.x, at.z) > Physics::World::SWIM_DEPTH) { free = (std::max)(0.0f, step - 0.1f); break; }
+            const bool wall = world.blocked(p, at) || world.groundHeight(at.x, at.z, p.y - 0.2f) > p.y + 0.35f;
+            if (wall || world.waterDepth(at.x, at.z, p.y - 0.2f) > Physics::World::SWIM_DEPTH) { free = (std::max)(0.0f, step - 0.1f); break; }
         }
         return free;
     }
 
-    void chooseDeflection(const Physics::World& world) {
+    void chooseRebound(const Physics::World& world) {
         const CaptureAnimConfig& c = kCaptureAnim;
         const DirectX::XMFLOAT3 right = { std::cos(m_cameraYaw), 0.0f, -std::sin(m_cameraYaw) };
         const DirectX::XMFLOAT3& p = m_ball.body.position;
@@ -237,7 +247,7 @@ class CaptureSequence {
             if (score > bestScore) {
                 bestScore = score;
                 m_side = dir;
-                m_distance = (std::min)(c.deflectDistance, (std::max)(0.0f, free - c.deflectMargin));
+                m_distance = (std::min)(c.reboundDistance, (std::max)(0.0f, free - c.reboundMargin));
             }
         }
     }
@@ -254,25 +264,29 @@ class CaptureSequence {
         const float t = m_machine.time();
         m_ball.body.velocity.x = m_ball.body.velocity.z = 0.0f;
         switch (phase()) {
-            case Phase::DEFLECT: {
-                const float u = (std::min)(t / c.deflectTime, 1.0f);
-                const float speed = 2.0f * m_distance * (1.0f - u) / c.deflectTime; // derivada de un desplazamiento ease-out
-                m_ball.body.velocity.x = m_side.x * speed;
-                m_ball.body.velocity.z = m_side.z * speed;
+            case Phase::REBOUND: {
+                const float u = (std::min)(t / m_reboundTime, 1.0f);
                 const float ease = Easing::apply(Easing::Curve::OUT_QUAD, u);
+                m_ball.body.velocity.x = m_drift.x;
+                m_ball.body.velocity.z = m_drift.y;
                 m_yaw = Easing::lerpAngle(m_startYaw, yawToSubject(), ease);
-                m_spin = 6.2831853f * c.tumbleTurns * ease;
+                m_spin = Easing::lerp(m_startSpin, 0.0f, ease);
+                m_twist = Easing::lerp(m_startTwist, m_endTwist, ease);
                 break;
             }
             case Phase::OPEN:
-            case Phase::ABSORB:
+            case Phase::ABSORB: { // suspendida: la deriva se frena y mantiene la altura
+                m_drift.x -= m_drift.x * (std::min)(1.0f, c.hoverDamping * dt);
+                m_drift.y -= m_drift.y * (std::min)(1.0f, c.hoverDamping * dt);
+                m_ball.body.velocity.x = m_drift.x;
+                m_ball.body.velocity.z = m_drift.y;
+                m_ball.body.velocity.y = (m_hoverY - m_ball.body.position.y) * c.hoverStiffness;
                 m_yaw = Easing::approachAngle(m_yaw, yawToSubject(), c.turnSpeed * dt);
-                m_spin = 0.0f;
+                m_spin = m_twist = 0.0f;
                 break;
+            }
             case Phase::CLOSE:
             case Phase::SETTLE:
-                m_yaw = Easing::approachAngle(m_yaw, yawToCamera(), c.turnSpeed * dt);
-                break;
             case Phase::WOBBLE:
             case Phase::CLICK:
                 m_yaw = Easing::approachAngle(m_yaw, yawToCamera(), c.turnSpeed * dt);
@@ -285,7 +299,7 @@ class CaptureSequence {
     void advance(const Physics::World&, bool& reveal) {
         const CaptureAnimConfig& c = kCaptureAnim;
         switch (phase()) {
-            case Phase::DEFLECT: if (m_machine.elapsed(c.deflectTime)) m_machine.enter(Phase::OPEN); break;
+            case Phase::REBOUND: if (m_machine.elapsed(m_reboundTime)) m_machine.enter(Phase::OPEN); break;
             case Phase::OPEN:    if (m_machine.elapsed(c.openTime)) m_machine.enter(Phase::ABSORB); break;
             case Phase::ABSORB:  if (m_machine.elapsed(c.absorbTime)) m_machine.enter(Phase::CLOSE); break;
             case Phase::CLOSE:   if (m_machine.elapsed(c.closeTime)) m_machine.enter(Phase::SETTLE); break;
@@ -306,11 +320,16 @@ class CaptureSequence {
     void onEnter(Phase to) {
         const CaptureAnimConfig& c = kCaptureAnim;
         switch (to) {
+            case Phase::OPEN:
+                m_hoverY = m_ball.body.position.y;
+                m_ball.body.gravityScale = 0.0f;
+                m_ball.body.velocity.y = 0.0f;
+                break;
             case Phase::ABSORB:
-                m_spin = 0.0f;
                 startFlash(opening(), { 1.0f, 0.25f, 0.2f }, 0.5f, 0.3f);
                 break;
             case Phase::CLOSE:
+                m_ball.body.gravityScale = Pokeball::GRAVITY_SCALE;
                 m_ball.body.velocity.y = c.closeHop;
                 m_ball.body.onGround = false;
                 startFlash(opening(), { 1.0f, 0.5f, 0.4f }, 0.45f, 0.25f);
@@ -432,7 +451,10 @@ class CaptureSequence {
     DirectX::XMFLOAT3 m_side = { 1.0f, 0.0f, 0.0f };
     float m_distance = 0.0f;
     float m_cameraYaw = 0.0f;
-    float m_yaw = 0.0f, m_startYaw = 0.0f, m_spin = 0.0f;
+    DirectX::XMFLOAT2 m_drift = { 0.0f, 0.0f };   // velocidad horizontal del rebote (x, z)
+    float m_reboundTime = 0.5f, m_hoverY = 0.0f;
+    float m_yaw = 0.0f, m_startYaw = 0.0f, m_spin = 0.0f, m_startSpin = 0.0f;
+    float m_twist = 0.0f, m_startTwist = 0.0f, m_endTwist = 0.0f;
     DirectX::XMFLOAT3 m_flashPosition = {}, m_flashColor = { 1.0f, 1.0f, 1.0f };
     float m_flashRadius = 0.5f, m_flashTime = 0.0f, m_flashDuration = 0.0f;
 };

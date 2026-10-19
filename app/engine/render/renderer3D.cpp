@@ -3,6 +3,7 @@
 #include "../world/style/habitatStyle.hpp"
 #include "../world/style/itemStyle.hpp"
 #include "../world/style/pokemonStyle.hpp"
+#include "undergroundGeometry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -47,6 +48,8 @@ namespace {
     // Mapa de sombras: una proyección ortográfica centrada en el jugador (el mundo es enorme) cuyo centro salta de texel en
     // texel, así las sombras no "nadan" al moverse. Vista desde la dirección de la luz activa.
     constexpr float kNodeDrawRange = 90.0f; // los materiales de recolección más lejos no se dibujan
+    constexpr float kCaveDrawRange = 90.0f; // las galerías (y su decorado) más lejos no se dibujan
+    constexpr float kLampRange = 50.0f;     // las luces del subsuelo más lejos no cuentan
     constexpr UINT kShadowMapSize = 3072;
     constexpr float kShadowHalfExtent = 80.0f; // radio de mundo que recibe sombras alrededor del jugador
     constexpr float kLightDistance = 400.0f;
@@ -84,6 +87,8 @@ namespace {
             float4 CameraPos;    // xyz = cámara, w = marea
             float4 Env;          // x = oscuridad, y = densidad de niebla, z = bajo el agua, w = radio del archipiélago
             float4 FogColor;
+            float4 LampPos[8];   // xyz = posición, w = alcance
+            float4 LampColor[8];
         }
         Texture2D ShadowMap : register(t0);
         SamplerComparisonState ShadowSampler : register(s0);
@@ -120,7 +125,12 @@ namespace {
         float3 ApplyEnv(float3 color, float3 wpos) {
             float dist = length(wpos - CameraPos.xyz);
             float torch = saturate(1.0f - dist / 28.0f);
-            color *= lerp(1.0f, torch * torch + 0.03f, Env.x);
+            float3 gain = torch * torch + 0.03f;
+            [unroll] for (int i = 0; i < 8; ++i) { // lámparas y cristales: iluminan lo que tienen cerca
+                float l = saturate(1.0f - length(wpos - LampPos[i].xyz) / max(LampPos[i].w, 0.01f));
+                gain += LampColor[i].rgb * l * l;
+            }
+            color *= lerp(float3(1.0f, 1.0f, 1.0f), gain, Env.x);
             float fog = 1.0f - exp(-dist * Env.y);
             return lerp(color, FogColor.rgb, saturate(fog));
         }
@@ -426,7 +436,7 @@ std::vector<Renderer3D::Chunk> Renderer3D::createTerrain(ID3D11Device* device, c
     };
     const auto keepCell = [&](int col, int row) {
         const float x = terrain.nodeCoord(col) + Physics::Heightfield::CELL * 0.5f, z = terrain.nodeCoord(row) + Physics::Heightfield::CELL * 0.5f;
-        if (!habitats.playable(x, z)) return false;
+        if (!habitats.playable(x, z) || habitats.under().hole(col, row)) return false; // la boca de una galería la dibuja el subsuelo
         const float void_ = HabitatMap::SKY_VOID * 0.5f;
         return terrain.at(col, row) > void_ && terrain.at(col + 1, row) > void_ && terrain.at(col, row + 1) > void_ && terrain.at(col + 1, row + 1) > void_;
     };
@@ -470,6 +480,42 @@ std::vector<Renderer3D::Chunk> Renderer3D::createWater(ID3D11Device* device, con
             depth = 0.0f;
         }
         return Vertex{ { ground.nodeCoord(col), y, ground.nodeCoord(row) }, { depth, world.flowX.at(col, row), world.flowZ.at(col, row) }, { 1.0f, 1.0f, 1.0f, kind } };
+    };
+    const auto keepCell = [&](int col, int row) { return wet(col, row) || wet(col + 1, row) || wet(col, row + 1) || wet(col + 1, row + 1); };
+    return buildChunks(device, n, vertexAt, keepCell);
+}
+
+// Galerías de cuevas y minas (UndergroundGeometry): cada lote de geometría es un trozo que se descarta si queda lejos.
+std::vector<Renderer3D::Chunk> Renderer3D::createUnderground(ID3D11Device* device, const HabitatMap& habitats, const GameData& data) {
+    std::vector<Chunk> chunks;
+    for (const UndergroundGeometry::Batch& batch : UndergroundGeometry::build(habitats, data)) {
+        Chunk chunk;
+        chunk.mesh = createMesh(device, batch.vertices.data(), static_cast<UINT>(batch.vertices.size()), sizeof(Vertex), batch.indices);
+        chunk.center = batch.center;
+        chunk.radius = batch.radius;
+        chunks.push_back(std::move(chunk));
+    }
+    return chunks;
+}
+
+// Agua de las grutas: como la superficie del agua, pero sobre las capas subterráneas (tipo de agua 2, como un lago tranquilo).
+std::vector<Renderer3D::Chunk> Renderer3D::createCaveWater(ID3D11Device* device, const HabitatMap& habitats) {
+    const Underground& under = habitats.under();
+    const Physics::Heightfield& floor = under.floorField();
+    const Physics::Heightfield& level = under.waterField();
+    const int n = floor.count();
+    constexpr float WET = 0.03f;
+    const auto wet = [&](int c, int r) { return c >= 0 && r >= 0 && c < n && r < n && under.nodeDefined(c, r) && level.at(c, r) - floor.at(c, r) > WET; };
+    const auto vertexAt = [&](int col, int row) {
+        float y = level.at(col, row), depth = (std::max)(0.0f, level.at(col, row) - floor.at(col, row)), kind = 2.0f;
+        if (!wet(col, row)) { // el borde de la orilla toma el nivel del agua que tiene al lado
+            float sum = 0.0f;
+            int count = 0;
+            for (int dr = -1; dr <= 1; ++dr) for (int dc = -1; dc <= 1; ++dc) if (wet(col + dc, row + dr)) { sum += level.at(col + dc, row + dr); ++count; }
+            y = count > 0 ? sum / static_cast<float>(count) : 0.0f;
+            depth = 0.0f;
+        }
+        return Vertex{ { floor.nodeCoord(col), y, floor.nodeCoord(row) }, { depth, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, kind } };
     };
     const auto keepCell = [&](int col, int row) { return wet(col, row) || wet(col + 1, row) || wet(col, row + 1) || wet(col + 1, row + 1); };
     return buildChunks(device, n, vertexAt, keepCell);
@@ -785,8 +831,6 @@ void Renderer3D::init(ID3D11Device* device) {
     m_dome = createSphere(device, true);
     m_star = createStar(device);
     m_beam = createBeam(device);
-    m_ballModel = m_models.get(device, "pokeball", true); // si falta el archivo se dibuja la esfera sencilla
-    m_ballLid = m_ballModel ? m_ballModel->part("movable") : -1;
     m_draws.reserve(256);
 }
 
@@ -827,6 +871,7 @@ void Renderer3D::collect(const Scene& scene) {
     addPlayer(scene);
     const float time = scene.dayCycle.lighting().time;
     addSky(scene, time);
+    addUnderground(scene);
 
     for (const CaptureTarget* wild : scene.wild.loaded()) {
         const CaptureTarget& target = *wild;
@@ -840,10 +885,10 @@ void Renderer3D::collect(const Scene& scene) {
         const Companion& pet = scene.companion;
         const float size = Companion::SIZE * pet.scale();
         if (size > 0.001f) {
-            addCreature({ pet.body.position.x, pet.body.position.y + size * 0.5f + pet.bob(), pet.body.position.z },
-                        size, pet.yaw(), pet.speciesId(), scene.storage.active() && scene.storage.active()->shiny);
+            const XMFLOAT3 at = pet.drawCenter();
+            addCreature({ at.x, at.y + pet.bob(), at.z }, size, pet.yaw(), pet.speciesId(), scene.storage.active() && scene.storage.active()->shiny);
         }
-        if (const Pokeball* ball = pet.ball()) addBall(*ball, pet.ballScale()); // cambio de pokémon
+        if (const BallTransfer* transfer = pet.transfer()) addTransfer(*transfer, pet.drawCenter(), Companion::SIZE * pet.scale());
     }
 
     for (const Chest& chest : scene.chests.entities) addChest(chest);
@@ -942,26 +987,145 @@ void Renderer3D::addFishingLine(const Scene& scene, const XMFLOAT3& rodTip) {
     add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(b.x, b.y + r * 0.4f, b.z), { 0.95f, 0.15f, 0.12f, 0.2f }, false);
 }
 
-// Isla del cielo: la base rocosa, las nubes alrededor y, en el mar, la corriente ascendente que lleva hasta ella.
+// Decorado de las galerías cercanas a la cámara y las luces que iluminan sus paredes (lámparas y cristales).
+void Renderer3D::addUnderground(const Scene& scene) {
+    m_lamps.clear();
+    const Underground& under = scene.habitats.under();
+    if (under.empty()) return;
+    const XMFLOAT3& eye = m_eye;
+    const auto tint = [](float r, float g, float b, float glow = 0.0f) { return XMFLOAT4{ r, g, b, glow }; };
+    const XMFLOAT4 rock = tint(0.95f, 0.93f, 0.9f), timber = tint(0.42f, 0.30f, 0.18f), steel = tint(0.55f, 0.56f, 0.62f);
+
+    // Viga o barra entre dos puntos, de sección cuadrada.
+    const auto bar = [&](const XMFLOAT3& a, const XMFLOAT3& b, float thickness, const XMFLOAT4& color) {
+        const float dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+        const float length = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (length < 1.0e-3f) return;
+        add(m_cube, XMMatrixScaling(thickness, thickness, length) * XMMatrixRotationRollPitchYaw(-std::asin(dy / length), std::atan2(dx, dz), 0.0f) *
+                    XMMatrixTranslation((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f, (a.z + b.z) * 0.5f), color, false);
+    };
+    const auto block = [&](const XMFLOAT3& size, float yaw, const XMFLOAT3& at, const XMFLOAT4& color) {
+        add(m_cube, XMMatrixScaling(size.x, size.y, size.z) * XMMatrixRotationY(yaw) * XMMatrixTranslation(at.x, at.y, at.z), color, false);
+    };
+
+    using Prop = Underground::Prop;
+    for (const Prop& prop : under.props()) {
+        const float dx = prop.a.x - eye.x, dz = prop.a.z - eye.z;
+        const float d2 = dx * dx + dz * dz;
+        if (d2 > kCaveDrawRange * kCaveDrawRange) continue;
+        const Underground::Style& style = Underground::style(prop.color);
+        const XMFLOAT3& a = prop.a;
+        const float turn = std::fmod(a.x * 12.9898f + a.z * 78.233f, 6.2831853f); // giro fijo de cada elemento
+        switch (prop.type) {
+            case Prop::STALACTITE:
+                add(m_cone, XMMatrixScaling(prop.w, prop.h, prop.w) * XMMatrixRotationY(turn) * XMMatrixTranslation(a.x, a.y, a.z), rock, false);
+                break;
+            case Prop::STALAGMITE:
+                add(m_cone, XMMatrixScaling(prop.w, prop.h, prop.w) * XMMatrixRotationY(turn) * XMMatrixRotationX(XM_PI) * XMMatrixTranslation(a.x, a.y, a.z), rock, false);
+                break;
+            case Prop::PILLAR: {
+                const float height = prop.b.y - a.y;
+                add(m_cone, XMMatrixScaling(prop.w * 1.5f, height * 0.5f, prop.w * 1.5f) * XMMatrixTranslation(a.x, a.y + height * 0.5f, a.z), rock, false);
+                add(m_cone, XMMatrixScaling(prop.w * 1.5f, height * 0.5f, prop.w * 1.5f) * XMMatrixRotationX(XM_PI) * XMMatrixTranslation(a.x, a.y + height * 0.5f, a.z), rock, false);
+                break;
+            }
+            case Prop::BOULDER:
+                block({ prop.w, prop.w * 0.7f, prop.w * 0.85f }, turn, { a.x, a.y, a.z }, tint(0.5f, 0.48f, 0.46f));
+                break;
+            case Prop::CRYSTAL:
+                block({ prop.w, prop.h, prop.w }, turn, { a.x, a.y + prop.h * 0.5f, a.z }, tint(style.r, style.g, style.b, style.glow));
+                block({ prop.w * 0.6f, prop.h * 0.7f, prop.w * 0.6f }, turn + 0.8f, { a.x + prop.w * 0.7f, a.y + prop.h * 0.35f, a.z }, tint(style.r, style.g, style.b, style.glow));
+                if (d2 < kLampRange * kLampRange) m_lamps.push_back({ { a.x, a.y + prop.h * 0.5f, a.z }, 7.0f, { style.r * style.glow, style.g * style.glow, style.b * style.glow }, std::sqrt(d2) });
+                break;
+            case Prop::ORE:
+                block({ prop.w, prop.w * 0.8f, prop.w }, turn, a, tint(0.34f, 0.32f, 0.31f));
+                for (int k = 0; k < 3; ++k) {
+                    const float ang = turn + k * 2.1f;
+                    block({ prop.w * 0.32f, prop.w * 0.32f, prop.w * 0.32f }, ang, { a.x + std::cos(ang) * prop.w * 0.42f, a.y + (k - 1) * prop.w * 0.2f, a.z + std::sin(ang) * prop.w * 0.42f }, tint(style.r, style.g, style.b, style.glow));
+                }
+                break;
+            case Prop::LAMP: {
+                const XMFLOAT3& n = prop.b;
+                const XMFLOAT3 tip = { a.x + n.x * 0.28f, a.y, a.z + n.z * 0.28f };
+                bar(a, tip, 0.06f, timber);
+                block({ 0.2f, 0.26f, 0.2f }, turn, { tip.x, tip.y - 0.08f, tip.z }, tint(1.0f, 0.78f, 0.35f, 1.0f));
+                if (d2 < kLampRange * kLampRange) m_lamps.push_back({ tip, 13.0f, { 1.0f, 0.78f, 0.42f }, std::sqrt(d2) });
+                break;
+            }
+            case Prop::POST:
+                block({ prop.w, prop.h, prop.w }, 0.0f, { a.x, a.y + prop.h * 0.5f, a.z }, timber);
+                break;
+            case Prop::BEAM:
+                bar(a, prop.b, prop.w, timber);
+                break;
+            case Prop::SLEEPER:
+                block({ prop.w, 0.1f, 0.22f }, std::atan2(prop.b.x, prop.b.z), a, timber);
+                break;
+            case Prop::RAIL:
+                bar(a, prop.b, prop.w, steel);
+                break;
+            case Prop::CART: {
+                const float yaw = std::atan2(prop.b.x, prop.b.z), w = prop.w;
+                block({ w * 0.9f, w * 0.5f, w * 1.3f }, yaw, { a.x, a.y + w * 0.5f, a.z }, tint(0.40f, 0.36f, 0.34f));
+                block({ w * 0.75f, w * 0.18f, w * 1.1f }, yaw, { a.x, a.y + w * 0.78f, a.z }, tint(0.16f, 0.15f, 0.15f));
+                const float cx = std::cos(yaw), sx = std::sin(yaw); // ruedas: dos por lado
+                for (const float side : { -1.0f, 1.0f }) for (const float end : { -1.0f, 1.0f }) {
+                    block({ 0.07f, w * 0.28f, w * 0.28f }, yaw, { a.x + cx * side * w * 0.5f + sx * end * w * 0.42f, a.y + w * 0.16f, a.z - sx * side * w * 0.5f + cx * end * w * 0.42f }, steel);
+                }
+                break;
+            }
+        }
+    }
+    std::sort(m_lamps.begin(), m_lamps.end(), [](const Lamp& l, const Lamp& r) { return l.distance < r.distance; });
+    if (m_lamps.size() > static_cast<size_t>(kLamps)) m_lamps.resize(kLamps);
+}
+
+// Islas del cielo: la corona de nubes que tapa el borde del abismo, las nubes que cuelgan bajo ellas y, en el mar, las corrientes ascendentes que llevan hasta ellas.
 void Renderer3D::addSky(const Scene& scene, float time) {
     const XMFLOAT3& p = scene.player.body.position;
+    int index = 0;
     for (const HabitatMap::Region& region : scene.habitats.regions()) {
         if (region.kind != HabitatPlacement::SKY) continue;
+        ++index;
         const float dx = region.x - p.x, dz = region.z - p.z;
-        if (dx * dx + dz * dz > 520.0f * 520.0f) continue;
+        if (dx * dx + dz * dz > 480.0f * 480.0f) continue;
         const float floorY = region.floorY;
-        const float radius = region.radius - 2.0f;
-        add(m_cone, XMMatrixScaling(radius, 62.0f, radius) * XMMatrixTranslation(region.x, floorY - 0.5f, region.z), kWhite, false);
+        const XMFLOAT4 cloud = { 1.0f, 1.0f, 1.0f, 0.0f };
 
-        // Nubes: grupos de bloques blancos aplastados, repartidos de forma fija alrededor y debajo de la isla.
-        for (int i = 0; i < 26; ++i) {
-            const float h1 = std::fmod(std::sin(i * 12.9898f) * 43758.5453f, 1.0f), h2 = std::fmod(std::sin(i * 78.233f) * 12345.6789f, 1.0f), h3 = std::fmod(std::sin(i * 39.346f) * 9876.543f, 1.0f);
-            const float angle = std::fabs(h1) * XM_2PI, dist = region.radius + 10.0f + std::fabs(h2) * 170.0f;
+        // Una nube: dos semiesferas (arriba y abajo) aplastadas.
+        const auto puff = [&](float x, float y, float z, float size, float squash) {
+            const XMMATRIX at = XMMatrixTranslation(x, y, z);
+            add(m_dome, XMMatrixScaling(size, size * squash, size) * at, cloud, false);
+            add(m_dome, XMMatrixScaling(size, size * squash, size) * XMMatrixRotationX(XM_PI) * at, cloud, false);
+        };
+        // El borde del suelo de nube se hunde en un abismo blanco: una corona de nubes lo tapa y otras cuelgan bajo la isla.
+        const int rim = 16 + static_cast<int>(region.radius / 6.0f);
+        for (int i = 0; i < rim; ++i) {
+            const float a = (static_cast<float>(i) + 0.5f * std::sin(i * 1.7f + index)) / rim * XM_2PI;
+            const float shape = HabitatMap::skyShape(region, std::cos(a), std::sin(a));
+            const float h1 = std::fabs(std::sin(i * 12.9898f + index * 3.7f)), h2 = std::fabs(std::sin(i * 78.233f + index));
+            const float r = region.radius * shape * (0.86f + 0.1f * h1);
+            const float size = 8.0f + 9.0f * h2 + region.radius * 0.08f;
+            puff(region.x + std::cos(a) * r, floorY - 3.2f - HabitatMap::SKY_ABYSS_DROP * (0.7f + 0.35f * h1), region.z + std::sin(a) * r, size, 0.55f);
+        }
+        const int belly = 6 + static_cast<int>(region.radius / 8.0f);
+        for (int i = 0; i < belly; ++i) {
+            const float a = i * 2.39996f + index, k = std::sqrt((static_cast<float>(i) + 0.5f) / belly);
+            const float shape = HabitatMap::skyShape(region, std::cos(a), std::sin(a));
+            const float h = std::fabs(std::sin(i * 39.346f + index));
+            puff(region.x + std::cos(a) * region.radius * shape * k * 0.9f, floorY - HabitatMap::SKY_ABYSS_DROP - 10.0f - 14.0f * (1.0f - k) - 6.0f * h, region.z + std::sin(a) * region.radius * shape * k * 0.9f,
+                 region.radius * (0.22f + 0.1f * h), 0.45f);
+        }
+
+        // Nubes sueltas alrededor y por debajo, de forma fija.
+        for (int i = 0; i < 12; ++i) {
+            const float h1 = std::fmod(std::sin((i + index * 31) * 12.9898f) * 43758.5453f, 1.0f), h2 = std::fmod(std::sin((i + index * 31) * 78.233f) * 12345.6789f, 1.0f), h3 = std::fmod(std::sin((i + index * 31) * 39.346f) * 9876.543f, 1.0f);
+            const float angle = std::fabs(h1) * XM_2PI, dist = region.radius * 1.2f + 10.0f + std::fabs(h2) * 90.0f;
             const float cx = region.x + std::cos(angle) * dist + std::sin(time * 0.05f + i) * 3.0f, cz = region.z + std::sin(angle) * dist;
-            const float cy = floorY - 25.0f - std::fabs(h3) * 70.0f;
-            for (int k = 0; k < 4; ++k) {
-                const float s = 7.0f + 5.0f * std::fabs(std::sin(i * 3.1f + k * 1.7f));
-                add(m_cube, XMMatrixScaling(s * 1.6f, s * 0.45f, s) * XMMatrixTranslation(cx + (k - 1.5f) * s * 0.9f, cy + (k & 1) * 1.5f, cz + std::sin(k * 2.3f + i) * s * 0.5f), { 1.0f, 1.0f, 1.0f, 0.65f }, false);
+            const float cy = floorY - 25.0f - std::fabs(h3) * 60.0f;
+            for (int k = 0; k < 3; ++k) {
+                const float s = 6.0f + 5.0f * std::fabs(std::sin(i * 3.1f + k * 1.7f));
+                puff(cx + (k - 1.0f) * s * 0.9f, cy + (k & 1) * 1.5f, cz + std::sin(k * 2.3f + i) * s * 0.5f, s, 0.5f);
             }
         }
     }
@@ -1117,21 +1281,49 @@ void Renderer3D::addChest(const Chest& chest) {
     }
 }
 
-// Pokéball: el modelo .glb (o una esfera si no se pudo cargar), centrado en 'position', del tamaño de la física, orientado según
-// yaw (hacia dónde mira el botón), spin (rodando) y roll (balanceo sobre el eje del botón), con la tapa abierta 'lid' (0..1).
-void Renderer3D::addBall(const XMFLOAT3& position, float yaw, float spin, float roll, float lid, float scale, const XMFLOAT3& color, float glow) {
+// Modelo de la pokéball de un tipo: el de su aspecto (PokeballStyle::look), o el de la Poké Ball si falta el archivo. Se carga una vez.
+const Renderer3D::BallModel& Renderer3D::ballModel(int ballType) {
+    const PokeballStyle::Look& look = PokeballStyle::look(ballType);
+    const auto found = m_ballModels.find(look.model);
+    if (found != m_ballModels.end()) return found->second;
+    BallModel entry;
+    entry.model = m_models.get(m_device, look.model, look.tintable);
+    if (!entry.model && std::string(look.model) != PokeballStyle::DEFAULT_MODEL) return ballModel(-1); // sin su archivo, la de siempre
+    entry.lid = entry.model ? entry.model->part(PokeballStyle::LID_PART) : -1;
+    return m_ballModels[look.model] = entry;
+}
+
+// Pokéball del tipo dado: su modelo .glb (o una esfera si no se pudo cargar), centrado en 'position', del tamaño de la física, orientado
+// según yaw (hacia dónde mira el botón), spin (rodando o inclinada), roll (giro sobre el eje del botón) y con la tapa abierta 'lid' (0..1).
+void Renderer3D::addBall(int ballType, const XMFLOAT3& position, float yaw, float spin, float roll, float lid, float scale, float glow) {
     if (scale <= 0.001f) return;
-    const XMMATRIX orient = XMMatrixRotationZ(roll) * XMMatrixRotationX(spin) * XMMatrixRotationY(yaw) * XMMatrixTranslation(position.x, position.y, position.z);
-    if (!m_ballModel) {
+    const PokeballStyle::Look& look = PokeballStyle::look(ballType);
+    const XMFLOAT3& color = look.color;
+    const XMMATRIX orient = XMMatrixRotationZ(roll) * XMMatrixRotationX(spin) * XMMatrixRotationY(yaw + look.frontYaw) * XMMatrixTranslation(position.x, position.y, position.z);
+    const BallModel& ball = ballModel(ballType);
+    if (!ball.model) {
         const float r = Pokeball::RADIUS * scale;
         add(m_sphere, XMMatrixScaling(r, r, r) * orient, { color.x, color.y, color.z, glow });
         return;
     }
-    const XMFLOAT3 c = m_ballModel->center();
-    const float s = Pokeball::RADIUS * 2.0f * scale / m_ballModel->height();
+    const XMFLOAT3 c = ball.model->center();
+    const float s = Pokeball::RADIUS * 2.0f * scale / ball.model->height();
     ModelPose pose;
-    pose.set(m_ballLid, lid);
-    addModel(*m_ballModel, XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(s, s, s) * orient, { color.x, color.y, color.z, glow }, pose);
+    pose.set(ball.lid, lid);
+    const XMFLOAT4 tint = look.tintable ? XMFLOAT4{ color.x, color.y, color.z, glow } : XMFLOAT4{ 1.0f, 1.0f, 1.0f, glow };
+    addModel(*ball.model, XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(s, s, s) * orient, tint, pose);
+}
+
+// Sacar o guardar a un pokémon: la bola con su tapa, el rayo rojo y la silueta roja del pokémon mientras entra o sale.
+void Renderer3D::addTransfer(const BallTransfer& transfer, const XMFLOAT3& creature, float creatureSize) {
+    static const XMFLOAT3 red = { 1.0f, 0.16f, 0.10f };
+    const BallTransfer::Pose pose = transfer.pose();
+    addBall(transfer.ballType(), pose.position, pose.yaw, 0.0f, 0.0f, pose.lid, pose.scale, pose.glow);
+    const BallTransfer::Beam beam = transfer.beam(creature, creatureSize);
+    if (!beam.active || beam.intensity <= 0.01f) return;
+    addGlowBetween(beam.from, beam.to, beam.width, { red.x, red.y, red.z, 0.9f * beam.intensity });
+    const float k = creatureSize * 1.05f;
+    add(m_cube, XMMatrixScaling(k, k, k) * XMMatrixTranslation(creature.x, creature.y, creature.z), { red.x, red.y, red.z, 1.0f * beam.intensity }, false, DrawKind::GLOW);
 }
 
 // Segmento entre dos puntos como cubo largo y fino orientado (el hilo de la caña) o, con GLOW, el rayo de la captura.
@@ -1145,7 +1337,7 @@ void Renderer3D::addGlowBetween(const XMFLOAT3& from, const XMFLOAT3& to, float 
 // Todo lo que se ve de una captura: la bola con su tapa, el rayo rojo, la silueta del pokémon, destellos y partículas.
 void Renderer3D::addCapture(const CaptureSequence& sequence) {
     const CaptureSequence::BallPose pose = sequence.ballPose();
-    addBall(pose.position, pose.yaw, pose.spin, pose.roll, pose.lid, pose.scale, sequence.ball().color, pose.glow);
+    addBall(sequence.ball().typeId, pose.position, pose.yaw, pose.spin, pose.roll, pose.lid, pose.scale, pose.glow);
 
     static const XMFLOAT3 red = { 1.0f, 0.16f, 0.10f };
     const CaptureSequence::Beam beam = sequence.beam();
@@ -1259,11 +1451,11 @@ void Renderer3D::renderShadowMap(ID3D11DeviceContext* context, CXMMATRIX lightVi
 }
 
 // Dibuja los trozos de malla cuya esfera envolvente cae a menos de kTerrainDrawRange de la cámara.
-void Renderer3D::drawChunks(ID3D11DeviceContext* context, const std::vector<Chunk>& chunks, CXMMATRIX viewProj) const {
+void Renderer3D::drawChunks(ID3D11DeviceContext* context, const std::vector<Chunk>& chunks, CXMMATRIX viewProj, float range) const {
     setObject(context, XMMatrixIdentity(), viewProj, kWhite);
     for (const Chunk& chunk : chunks) {
         const float dx = chunk.center.x - m_eye.x, dy = chunk.center.y - m_eye.y, dz = chunk.center.z - m_eye.z;
-        const float reach = kTerrainDrawRange + chunk.radius;
+        const float reach = range + chunk.radius;
         if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
         drawIndexed(context, chunk.mesh);
     }
@@ -1278,7 +1470,8 @@ void Renderer3D::drawWater(ID3D11DeviceContext* context, CXMMATRIX viewProj) con
     context->VSSetShader(m_waterVertexShader.Get(), nullptr, 0);
     context->PSSetShader(m_waterPixelShader.Get(), nullptr, 0);
 
-    drawChunks(context, m_water, viewProj);
+    drawChunks(context, m_water, viewProj, kTerrainDrawRange);
+    drawChunks(context, m_caveWater, viewProj, kCaveDrawRange);
     drawIndexed(context, m_ocean);
 
     context->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFF);
@@ -1309,6 +1502,11 @@ void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Light
     const XMFLOAT3 fog = env.underwater ? XMFLOAT3{ 0.04f * day, 0.22f * day, 0.36f * day } : XMFLOAT3{ light.skyHorizon.x, light.skyHorizon.y, light.skyHorizon.z };
     fc.env = { env.darkness, env.underwater ? kWaterFogDensity : (env.darkness > 0.5f ? 0.0f : kFogDensity), env.underwater ? 1.0f : 0.0f, env.worldRadius };
     fc.fogColor = { fog.x * (1.0f - env.darkness), fog.y * (1.0f - env.darkness), fog.z * (1.0f - env.darkness), 0.0f };
+    for (int i = 0; i < kLamps; ++i) {
+        const bool used = i < static_cast<int>(m_lamps.size());
+        fc.lampPos[i] = used ? XMFLOAT4{ m_lamps[i].position.x, m_lamps[i].position.y, m_lamps[i].position.z, m_lamps[i].reach } : XMFLOAT4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        fc.lampColor[i] = used ? XMFLOAT4{ m_lamps[i].color.x, m_lamps[i].color.y, m_lamps[i].color.z, 0.0f } : XMFLOAT4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    }
     context->UpdateSubresource(m_frameBuffer.Get(), 0, nullptr, &fc, 0, 0);
 }
 
@@ -1318,6 +1516,8 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     if (!m_worldBuilt || m_worldSeed != scene.habitats.seed()) {
         m_terrain = createTerrain(m_device, scene.habitats, scene.world, scene.data());
         m_water = createWater(m_device, scene.habitats, scene.world);
+        m_cave = createUnderground(m_device, scene.habitats, scene.data());
+        m_caveWater = createCaveWater(m_device, scene.habitats);
         m_worldSeed = scene.habitats.seed();
         m_worldBuilt = true;
     }
@@ -1336,9 +1536,9 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     env.eye = scene.camera.eye(player);
     env.focus = player;
     env.tide = scene.world.tide;
-    env.underwater = scene.player.diving() && env.eye.y < scene.world.waterLevel(env.eye.x, env.eye.z);
+    env.underwater = scene.player.diving() && env.eye.y < scene.world.waterLevel(env.eye.x, env.eye.z, scene.player.body.feet());
     env.worldRadius = scene.habitats.radius();
-    m_darkness += (scene.habitats.darkness(player.x, player.z) - m_darkness) * 0.08f;
+    m_darkness += (scene.habitats.darkness(player.x, player.z, scene.player.body.feet()) - m_darkness) * 0.08f;
     env.darkness = m_darkness;
     m_eye = env.eye;
 
@@ -1376,7 +1576,8 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     context->VSSetShader(m_vertexShader.Get(), nullptr, 0);
     context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
 
-    drawChunks(context, m_terrain, viewProj);
+    drawChunks(context, m_terrain, viewProj, kTerrainDrawRange);
+    drawChunks(context, m_cave, viewProj, kCaveDrawRange);
     drawAll(context, viewProj, false);
 
     // 4. El agua, translúcida, encima de todo lo anterior.
@@ -1389,7 +1590,7 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
 void Renderer3D::cleanup() {
     m_draws.clear();
     m_models.clear();
-    m_ballModel = nullptr;
+    m_ballModels.clear();
     m_beam = {};
     m_modelSampler.Reset();
     m_additiveBlend.Reset();
@@ -1421,5 +1622,7 @@ void Renderer3D::cleanup() {
     m_ocean = {};
     m_water.clear();
     m_terrain.clear();
+    m_cave.clear();
+    m_caveWater.clear();
     m_worldBuilt = false;
 }

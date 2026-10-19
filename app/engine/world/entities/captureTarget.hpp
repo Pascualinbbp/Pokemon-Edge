@@ -40,8 +40,11 @@ class CaptureTarget {
     }
 
     // Lo coloca (o recoloca) en un punto del mundo, vivo, con la vida entera y sin especie asignada.
-    void place(float x, float z, float yaw) {
-        body.position = { x, 0.0f, z };
+    // 'y' = altura de los pies (de ella depende si está bajo tierra o en la superficie); 'deep' = sale de una galería al renovarse.
+    void place(float x, float y, float z, float yaw, bool deep = false) {
+        body.position = { x, y, z };
+        body.underground = deep;
+        m_deepSlot = deep;
         body.velocity = { 0.0f, 0.0f, 0.0f };
         m_home = { x, z };
         m_yaw = m_heading = yaw;
@@ -63,6 +66,7 @@ class CaptureTarget {
     }
 
     // Descarta el sitio (no vive nada ahí): queda fuera de juego hasta que el chunk lo renueve.
+    bool deepSlot() const { return m_deepSlot; }
     void discard() {
         m_state = State::HIDDEN;
         m_timer = 0.0f;
@@ -227,14 +231,15 @@ class CaptureTarget {
 
     private:
     enum class State { IDLE, CAPTURING, HIDDEN };
+    bool m_deepSlot = false; // su sitio está en una galería
 
     // Los que nadan, donde hay fondo suficiente, se sumergen a su profundidad: sin gravedad, subiendo o bajando hasta ella.
     void dive(const Physics::World& world) {
-        const float depth = world.waterDepth(body.position.x, body.position.z);
+        const float depth = world.waterDepth(body.position.x, body.position.z, body.feet());
         const bool deep = m_swims && !m_surface && m_state == State::IDLE && depth > DIVE_MIN_DEPTH;
         body.underwater = deep;
         if (!deep) return;
-        const float level = world.waterLevel(body.position.x, body.position.z);
+        const float level = world.waterLevel(body.position.x, body.position.z, body.feet());
         const float lowest = level - depth + 0.1f, highest = level - SIZE - 0.1f; // el cubo siempre bajo la superficie
         const float target = lowest + (std::max)(highest - lowest, 0.0f) * (1.0f - m_diveFraction);
         body.velocity.y = (std::clamp)((target - body.position.y) * 1.5f, -DIVE_SPEED, DIVE_SPEED);
@@ -260,7 +265,7 @@ class CaptureTarget {
         if (m_walking) m_yaw += (std::clamp)(delta, -TURN_SPEED * dt, TURN_SPEED * dt);
         if (m_walking && !m_leaving) {
             const float ax = body.position.x + std::sin(m_yaw) * 1.5f, az = body.position.z + std::cos(m_yaw) * 1.5f;
-            const float here = world.waterDepth(body.position.x, body.position.z), ahead = world.waterDepth(ax, az);
+            const float here = world.waterDepth(body.position.x, body.position.z, body.feet()), ahead = world.waterDepth(ax, az, body.feet());
             const bool bad = m_swims ? (ahead < WATER_EDGE && here >= WATER_EDGE) : (ahead > WATER_EDGE && ahead > here);
             if (bad) {
                 m_heading = std::atan2(m_home.x - body.position.x, m_home.y - body.position.z);

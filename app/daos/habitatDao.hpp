@@ -13,7 +13,7 @@ class HabitatDao {
             { "COAST", HabitatPlacement::COAST }, { "BESIDE", HabitatPlacement::BESIDE }, { "SEA", HabitatPlacement::SEA },
             { "RIVER", HabitatPlacement::RIVER }, { "UPPER_RIVER", HabitatPlacement::UPPER_RIVER }, { "LAKE", HabitatPlacement::LAKE },
             { "UPPER_LAKE", HabitatPlacement::UPPER_LAKE }, { "POND", HabitatPlacement::POND }, { "PEAK", HabitatPlacement::PEAK },
-            { "CAVE", HabitatPlacement::CAVE }, { "MINE", HabitatPlacement::MINE }, { "SKY", HabitatPlacement::SKY },
+            { "CAVE", HabitatPlacement::CAVE }, { "MINE", HabitatPlacement::MINE }, { "HALL", HabitatPlacement::HALL }, { "UNDERGROUND_WATER", HabitatPlacement::UNDERGROUND_WATER }, { "SKY", HabitatPlacement::SKY },
             { "SKY_LAND", HabitatPlacement::SKY_LAND }, { "SKY_SEA", HabitatPlacement::SKY_SEA } };
         for (const auto& entry : NAMES) if (name == entry.first) return entry.second;
         return HabitatPlacement::ANY;

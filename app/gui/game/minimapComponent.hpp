@@ -110,7 +110,7 @@ namespace MinimapComponent {
                 const ImVec2 corner = toScreen(Exploration::centerOf(col) - Exploration::CELL * 0.5f, Exploration::centerOf(row) + Exploration::CELL * 0.5f);
                 const float dx = corner.x + cell * 0.5f - mid.x, dy = corner.y + cell * 0.5f - mid.y;
                 if (dx * dx + dy * dy > (RADIUS - 1.0f) * (RADIUS - 1.0f)) continue;
-                dl->AddRectFilled(corner, ImVec2(corner.x + cell + 0.5f, corner.y + cell + 0.5f), terrain.colors[static_cast<size_t>(row) * Exploration::SIZE + col]);
+                dl->AddRectFilled(corner, ImVec2(corner.x + cell + 0.5f, corner.y + cell + 0.5f), MapTerrain::color(terrain, static_cast<size_t>(row) * Exploration::SIZE + col, status.layer));
             }
         }
 

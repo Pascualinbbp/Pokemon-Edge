@@ -29,22 +29,23 @@ class Fishing {
     float biteProgress() const { return m_phase == Phase::BITING ? m_timer / BITE_WINDOW : 0.0f; }
 
     // Punto de agua delante del jugador donde cae el corcho; false si no hay agua suficiente a su alcance.
-    static bool findWater(const Physics::World& world, float x, float z, float yaw, DirectX::XMFLOAT3& out) {
+    static bool findWater(const Physics::World& world, float x, float z, float yaw, DirectX::XMFLOAT3& out, float feet = Physics::World::ABOVE) {
         const float sx = std::sin(yaw), sz = std::cos(yaw);
         for (float d = CAST_MIN; d <= CAST_MAX; d += 0.5f) {
             const float px = x + sx * d, pz = z + sz * d;
-            if (world.waterDepth(px, pz) < MIN_DEPTH) continue;
+            if (world.waterDepth(px, pz, feet) < MIN_DEPTH) continue;
             const float reach = (std::min)(d + 1.5f, CAST_MAX); // un poco más allá de la orilla
             const float fx = x + sx * reach, fz = z + sz * reach;
-            const bool deep = world.waterDepth(fx, fz) >= MIN_DEPTH;
-            out = { deep ? fx : px, world.waterLevel(deep ? fx : px, deep ? fz : pz), deep ? fz : pz };
+            const bool deep = world.waterDepth(fx, fz, feet) >= MIN_DEPTH;
+            out = { deep ? fx : px, world.waterLevel(deep ? fx : px, deep ? fz : pz, feet), deep ? fz : pz };
             return true;
         }
         return false;
     }
 
-    bool cast(const Physics::World& world, float x, float z, float yaw, float rodSpeed) {
-        if (active() || !findWater(world, x, z, yaw, m_bobber)) return false;
+    bool cast(const Physics::World& world, float x, float z, float yaw, float rodSpeed, float feet = Physics::World::ABOVE) {
+        if (active() || !findWater(world, x, z, yaw, m_bobber, feet)) return false;
+        m_feet = feet;
         m_phase = Phase::CASTING;
         m_timer = 0.0f;
         m_speed = (std::max)(rodSpeed, 0.1f);
@@ -57,7 +58,7 @@ class Fishing {
     // 'reel' = el jugador pulsó recoger este frame. El corcho sube y baja con el agua.
     Event update(float dt, bool reel, const Physics::World& world, float playerX, float playerZ) {
         if (m_phase == Phase::IDLE) return Event::NONE;
-        m_bobber.y = world.waterLevel(m_bobber.x, m_bobber.z);
+        m_bobber.y = world.waterLevel(m_bobber.x, m_bobber.z, m_feet);
         const float dx = m_bobber.x - playerX, dz = m_bobber.z - playerZ;
         if (dx * dx + dz * dz > MAX_DISTANCE * MAX_DISTANCE) { reset(); return Event::LINE_CUT; }
 
@@ -102,6 +103,7 @@ class Fishing {
     private:
     Phase m_phase = Phase::IDLE;
     DirectX::XMFLOAT3 m_bobber = {};
+    float m_feet = Physics::World::ABOVE; // altura de los pies al lanzar (decide si el agua es la de una gruta)
     float m_timer = 0.0f;
     float m_limit = 0.0f;
     float m_speed = 1.0f;

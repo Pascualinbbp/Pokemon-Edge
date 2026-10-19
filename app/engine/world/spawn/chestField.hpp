@@ -19,6 +19,7 @@ class ChestField {
     static constexpr float EXCLUSION_RADIUS = 14.0f; // nunca aparece uno tan cerca del jugador
     static constexpr float INTERVAL = 6.0f;          // segundos entre intentos de generar un cofre
     static constexpr int PLACE_TRIES = 10;
+    static constexpr int DEEP_TRIES = 48;           // las galerías ocupan poco de la zona: más intentos
     static constexpr float MIN_LAND_DEPTH = -50.0f;  // por debajo de esto no hay suelo (el vacío alrededor de la isla del cielo)
     static constexpr float MAX_SLOPE = 0.6f;         // un cofre no se coloca en una ladera empinada
 
@@ -49,16 +50,18 @@ class ChestField {
 
         const int zoneIndex = candidates[RandomUtil::integer(0, static_cast<int>(candidates.size()) - 1)];
         const HabitatMap::Zone& zone = habitats.chestSites()[zoneIndex];
-        for (int attempt = 0; attempt < PLACE_TRIES; ++attempt) {
+        for (int attempt = 0; attempt < (zone.deep ? DEEP_TRIES : PLACE_TRIES); ++attempt) {
             // Punto al azar dentro de la elipse de la zona.
             const float angle = RandomUtil::range(0.0f, 6.2831853f), radial = std::sqrt(RandomUtil::range(0.0f, 1.0f));
             const float u = std::cos(angle) * radial * zone.radius * zone.stretch, v = std::sin(angle) * radial * zone.radius / zone.stretch;
             const float x = zone.x + u * zone.cosA - v * zone.sinA, z = zone.z + u * zone.sinA + v * zone.cosA;
-            if (!valid(x, z, playerX, playerZ, world)) continue;
+            if (!valid(x, z, playerX, playerZ, world, habitats, zone.deep)) continue;
 
             const int type = ChestRules::pickType(data.chests);
             if (type < 0) return;
-            entities.emplace_back(zoneIndex, type, data.chests[type].rarity, DirectX::XMFLOAT3{ x, world.groundHeight(x, z), z }, RandomUtil::range(-3.14159265f, 3.14159265f));
+            const float y = zone.deep ? habitats.under().floorAt(x, z) : world.groundHeight(x, z);
+            entities.emplace_back(zoneIndex, type, data.chests[type].rarity, DirectX::XMFLOAT3{ x, y, z }, RandomUtil::range(-3.14159265f, 3.14159265f));
+            entities.back().body.underground = zone.deep;
             --m_budget[zone.habitat];
             return;
         }
@@ -71,8 +74,11 @@ class ChestField {
         return count;
     }
 
-    bool valid(float x, float z, float playerX, float playerZ, const Physics::World& world) const {
-        if (world.waterDepth(x, z) > 0.05f || world.groundHeight(x, z) < MIN_LAND_DEPTH || world.slope(x, z) > MAX_SLOPE) return false; // nunca en el agua ni en una pared
+    bool valid(float x, float z, float playerX, float playerZ, const Physics::World& world, const HabitatMap& habitats, bool deep) const {
+        if (deep) { // galería cubierta, seca, con altura para el cofre y lejos de la boca
+            const Underground& under = habitats.under();
+            if (!under.covered(x, z) || under.depthAt(x, z) > 0.05f || under.ceilAt(x, z) - under.floorAt(x, z) < 2.0f || under.floor().slope(x, z) > MAX_SLOPE) return false;
+        } else if (world.waterDepth(x, z) > 0.05f || world.groundHeight(x, z) < MIN_LAND_DEPTH || world.slope(x, z) > MAX_SLOPE) return false; // nunca en el agua ni en una pared
         if ((x - playerX) * (x - playerX) + (z - playerZ) * (z - playerZ) < EXCLUSION_RADIUS * EXCLUSION_RADIUS) return false;
         const float mx = x - ResearchMachine::POSITION.x, mz = z - ResearchMachine::POSITION.z;
         if (mx * mx + mz * mz < 16.0f) return false;

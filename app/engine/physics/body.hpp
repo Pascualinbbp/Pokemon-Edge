@@ -16,6 +16,8 @@ namespace Physics {
         bool onGround = true;
         bool stickToGround = false; // al bajar una cuesta se queda pegado al suelo en vez de caer (personajes)
         bool rolls = false;         // rueda: en una cuesta gana velocidad cuesta abajo (pokéballs)
+        float feet() const { return position.y - groundOffset; } // altura de la parte baja del cuerpo
+        bool underground = false;   // dentro de una galería (cueva o mina): la física la fija en cada paso y las consultas usan el suelo de la galería
         bool underwater = false;    // buceando: sin gravedad ni flotación; quien lo controla fija la velocidad vertical
     };
 }

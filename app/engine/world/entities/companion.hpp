@@ -3,7 +3,7 @@
 #include <cmath>
 #include <DirectXMath.h>
 #include "../../physics/physicsWorld.hpp"
-#include "pokeball.hpp"
+#include "ballTransfer.hpp"
 
 // El pokémon líder del equipo, que acompaña al jugador por el mundo (física común, como cualquier otro cuerpo).
 // Sigue al jugador por detrás y, si pasa cerca de un recurso que sabe trabajar, lo trabaja solo.
@@ -25,12 +25,9 @@ class Companion {
     static constexpr float LEVEL_SPEEDUP = 0.25f; // cada nivel de recolección por encima del 1 trabaja un 25 % más rápido
     static constexpr float HOVER_HEIGHT = 1.3f;   // altura sobre el jugador al levitar
 
-    // Cambio de pokémon: el que está fuera vuelve a su pokéball y el nuevo sale de la suya.
-    static constexpr float RECALL_TIME = 0.45f;   // el pokémon se encoge hacia su bola y esta vuela a la mano del jugador
-    static constexpr float THROW_TIME = 0.45f;    // la bola del nuevo vuela hasta su sitio
-    static constexpr float APPEAR_TIME = 0.3f;    // la bola se abre y el pokémon crece
+    // Cambio de pokémon (BallTransfer): el que está fuera vuelve a su pokéball y después sale el nuevo de la suya.
     static constexpr float HAND_HEIGHT = 1.0f;    // altura de la mano del jugador
-    static constexpr float THROW_ARC = 1.2f;      // altura máxima del lanzamiento
+    static constexpr float HOVER_OVER = 1.0f;     // la bola queda suspendida a esta altura sobre el pokémon
 
     Physics::Body body;
 
@@ -48,33 +45,30 @@ class Companion {
     static float workPower(int level, float teamBonus) { return (1.0f + LEVEL_SPEEDUP * static_cast<float>(level - 1)) * teamBonus; }
     float bob() const { return m_working ? std::sin(m_time * 14.0f) * 0.07f : 0.0f; }
 
-    // Escala del pokémon dibujado (0..1): se encoge al volver a la bola y crece al salir de ella.
-    float scale() const {
-        switch (m_phase) {
-            case Phase::RECALL: return 1.0f - (std::min)(m_phaseTime / RECALL_TIME, 1.0f);
-            case Phase::SEND:   return (std::clamp)((m_phaseTime - THROW_TIME) / APPEAR_TIME, 0.0f, 1.0f);
-            default:            return 1.0f;
-        }
-    }
+    // Escala del pokémon dibujado (0..1): sale de su bola o vuelve a ella por el rayo.
+    float scale() const { return m_phase == Phase::NONE ? 1.0f : m_transfer.emerge(); }
 
-    // La pokéball que se ve durante el cambio (nullptr si no hay cambio en curso) y su escala.
-    const Pokeball* ball() const { return m_phase == Phase::NONE ? nullptr : &m_ball; }
-    float ballScale() const { return m_ballScale; }
+    // El cambio en curso (nullptr si no hay) y dónde se dibuja el pokémon mientras sale o entra.
+    const BallTransfer* transfer() const { return m_phase == Phase::NONE ? nullptr : &m_transfer; }
+    DirectX::XMFLOAT3 center() const { return { body.position.x, body.position.y + SIZE * 0.5f, body.position.z }; }
+    DirectX::XMFLOAT3 drawCenter() const { return m_phase == Phase::NONE ? center() : m_transfer.creatureCenter(center()); }
     bool changing() const { return m_phase != Phase::NONE; }
 
     // Cambia de pokémon con su animación: si hay uno fuera vuelve a su bola; después sale el nuevo de la suya.
-    void swap(int speciesId, bool floats, const DirectX::XMFLOAT3& ballColor, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
-        m_next = { speciesId, floats, ballColor };
+    void swap(int speciesId, bool floats, int ballType, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
+        m_next = { speciesId, floats, ballType };
+        m_cameraYaw = cameraYaw;
+        if (m_phase == Phase::RECALL) return; // ya se está guardando: saldrá el último elegido
         if (active()) {
             m_phase = Phase::RECALL;
-            m_phaseTime = 0.0f;
-            m_ball.color = m_color;
+            m_transfer.start(BallTransfer::Mode::ABSORB, cameraYaw, hand(playerPosition), m_ballType);
         } else beginSend(playerPosition, cameraYaw);
     }
 
     // Cambia de pokémon (-1 = ninguno): aparece junto al jugador.
     void set(int speciesId, bool floats, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
         m_phase = Phase::NONE;
+        m_transfer.stop();
         m_speciesId = speciesId;
         m_floats = floats;
         body.gravityScale = floats ? 0.0f : 1.0f;
@@ -92,6 +86,7 @@ class Companion {
                 const DirectX::XMFLOAT3* goal = nullptr) {
         if (!active()) return false;
         m_time += dt;
+        m_cameraYaw = cameraYaw;
         if (m_phase != Phase::NONE) {
             animate(dt, world, playerPosition, cameraYaw);
             return false;
@@ -133,42 +128,26 @@ class Companion {
 
     private:
     enum class Phase { NONE, RECALL, SEND };
-    struct Next { int speciesId; bool floats; DirectX::XMFLOAT3 color; };
+    struct Next { int speciesId; bool floats; int ballType; };
+
+    static DirectX::XMFLOAT3 hand(const DirectX::XMFLOAT3& player) { return { player.x, player.y + HAND_HEIGHT, player.z }; }
 
     void beginSend(const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
         set(m_next.speciesId, m_next.floats, playerPosition, cameraYaw);
-        m_color = m_next.color;
-        m_ball.color = m_color;
+        m_ballType = m_next.ballType;
         m_phase = Phase::SEND;
-        m_phaseTime = 0.0f;
-        m_throwFrom = { playerPosition.x, playerPosition.y + HAND_HEIGHT, playerPosition.z };
-        m_ballScale = 1.0f;
-        m_ball.body.position = m_throwFrom;
+        m_transfer.start(BallTransfer::Mode::RELEASE, cameraYaw, hand(playerPosition), m_ballType);
     }
 
-    // Avanza la animación del cambio y coloca la pokéball visible.
+    // Avanza el cambio: la bola queda suspendida sobre el pokémon (que no se mueve mientras tanto).
     void animate(float dt, const Physics::World& world, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
-        m_phaseTime += dt;
-        const DirectX::XMFLOAT3 hand = { playerPosition.x, playerPosition.y + HAND_HEIGHT, playerPosition.z };
-        if (m_phase == Phase::RECALL) {
-            const float u = (std::min)(m_phaseTime / RECALL_TIME, 1.0f);
-            const DirectX::XMFLOAT3 from = { body.position.x, body.position.y + SIZE * 0.5f, body.position.z };
-            m_ball.body.position = { from.x + (hand.x - from.x) * u, from.y + (hand.y - from.y) * u, from.z + (hand.z - from.z) * u };
-            m_ballScale = (std::min)(1.0f, u * 4.0f);
-            if (m_phaseTime >= RECALL_TIME) beginSend(playerPosition, cameraYaw);
-            return;
-        }
-
-        // SEND: la bola vuela en arco hasta el sitio del pokémon, se abre y este crece.
-        const DirectX::XMFLOAT3 target = { body.position.x, body.position.y + SIZE * 0.5f, body.position.z };
-        const float u = (std::min)(m_phaseTime / THROW_TIME, 1.0f);
-        m_ball.body.position = { m_throwFrom.x + (target.x - m_throwFrom.x) * u,
-                                 m_throwFrom.y + (target.y - m_throwFrom.y) * u + std::sin(u * 3.14159265f) * THROW_ARC,
-                                 m_throwFrom.z + (target.z - m_throwFrom.z) * u };
-        m_ballScale = m_phaseTime <= THROW_TIME ? 1.0f : (std::max)(0.0f, 1.0f - (m_phaseTime - THROW_TIME) / APPEAR_TIME);
+        const DirectX::XMFLOAT3 over = { body.position.x, body.position.y + SIZE * 0.5f + HOVER_OVER, body.position.z };
+        m_transfer.update(dt, over, hand(playerPosition));
         body.velocity = { 0.0f, 0.0f, 0.0f };
         world.step(body, dt);
-        if (m_phaseTime >= THROW_TIME + APPEAR_TIME) m_phase = Phase::NONE;
+        if (m_transfer.active()) return;
+        if (m_phase == Phase::RECALL) beginSend(playerPosition, cameraYaw);
+        else m_phase = Phase::NONE;
     }
 
     // Rumbo libre de obstáculos más cercano al deseado: si hay algo delante, prueba cada vez más a los lados (primero hacia el
@@ -208,10 +187,8 @@ class Companion {
     float m_workTimer = 0.0f;
     bool m_working = false;
     Phase m_phase = Phase::NONE;
-    float m_phaseTime = 0.0f;
-    float m_ballScale = 0.0f;
-    Pokeball m_ball;                          // solo para dibujar el cambio
-    DirectX::XMFLOAT3 m_color = { 0.86f, 0.16f, 0.16f }; // color de la pokéball del pokémon que está fuera
-    DirectX::XMFLOAT3 m_throwFrom = {};
-    Next m_next = { -1, false, { 1.0f, 1.0f, 1.0f } };
+    float m_cameraYaw = 0.0f;
+    BallTransfer m_transfer;
+    int m_ballType = 1;                       // tipo de la pokéball del pokémon que está fuera
+    Next m_next = { -1, false, 1 };
 };
