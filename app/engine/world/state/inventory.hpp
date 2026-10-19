@@ -85,7 +85,7 @@ class Inventory {
             const Tool* tool = m_data->toolOf(*slot.item);
             if (!tool || tool->skillId != skillId || slot.count <= best) continue;
             best = slot.count;
-            if (const ToolTier* tier = tool->tier(slot.count)) speed = tier->speed;
+            speed = tool->speed(slot.count);
         }
         return speed;
     }

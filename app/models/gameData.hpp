@@ -3,6 +3,9 @@
 #include <vector>
 #include "pokemon/ability.hpp"
 #include "pokemon/dexReward.hpp"
+#include "pokemon/generation.hpp"
+#include "pokemon/rarity.hpp"
+#include "pokemon/typeChart.hpp"
 #include "world/chestType.hpp"
 #include "world/groundItemType.hpp"
 #include "world/habitat.hpp"
@@ -29,6 +32,9 @@ struct GameData {
     std::vector<PokemonSpecies> species;
     std::vector<Ability> abilities;
     std::vector<PokemonType> types;
+    TypeChart typeChart;
+    std::vector<Rarity> rarities;
+    std::vector<Generation> generations;
     std::vector<GroundItemType> groundItems;
     std::vector<TrainingItem> trainingItems;
     std::vector<ChestType> chests;
@@ -51,6 +57,11 @@ struct GameData {
     const TrainingItem* training(int id) const { return find(trainingItems, id); }
     const Ability* ability(int id) const { return find(abilities, id); }
     const PokemonType* type(int id) const { return find(types, id); }
+    const Rarity* rarity(int id) const { return find(rarities, id); }
+    const Generation* generation(int id) const { return find(generations, id); }
+    const Rarity* rarityOf(const PokemonSpecies& species) const { return rarity(species.rarityId); }
+    float spawnMultiplier(const PokemonSpecies& species) const { const Rarity* r = rarityOf(species); return r ? r->spawnMultiplier : 1.0f; }
+    float xpMultiplier(const PokemonSpecies& species) const { const Rarity* r = rarityOf(species); return r ? r->xpMultiplier : 1.0f; }
     const PokemonSpecies* speciesById(int id) const { return find(species, id); }
     const Habitat* habitat(int id) const { return find(habitats, id); }
     const Weather* weather(int id) const { return find(weathers, id); }
@@ -117,7 +128,7 @@ struct GameData {
     bool levitates(const PokemonSpecies& species) const {
         const Ability* active = ability(species.abilityId);
         const Ability* passive = ability(species.passiveId);
-        return (active && active->floats) || (passive && passive->floats);
+        return (active && active->floats()) || (passive && passive->floats());
     }
 
     // La herramienta que representa un objeto (nullptr si no es una herramienta).
@@ -138,12 +149,12 @@ struct GameData {
 
     // Nombre que ve el jugador: el de la herramienta cambia con su nivel ('count' = unidades o nivel); el resto, su nombre.
     std::string itemTitle(const Item& item, int count) const {
-        if (const Tool* found = toolOf(item)) if (const ToolTier* tier = found->tier(count)) return tier->name;
+        if (const Tool* found = toolOf(item)) return found->title(count);
         return itemName(item);
     }
 
     std::string itemText(const Item& item, int count) const {
-        if (const Tool* found = toolOf(item)) if (const ToolTier* tier = found->tier(count)) return tier->description;
+        if (const Tool* found = toolOf(item)) return found->effects(count);
         return itemDescription(item);
     }
 

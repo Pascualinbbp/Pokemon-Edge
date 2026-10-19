@@ -1,3 +1,4 @@
+#include "../../utils/core/crashUtil.hpp"
 #include "mainWindow.hpp"
 #include "graphicsDevice.hpp"
 #include "guiInput.hpp"
@@ -230,6 +231,7 @@ void MainWindow::run() {
             if (msg.message != WM_INPUT) redrawFrames = 2; // los informes del mando no obligan a redibujar
         }
         if (done) break;
+        CrashUtil::heartbeat();
 
         InputHandler::refreshDevices();
 
@@ -255,6 +257,7 @@ void MainWindow::run() {
             // Espera pasiva. Sin mando (o sin foco) no se despierta nunca por iniciativa propia.
             // Con un mando conectado se despierta cada kMenuPollMs para leerlo: Windows no avisa de
             // las pulsaciones de los mandos Xbox (XInput).
+            CrashUtil::idle();
             WindowUtil::waitForMessages((g_focused && InputHandler::hasGamepad()) ? kMenuPollMs : INFINITE);
             timer.reset(); // el tiempo dormido no cuenta como dt
             continue;
@@ -293,9 +296,11 @@ void MainWindow::run() {
 
         // GUI: fondo de la GUI. Juego: fondo propio del motor.
         const bool inGame = isInGame(g_state);
+        CrashUtil::stage("fotograma: empezar");
         GraphicsDevice::beginFrame(inGame ? GameEngine::CLEAR_COLOR : GuiStyle::BACKGROUND);
         if (inGame) engine.render(GraphicsDevice::context(), GraphicsDevice::width(), GraphicsDevice::height());
 
+        CrashUtil::stage("fotograma: interfaz");
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         if (g_state != GameState::PLAYING) GuiInput::feed();
@@ -363,7 +368,7 @@ void MainWindow::run() {
                 InventoryComponent::render(g_state, g_backState, engine.data(), engine.inventory());
                 break;
             case GameState::POKEDEX:
-                PokedexComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory());
+                PokedexComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.progress());
                 break;
             case GameState::POKEMON:
                 PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress(), InputHandler::activeDevice());
@@ -384,6 +389,7 @@ void MainWindow::run() {
 
         ImGui::Render();
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        CrashUtil::stage("fotograma: presentar");
         GraphicsDevice::present();
 
         if (g_state != prevState) {

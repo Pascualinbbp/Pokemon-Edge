@@ -1,5 +1,8 @@
 #pragma once
+#include "../../utils/core/crashUtil.hpp"
+#include <cstdio>
 #include <utility>
+#include "../../utils/core/loggerUtil.hpp"
 #include <vector>
 #include "../world/scene.hpp"
 #include "../render/renderer3D.hpp"
@@ -64,12 +67,19 @@ class GameEngine {
 
     // Devuelve true si se pide pausar (ESC fuera del modo lanzamiento).
     bool update(float dt, const InputState& input) {
+        const DirectX::XMFLOAT3& at = m_scene.player.body.position;
+        CrashUtil::detail("x=%.1f y=%.1f z=%.1f", at.x, at.y, at.z);
+        CrashUtil::stage("juego: actualizar");
         m_scene.dayCycle.update(dt); // el tiempo del mundo corre siempre mientras se juega, haga lo que haga el jugador
-        return m_scene.update(dt, input);
+        const bool pause = m_scene.update(dt, input);
+        logLayer();
+        return pause;
     }
 
     void render(ID3D11DeviceContext* context, int screenW, int screenH) {
+        CrashUtil::stage("juego: dibujar");
         m_renderer.render(context, m_scene, screenW, screenH);
+        CrashUtil::stage("juego: dibujado");
     }
 
     // Lo que necesita la pantalla de inventario (el equipo se modifica desde ella).
@@ -77,6 +87,7 @@ class GameEngine {
     Inventory& inventory() { return m_scene.inventory; }
     PokemonStorage& storage() { return m_scene.storage; }
     const PlayerProgress& progress() const { return m_scene.progress; }
+    PlayerProgress& progress() { return m_scene.progress; }
 
     bool needsStarter() const { return m_scene.needsStarter(); }
     void chooseStarter(int speciesId) { m_scene.chooseStarter(speciesId); }
@@ -99,6 +110,19 @@ class GameEngine {
     }
 
     private:
+    // Deja en el registro cada vez que el jugador entra o sale de una cueva, una mina o el cielo (para localizar fallos en cada capa).
+    void logLayer() {
+        const Physics::Body& body = m_scene.player.body;
+        const int layer = static_cast<int>(m_scene.habitats.layerAt(body.position.x, body.position.z, body.feet()));
+        if (layer == m_layer) return;
+        m_layer = layer;
+        static constexpr const char* NAMES[] = { "subsuelo", "superficie", "cielo" };
+        char text[160];
+        std::snprintf(text, sizeof(text), "Capa %s en (%.1f, %.1f, %.1f)", NAMES[(layer >= 0 && layer < 3) ? layer : 1], body.position.x, body.position.y, body.position.z);
+        Logger::logInfo("ENGINE", text);
+    }
+
+    int m_layer = -1;
     GameData m_data;
     Scene m_scene;
     Renderer3D m_renderer;

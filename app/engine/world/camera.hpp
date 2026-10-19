@@ -102,10 +102,13 @@ class Camera {
         return at;
     }
 
-    // pull: fracción (0..1) de la distancia normal a la que queda la cámara (menos de 1 cuando una pared se interpone).
+    // pull: fracción (0..1) de la distancia normal a la que queda la cámara (menos de 1 cuando una pared se interpone). Nunca baja de
+    // MIN_PULL: con la cámara pegada al punto al que mira (techo bajo, pared junto al jugador) la matriz de vista quedaría indefinida.
+    static constexpr float MIN_PULL = 0.12f;
     DirectX::XMMATRIX viewMatrix(const DirectX::XMFLOAT3& target, float minEyeY = -1.0e9f, float maxEyeY = 1.0e9f, float pull = 1.0f) const {
         DirectX::XMFLOAT3 at, eyePos;
         compute(target, at, eyePos);
+        pull = (std::clamp)(pull, MIN_PULL, 1.0f);
         eyePos = { at.x + (eyePos.x - at.x) * pull, at.y + (eyePos.y - at.y) * pull, at.z + (eyePos.z - at.z) * pull };
         eyePos.y = (std::min)((std::max)(eyePos.y, minEyeY), maxEyeY);
         return DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&eyePos), DirectX::XMLoadFloat3(&at), DirectX::g_XMIdentityR1);

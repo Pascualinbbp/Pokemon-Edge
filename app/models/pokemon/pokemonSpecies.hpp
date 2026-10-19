@@ -52,11 +52,12 @@ struct PokemonSpecies {
     std::vector<int> types; // uno o dos id de la tabla type
     BaseStats stats;
     SpawnProfile spawn;       // en qué hábitats y con qué condiciones aparece salvaje
-    float spawnWeight = 1.0f; // rareza: suma de sus pesos en los hábitats (cuanto menor, más raro); la rellena el DAO
+    float spawnWeight = 1.0f; // frecuencia: suma de sus pesos en los hábitats (cuanto menor, más raro); la rellena el DAO
     int catchRate = 45;       // ratio de captura fijo de la especie (1..255)
     int minLevel = 1;         // nivel al aparecer salvaje
     int maxLevel = 1;
     int generationId = -1;    // generación (tabla generation)
+    int rarityId = -1;        // rareza (tabla rarity)
     std::vector<Evolution> evolutions; // vacío = no evoluciona
     bool swims = false;       // acuático: solo aparece donde hay agua y se mueve por ella
     bool starter = false;     // se puede elegir como pokémon inicial

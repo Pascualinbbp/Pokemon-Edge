@@ -1,10 +1,11 @@
 #pragma once
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <sstream>
 #include <string>
 #include <vector>
-#include "inventory.hpp"
+#include "playerProgress.hpp"
 #include "../rules/evRules.hpp"
 #include "../../../models/gameData.hpp"
 
@@ -70,12 +71,21 @@ class DexProgress {
         return count;
     }
 
-    // Reclama el premio: lo da al inventario y lo marca. false si no se puede (no alcanzado, ya reclamado o mochila llena).
-    bool claim(const DexReward& reward, int speciesId, Inventory& inventory) {
+    // Puntos de progreso de la especie (los de sus hitos reclamados) y los que tendría con todos reclamados.
+    int progress(int speciesId) const { return sumProgress(speciesId, true); }
+    int progressMax(int speciesId) const { return sumProgress(speciesId, false); }
+
+    struct Claim { bool done = false; int xp = 0; int levels = 0; };
+
+    // Reclama el hito: da experiencia al jugador (multiplicada por la rareza de la especie) y suma su progreso. done = false si no se
+    // puede (no alcanzado o ya reclamado).
+    Claim claim(const DexReward& reward, int speciesId, PlayerProgress& player) {
         Entry* e = entry(speciesId);
-        if (!e || !claimable(reward, speciesId) || !inventory.add(reward.itemId, reward.quantity)) return false;
+        const PokemonSpecies* species = m_data ? m_data->speciesById(speciesId) : nullptr;
+        if (!e || !species || !claimable(reward, speciesId)) return {};
         e->claimed.push_back(reward.id);
-        return true;
+        const int xp = static_cast<int>(std::lround(static_cast<float>(reward.playerXp) * m_data->xpMultiplier(*species)));
+        return { true, xp, player.addXp(xp) };
     }
 
     // Guardado: "Especie|capturas|variocolor|rango|nivel|id,id" (solo las especies con algo que contar).
@@ -113,6 +123,14 @@ class DexProgress {
 
     private:
     static constexpr char SEPARATOR = '|';
+
+    int sumProgress(int speciesId, bool claimedOnly) const {
+        int total = 0;
+        for (const DexReward& reward : m_data->dexRewards) {
+            if (reward.appliesTo(speciesId) && (!claimedOnly || claimed(reward, speciesId))) total += reward.progress;
+        }
+        return total;
+    }
 
     Entry* entry(int speciesId) {
         const int index = m_data ? m_data->speciesIndex(speciesId) : -1;

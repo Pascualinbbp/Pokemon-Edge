@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 
-// Recompensa de progreso de la Pokédex (tabla dex_reward): se gana por especie al llegar a cierto logro con ella.
+// Hito de la Pokédex (tabla dex_reward): se gana por especie al llegar a cierto logro con ella y da experiencia al jugador y progreso de la especie.
 struct DexReward {
     // CAPTURES: pokémon de la especie capturados · SHINY: variocolor capturados · RANK: mejor rango analizado (índice de
     // EvRules::RANKS: 0 = D ... 4 = S, 5 = S+) · LEVEL: nivel más alto alcanzado por uno de la especie.
@@ -11,8 +11,8 @@ struct DexReward {
     Kind kind = Kind::CAPTURES;
     int threshold = 1;
     std::string description;
-    int itemId = -1;
-    int quantity = 1;
+    int playerXp = 0;   // experiencia del jugador (antes de multiplicarla por la rareza de la especie)
+    int progress = 1;   // puntos de progreso de la especie
     int speciesId = -1; // -1 = vale para todas las especies
 
     static Kind parse(const std::string& text) {

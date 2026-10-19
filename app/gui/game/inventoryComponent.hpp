@@ -102,7 +102,8 @@ namespace InventoryComponent {
                 GuiCards::muted("Nivel máximo alcanzado.");
                 return;
             }
-            ImGui::TextUnformatted(next->name.c_str());
+            ImGui::TextUnformatted(tool.title(next->level).c_str());
+            GuiCards::muted(next->description.c_str());
             char text[96];
             for (const RecipeIngredient& ingredient : next->cost) {
                 const Item* material = data.materialItem(ingredient.materialId);
@@ -173,8 +174,7 @@ namespace InventoryComponent {
                 }
             } else if (const Tool* tool = data.toolOf(*item)) {
                 const Skill* skill = data.skill(tool->skillId);
-                const ToolTier* tier = tool->tier(count);
-                std::snprintf(text, sizeof(text), "Habilidad: %s  -  Velocidad x%.1f", skill ? skill->name.c_str() : "?", tier ? tier->speed : 1.0f);
+                std::snprintf(text, sizeof(text), "Habilidad: %s  -  Velocidad x%.1f", skill ? skill->name.c_str() : "?", tool->speed(count));
                 ImGui::TextUnformatted(text);
                 std::string works;
                 for (const ResourceNodeType& node : data.nodes) {

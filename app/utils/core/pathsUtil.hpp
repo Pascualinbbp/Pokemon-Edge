@@ -31,6 +31,7 @@ class PathsUtil {
     inline static const fs::path VERSION_JSON_PATH = DATA_DIR / "version.json";
     inline static const fs::path DB_PATH = DB_DIR / "pokemonEdge.db";
     inline static const fs::path LOG_FILE_PATH = LOG_DIR / "app.log";
+    inline static const fs::path CRASH_DUMP_PATH = LOG_DIR / "crash.dmp"; // volcado del último cierre inesperado (CrashUtil)
     inline static const fs::path TEMP_ZIP_PATH = DOWNLOAD_FOLDER / "update.zip";
     inline static const fs::path EXTRACT_PROGRESS_PATH = DOWNLOAD_FOLDER / "extract.progress";
 

@@ -4,6 +4,7 @@
 #include "../world/style/itemStyle.hpp"
 #include "../world/style/pokemonStyle.hpp"
 #include "undergroundGeometry.hpp"
+#include "../../utils/core/crashUtil.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -438,6 +439,11 @@ std::vector<Renderer3D::Chunk> Renderer3D::createTerrain(ID3D11Device* device, c
         const float x = terrain.nodeCoord(col) + Physics::Heightfield::CELL * 0.5f, z = terrain.nodeCoord(row) + Physics::Heightfield::CELL * 0.5f;
         if (!habitats.playable(x, z) || habitats.under().hole(col, row)) return false; // la boca de una galería la dibuja el subsuelo
         const float void_ = HabitatMap::SKY_VOID * 0.5f;
+        if (const HabitatMap::Region* region = habitats.regionAt(x, z); region && region->kind == HabitatPlacement::SKY) {
+            // Más allá del mar de nubes el relieve cae al vacío: no se dibuja (lo tapa la base de nube de createSkyBase).
+            const float limit = region->floorY - HabitatMap::SKY_SEA_DEPTH - 1.5f;
+            if (terrain.at(col, row) < limit && terrain.at(col + 1, row) < limit && terrain.at(col, row + 1) < limit && terrain.at(col + 1, row + 1) < limit) return false;
+        }
         return terrain.at(col, row) > void_ && terrain.at(col + 1, row) > void_ && terrain.at(col, row + 1) > void_ && terrain.at(col + 1, row + 1) > void_;
     };
     return buildChunks(device, nodes, vertexAt, keepCell);
@@ -519,6 +525,82 @@ std::vector<Renderer3D::Chunk> Renderer3D::createCaveWater(ID3D11Device* device,
     };
     const auto keepCell = [&](int col, int row) { return wet(col, row) || wet(col + 1, row) || wet(col, row + 1) || wet(col + 1, row + 1); };
     return buildChunks(device, n, vertexAt, keepCell);
+}
+
+// Base de nube de cada isla del cielo: una sola malla ligera por isla (un anillo abultado que sobresale del borde del mar de nubes y se
+// recoge hacia abajo hasta una punta) en vez de la roca o el abismo; la isla parece apoyada en una nube. Colores y lóbulos fijos.
+std::vector<Renderer3D::Chunk> Renderer3D::createSkyBase(ID3D11Device* device, const HabitatMap& habitats) {
+    constexpr int SEGMENTS = 40, RINGS = 6;              // anillos desde el borde (0) hasta la punta
+    constexpr float LIP = 2.2f;                          // cuánto sobresale la nube del borde del mar
+    constexpr XMFLOAT3 TOP = { 0.98f, 0.98f, 1.0f }, BOTTOM = { 0.70f, 0.76f, 0.88f };
+    std::vector<Chunk> chunks;
+    for (const HabitatMap::Region& region : habitats.regions()) {
+        if (region.kind != HabitatPlacement::SKY) continue;
+        const float level = region.floorY - 0.35f;      // nivel del mar de nubes
+        const float depth = (std::clamp)(region.seaRadius * 0.5f, 14.0f, 40.0f);
+        const XMFLOAT3 core = { region.x, level - depth * 0.5f, region.z };
+        std::vector<Vertex> vertices;
+        vertices.reserve(SEGMENTS * (RINGS + 1) + 1);
+        for (int k = 0; k <= RINGS; ++k) {
+            const float t = k <= 1 ? 0.0f : static_cast<float>(k - 1) / static_cast<float>(RINGS - 1); // 0 en el borde, 1 en la punta
+            const XMFLOAT3 tone = { TOP.x + (BOTTOM.x - TOP.x) * t, TOP.y + (BOTTOM.y - TOP.y) * t, TOP.z + (BOTTOM.z - TOP.z) * t };
+            for (int i = 0; i < SEGMENTS; ++i) {
+                const float a = static_cast<float>(i) / SEGMENTS * XM_2PI;
+                const float ca = std::cos(a), sa = std::sin(a);
+                const float edge = region.seaRadius * HabitatMap::skyShape(region, ca, sa);
+                const float lump = 1.0f + 0.10f * std::sin(3.0f * a + region.lobe[0] + 2.0f * k) + 0.06f * std::sin(7.0f * a + region.lobe[1] + 1.3f * k);
+                float radius, y;
+                if (k == 0) { radius = edge - 0.5f; y = level - 0.4f; }                       // bajo la superficie del mar
+                else if (k == 1) { radius = edge + LIP * lump; y = level - 1.6f; }            // el borde abultado
+                else { radius = (edge + LIP) * (1.0f - 0.88f * std::pow(t, 1.15f)) * lump; y = level - 1.6f - (depth - 1.6f) * std::pow(t, 0.8f); }
+                const float shade = 0.94f + 0.06f * std::sin(5.0f * a + 1.7f * k);
+                vertices.push_back({ { region.x + ca * radius, y, region.z + sa * radius }, { ca, 0.0f, sa }, { tone.x * shade, tone.y * shade, tone.z * shade, 1.0f } });
+            }
+        }
+        const int tip = static_cast<int>(vertices.size());
+        vertices.push_back({ { region.x, level - depth - 2.0f, region.z }, { 0.0f, -1.0f, 0.0f }, { BOTTOM.x * 0.95f, BOTTOM.y * 0.95f, BOTTOM.z * 0.95f, 1.0f } });
+
+        // Normales por diferencias entre vecinos del anillo y de la columna, orientadas hacia fuera del centro de la nube.
+        const auto at = [&](int k, int i) -> const Vertex& { return vertices[static_cast<size_t>((std::clamp)(k, 0, RINGS)) * SEGMENTS + ((i % SEGMENTS) + SEGMENTS) % SEGMENTS]; };
+        for (int k = 0; k <= RINGS; ++k) {
+            for (int i = 0; i < SEGMENTS; ++i) {
+                const XMVECTOR along = XMVectorSubtract(XMLoadFloat3(&at(k, i + 1).pos), XMLoadFloat3(&at(k, i - 1).pos));
+                const XMVECTOR down = XMVectorSubtract(XMLoadFloat3(&at((std::min)(k + 1, RINGS), i).pos), XMLoadFloat3(&at((std::max)(k - 1, 0), i).pos));
+                XMVECTOR n = XMVector3Normalize(XMVector3Cross(down, along));
+                Vertex& v = vertices[static_cast<size_t>(k) * SEGMENTS + i];
+                const XMVECTOR outward = XMVectorSubtract(XMLoadFloat3(&v.pos), XMLoadFloat3(&core));
+                if (XMVectorGetX(XMVector3Dot(n, outward)) < 0.0f) n = XMVectorNegate(n);
+                XMStoreFloat3(&v.normal, n);
+            }
+        }
+
+        std::vector<uint16_t> indices;
+        const auto push = [&](int a, int b, int c) { // cara frontal hacia fuera del centro de la nube
+            const XMVECTOR pa = XMLoadFloat3(&vertices[a].pos), pb = XMLoadFloat3(&vertices[b].pos), pc = XMLoadFloat3(&vertices[c].pos);
+            const XMVECTOR cross = XMVector3Cross(XMVectorSubtract(pb, pa), XMVectorSubtract(pc, pa));
+            const XMVECTOR centroid = XMVectorScale(XMVectorAdd(XMVectorAdd(pa, pb), pc), 1.0f / 3.0f);
+            const bool facing = XMVectorGetX(XMVector3Dot(cross, XMVectorSubtract(centroid, XMLoadFloat3(&core)))) >= 0.0f;
+            indices.push_back(static_cast<uint16_t>(a));
+            indices.push_back(static_cast<uint16_t>(facing ? b : c));
+            indices.push_back(static_cast<uint16_t>(facing ? c : b));
+        };
+        for (int k = 0; k < RINGS; ++k) {
+            for (int i = 0; i < SEGMENTS; ++i) {
+                const int j = (i + 1) % SEGMENTS;
+                const int a = k * SEGMENTS + i, b = k * SEGMENTS + j, c = (k + 1) * SEGMENTS + i, d = (k + 1) * SEGMENTS + j;
+                push(a, c, b);
+                push(b, c, d);
+            }
+        }
+        for (int i = 0; i < SEGMENTS; ++i) push(RINGS * SEGMENTS + i, tip, RINGS * SEGMENTS + (i + 1) % SEGMENTS);
+
+        Chunk chunk;
+        chunk.mesh = createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
+        chunk.center = core;
+        chunk.radius = region.seaRadius * 1.5f + depth;
+        chunks.push_back(std::move(chunk));
+    }
+    return chunks;
 }
 
 // El mar hasta el horizonte: un único cuadrado enorme (tipo de agua 5); el shader solo lo pinta fuera del archipiélago.
@@ -891,6 +973,16 @@ void Renderer3D::collect(const Scene& scene) {
         if (const BallTransfer* transfer = pet.transfer()) addTransfer(*transfer, pet.drawCenter(), Companion::SIZE * pet.scale());
     }
 
+    for (const Scene::Strike& strike : scene.strikes) { // golpe del acompañante: rayo (a distancia) e impacto con el color de su tipo
+        int r = 255, g = 255, b = 255;
+        PokemonStyle::typeRgb(strike.typeId, r, g, b);
+        const float fade = 1.0f - strike.age / Scene::STRIKE_TIME;
+        const XMFLOAT3 tone = { static_cast<float>(r) / 255.0f, static_cast<float>(g) / 255.0f, static_cast<float>(b) / 255.0f };
+        if (strike.ranged) addGlowBetween(strike.from, strike.to, 0.16f * fade + 0.04f, { tone.x, tone.y, tone.z, 0.9f * fade });
+        const float k = 0.25f + 0.6f * (1.0f - fade);
+        add(m_sphere, XMMatrixScaling(k, k, k) * XMMatrixTranslation(strike.to.x, strike.to.y, strike.to.z), { tone.x, tone.y, tone.z, 1.1f * fade }, false, DrawKind::GLOW);
+    }
+
     for (const Chest& chest : scene.chests.entities) addChest(chest);
     for (const ResourceNode& node : scene.nodes) {
         const float dx = node.body.position.x - p.x, dz = node.body.position.z - p.z;
@@ -1080,55 +1172,9 @@ void Renderer3D::addUnderground(const Scene& scene) {
     if (m_lamps.size() > static_cast<size_t>(kLamps)) m_lamps.resize(kLamps);
 }
 
-// Islas del cielo: la corona de nubes que tapa el borde del abismo, las nubes que cuelgan bajo ellas y, en el mar, las corrientes ascendentes que llevan hasta ellas.
+// Islas del cielo: en el mar, las corrientes ascendentes que llevan hasta ellas (la base de nube de cada isla es una malla fija: createSkyBase).
 void Renderer3D::addSky(const Scene& scene, float time) {
     const XMFLOAT3& p = scene.player.body.position;
-    int index = 0;
-    for (const HabitatMap::Region& region : scene.habitats.regions()) {
-        if (region.kind != HabitatPlacement::SKY) continue;
-        ++index;
-        const float dx = region.x - p.x, dz = region.z - p.z;
-        if (dx * dx + dz * dz > 480.0f * 480.0f) continue;
-        const float floorY = region.floorY;
-        const XMFLOAT4 cloud = { 1.0f, 1.0f, 1.0f, 0.0f };
-
-        // Una nube: dos semiesferas (arriba y abajo) aplastadas.
-        const auto puff = [&](float x, float y, float z, float size, float squash) {
-            const XMMATRIX at = XMMatrixTranslation(x, y, z);
-            add(m_dome, XMMatrixScaling(size, size * squash, size) * at, cloud, false);
-            add(m_dome, XMMatrixScaling(size, size * squash, size) * XMMatrixRotationX(XM_PI) * at, cloud, false);
-        };
-        // El borde del suelo de nube se hunde en un abismo blanco: una corona de nubes lo tapa y otras cuelgan bajo la isla.
-        const int rim = 16 + static_cast<int>(region.radius / 6.0f);
-        for (int i = 0; i < rim; ++i) {
-            const float a = (static_cast<float>(i) + 0.5f * std::sin(i * 1.7f + index)) / rim * XM_2PI;
-            const float shape = HabitatMap::skyShape(region, std::cos(a), std::sin(a));
-            const float h1 = std::fabs(std::sin(i * 12.9898f + index * 3.7f)), h2 = std::fabs(std::sin(i * 78.233f + index));
-            const float r = region.radius * shape * (0.86f + 0.1f * h1);
-            const float size = 8.0f + 9.0f * h2 + region.radius * 0.08f;
-            puff(region.x + std::cos(a) * r, floorY - 3.2f - HabitatMap::SKY_ABYSS_DROP * (0.7f + 0.35f * h1), region.z + std::sin(a) * r, size, 0.55f);
-        }
-        const int belly = 6 + static_cast<int>(region.radius / 8.0f);
-        for (int i = 0; i < belly; ++i) {
-            const float a = i * 2.39996f + index, k = std::sqrt((static_cast<float>(i) + 0.5f) / belly);
-            const float shape = HabitatMap::skyShape(region, std::cos(a), std::sin(a));
-            const float h = std::fabs(std::sin(i * 39.346f + index));
-            puff(region.x + std::cos(a) * region.radius * shape * k * 0.9f, floorY - HabitatMap::SKY_ABYSS_DROP - 10.0f - 14.0f * (1.0f - k) - 6.0f * h, region.z + std::sin(a) * region.radius * shape * k * 0.9f,
-                 region.radius * (0.22f + 0.1f * h), 0.45f);
-        }
-
-        // Nubes sueltas alrededor y por debajo, de forma fija.
-        for (int i = 0; i < 12; ++i) {
-            const float h1 = std::fmod(std::sin((i + index * 31) * 12.9898f) * 43758.5453f, 1.0f), h2 = std::fmod(std::sin((i + index * 31) * 78.233f) * 12345.6789f, 1.0f), h3 = std::fmod(std::sin((i + index * 31) * 39.346f) * 9876.543f, 1.0f);
-            const float angle = std::fabs(h1) * XM_2PI, dist = region.radius * 1.2f + 10.0f + std::fabs(h2) * 90.0f;
-            const float cx = region.x + std::cos(angle) * dist + std::sin(time * 0.05f + i) * 3.0f, cz = region.z + std::sin(angle) * dist;
-            const float cy = floorY - 25.0f - std::fabs(h3) * 60.0f;
-            for (int k = 0; k < 3; ++k) {
-                const float s = 6.0f + 5.0f * std::fabs(std::sin(i * 3.1f + k * 1.7f));
-                puff(cx + (k - 1.0f) * s * 0.9f, cy + (k & 1) * 1.5f, cz + std::sin(k * 2.3f + i) * s * 0.5f, s, 0.5f);
-            }
-        }
-    }
     for (const Physics::World::Updraft& stream : scene.habitats.updrafts()) { // la corriente: una espiral de bloques claros que sube del mar al cielo
         const float dx = stream.x - p.x, dz = stream.z - p.z;
         if (dx * dx + dz * dz > 300.0f * 300.0f) continue;
@@ -1518,6 +1564,7 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
         m_water = createWater(m_device, scene.habitats, scene.world);
         m_cave = createUnderground(m_device, scene.habitats, scene.data());
         m_caveWater = createCaveWater(m_device, scene.habitats);
+        m_skyBase = createSkyBase(m_device, scene.habitats);
         m_worldSeed = scene.habitats.seed();
         m_worldBuilt = true;
     }
@@ -1546,13 +1593,16 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     const XMMATRIX view = scene.getViewMatrix();
     const XMMATRIX viewProj = view * XMLoadFloat4x4(&m_proj);
     const XMMATRIX lightMatrix = lightViewProj(light.lightDir, env.focus);
+    CrashUtil::stage("dibujo: recoger objetos");
     collect(scene);
+    CrashUtil::stage("dibujo: constantes");
     updateFrame(context, light, view, lightMatrix, env);
 
     ID3D11Buffer* buffers[2] = { m_objectBuffer.Get(), m_frameBuffer.Get() };
     context->VSSetConstantBuffers(0, 2, buffers);
     context->PSSetConstantBuffers(0, 2, buffers);
 
+    CrashUtil::stage("dibujo: sombras");
     // 1. Mapa de sombras: la luz activa (sol o luna) ve todos los objetos cercanos.
     renderShadowMap(context, lightMatrix);
 
@@ -1576,13 +1626,19 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     context->VSSetShader(m_vertexShader.Get(), nullptr, 0);
     context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
 
+    CrashUtil::stage("dibujo: relieve");
     drawChunks(context, m_terrain, viewProj, kTerrainDrawRange);
+    CrashUtil::stage("dibujo: galerías");
     drawChunks(context, m_cave, viewProj, kCaveDrawRange);
+    drawChunks(context, m_skyBase, viewProj, kTerrainDrawRange);
+    CrashUtil::stage("dibujo: objetos");
     drawAll(context, viewProj, false);
 
+    CrashUtil::stage("dibujo: agua");
     // 4. El agua, translúcida, encima de todo lo anterior.
     drawWater(context, viewProj);
 
+    CrashUtil::stage("dibujo: brillos");
     // 5. Brillos aditivos (rayo de captura, destellos).
     drawGlow(context, viewProj);
 }

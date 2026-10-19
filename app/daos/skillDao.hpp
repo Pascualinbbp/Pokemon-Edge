@@ -23,10 +23,9 @@ class SkillDao {
             tools.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::text(row, "description"),
                               DaoRow::integer(row, "skill_id"), {} });
         }
-        for (const auto& row : SqliteUtil::executeSelect("SELECT tool_id, level, name, description, speed FROM tool_tier ORDER BY tool_id, level;")) {
+        for (const auto& row : SqliteUtil::executeSelect("SELECT tool_id, level, description, speed_bonus FROM tool_level ORDER BY tool_id, level;")) {
             if (Tool* tool = find(tools, DaoRow::integer(row, "tool_id"))) {
-                tool->tiers.push_back({ DaoRow::integer(row, "level"), DaoRow::text(row, "name"), DaoRow::text(row, "description"),
-                                        DaoRow::real(row, "speed"), {} });
+                tool->tiers.push_back({ DaoRow::integer(row, "level"), DaoRow::text(row, "description"), DaoRow::real(row, "speed_bonus"), {} });
             }
         }
         for (const auto& row : SqliteUtil::executeSelect("SELECT tool_id, level, material_id, quantity FROM tool_upgrade ORDER BY tool_id, level;")) {

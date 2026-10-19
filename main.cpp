@@ -1,9 +1,11 @@
 #include "app/managers/appManager.hpp"
+#include "app/utils/core/crashUtil.hpp"
 #include "app/utils/core/loggerUtil.hpp"
 #include <exception>
 #include <string>
 
 int main() {
+    CrashUtil::install(); // cierres que no son excepciones de C++ (acceso a memoria, abort, bloqueos): quedan en el registro
     try {
         Logger::logInfo("SYSTEM", "--- INICIO DE APLICACIÓN (C++) ---");
         Logger::logInfo("SYSTEM", "Creando instancia de AppManager...");

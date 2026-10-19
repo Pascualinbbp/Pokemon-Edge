@@ -2,6 +2,9 @@
 #include <string>
 #include <vector>
 #include "../models/pokemon/pokemonType.hpp"
+#include "../models/pokemon/typeChart.hpp"
+#include "../utils/core/loggerUtil.hpp"
+#include "daoRow.hpp"
 #include "../utils/data/sqliteUtil.hpp"
 
 class TypeDao {
@@ -19,6 +22,16 @@ class TypeDao {
         return types;
     }
     
+    // Tabla de efectividades entre tipos (lo que no está en la tabla es x1).
+    TypeChart findChart() const {
+        TypeChart chart;
+        for (const auto& row : SqliteUtil::executeSelect("SELECT attacker_id, defender_id, multiplier FROM type_matchup;")) {
+            chart.add(DaoRow::integer(row, "attacker_id"), DaoRow::integer(row, "defender_id"), DaoRow::real(row, "multiplier"));
+        }
+        if (chart.empty()) Logger::logError("TYPE_DAO", "La tabla type_matchup no existe o está vacía (falta aplicar testing/sql/type.sql): todos los ataques harán x1.");
+        return chart;
+    }
+
     private:
     static constexpr const char* SELECT_ALL = "SELECT id, name FROM type;";
     static constexpr const char* SELECT_BY_ID = "SELECT id, name FROM type WHERE id = ?;";

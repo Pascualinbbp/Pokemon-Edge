@@ -1,4 +1,5 @@
 #include "graphicsDevice.hpp"
+#include <cstdio>
 #include "../../utils/core/fileUtil.hpp"
 #include "../../utils/core/loggerUtil.hpp"
 #include "../../utils/graphics/d3dUtil.hpp"
@@ -102,8 +103,17 @@ namespace GraphicsDevice {
         g_context->RSSetViewports(1, &viewport);
     }
 
+    // Presenta el fotograma. Si la tarjeta gráfica se reinicia o se pierde (fallo del driver o del shader) lo deja en el registro con el motivo.
     void present() {
-        g_swapChain->Present(1, 0);
+        const HRESULT hr = g_swapChain->Present(1, 0);
+        static bool reported = false;
+        if (FAILED(hr) && !reported) {
+            reported = true;
+            const HRESULT reason = (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) && g_device ? g_device->GetDeviceRemovedReason() : hr;
+            char text[160];
+            std::snprintf(text, sizeof(text), "Present falló (0x%08lx); motivo del dispositivo: 0x%08lx", static_cast<unsigned long>(hr), static_cast<unsigned long>(reason));
+            Logger::logError("GRAPHICS", text);
+        }
     }
 
     bool loadTexture(const std::filesystem::path& path, Texture& out) {

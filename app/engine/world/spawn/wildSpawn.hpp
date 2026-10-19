@@ -35,7 +35,7 @@ namespace WildSpawn {
         return species.swims || context.depth <= MAX_LAND_DEPTH;
     }
 
-    // Peso base de la especie en el punto (0 = no aparece aquí).
+    // Peso base de la especie en el punto (0 = no aparece aquí); la rareza de la especie lo multiplica en baseOf.
     inline float baseWeight(const GameData& data, const PokemonSpecies& species, const Context& context) {
         const auto presence = [&](int habitatId) {
             const int index = data.habitatIndex(habitatId);
@@ -77,7 +77,7 @@ namespace WildSpawn {
     }
 
     inline float baseOf(const GameData& data, const PokemonSpecies& species, const Context& context) {
-        return fits(species, context) ? (context.habitats.empty() ? 1.0f : baseWeight(data, species, context)) * rodFactor(species, context) : 0.0f;
+        return fits(species, context) ? (context.habitats.empty() ? 1.0f : baseWeight(data, species, context)) * rodFactor(species, context) * data.spawnMultiplier(species) : 0.0f;
     }
 
     // Índice en GameData::species del pokémon que aparece (-1 si no hay ninguno).

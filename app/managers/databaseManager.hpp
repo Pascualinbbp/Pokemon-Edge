@@ -13,7 +13,10 @@
 #include "../daos/groundItemDao.hpp"
 #include "../daos/trainingItemDao.hpp"
 #include "../daos/habitatDao.hpp"
+#include "../daos/abilityDao.hpp"
 #include "../daos/dexRewardDao.hpp"
+#include "../daos/generationDao.hpp"
+#include "../daos/rarityDao.hpp"
 
 class DatabaseManager {
     private:
@@ -29,6 +32,9 @@ class DatabaseManager {
     inline static TrainingItemDao trainingItemDaoInstance;
     inline static HabitatDao habitatDaoInstance;
     inline static DexRewardDao dexRewardDaoInstance;
+    inline static AbilityDao abilityDaoInstance;
+    inline static RarityDao rarityDaoInstance;
+    inline static GenerationDao generationDaoInstance;
 
     public:
     static void init() {
@@ -80,7 +86,10 @@ class DatabaseManager {
         data.skills = skillDaoInstance.findAll();
         data.tools = skillDaoInstance.findTools();
         data.species = speciesDaoInstance.findAll();
-        data.abilities = speciesDaoInstance.findAbilities();
+        data.abilities = abilityDaoInstance.findAll();
+        data.rarities = rarityDaoInstance.findAll();
+        data.generations = generationDaoInstance.findAll();
+        data.typeChart = typeDaoInstance.findChart();
         data.types = typeDaoInstance.findAll();
         data.groundItems = groundItemDaoInstance.findAll();
         data.trainingItems = trainingItemDaoInstance.findAll();

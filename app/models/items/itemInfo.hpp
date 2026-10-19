@@ -51,7 +51,7 @@ namespace ItemInfo {
             for (const ToolTier& tier : tool.tiers) {
                 for (const RecipeIngredient& ingredient : tier.cost) {
                     if (ingredient.materialId != item.refId) continue;
-                    std::snprintf(text, sizeof(text), "Mejorar a %s (x%d)", tier.name.c_str(), ingredient.quantity);
+                    std::snprintf(text, sizeof(text), "Mejorar %s (x%d)", tool.title(tier.level).c_str(), ingredient.quantity);
                     lines.emplace_back(text);
                 }
             }

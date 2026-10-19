@@ -81,9 +81,9 @@ class Companion {
     }
 
     // Avanza el seguimiento. 'power' > 0 = trabajando este frame (el multiplicador del pokémon); devuelve true cuando
-    // completa un golpe. Con 'goal' va hacia ese punto (aunque se separe del jugador) en vez de seguirlo.
+    // completa un golpe. Con 'goal' va hacia ese punto (aunque se separe del jugador) en vez de seguirlo y se detiene a 'approach' de él.
     bool update(float dt, const Physics::World& world, const DirectX::XMFLOAT3& playerPosition, float cameraYaw, float power,
-                const DirectX::XMFLOAT3* goal = nullptr) {
+                const DirectX::XMFLOAT3* goal = nullptr, float approach = APPROACH) {
         if (!active()) return false;
         m_time += dt;
         m_cameraYaw = cameraYaw;
@@ -95,9 +95,10 @@ class Companion {
         const DirectX::XMFLOAT2 spot = goal ? DirectX::XMFLOAT2{ goal->x, goal->z } : followSpot(playerPosition, cameraYaw);
         const float dx = spot.x - body.position.x, dz = spot.y - body.position.z;
         const float distance = std::sqrt(dx * dx + dz * dz);
-        const float stop = goal ? APPROACH : 0.3f;
+        const float stop = goal ? approach : 0.3f;
         float heading = std::atan2(dx, dz);
         if (goal && distance > AVOID_MIN_GOAL) heading = avoid(world, heading);
+        if (goal) m_yaw = std::atan2(dx, dz); // de cara a su objetivo aunque ya haya llegado
         if (!goal && distance > TELEPORT_DISTANCE) {
             body.position = { spot.x, playerPosition.y, spot.y };
             body.velocity = { 0.0f, 0.0f, 0.0f };

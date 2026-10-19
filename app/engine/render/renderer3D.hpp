@@ -94,6 +94,7 @@ class Renderer3D {
     static std::vector<Chunk> buildChunks(ID3D11Device* device, int nodes, VertexFn vertexAt, KeepFn keepCell);
     static std::vector<Chunk> createTerrain(ID3D11Device* device, const HabitatMap& habitats, const Physics::World& world, const GameData& data);
     static std::vector<Chunk> createWater(ID3D11Device* device, const HabitatMap& habitats, const Physics::World& world);
+    static std::vector<Chunk> createSkyBase(ID3D11Device* device, const HabitatMap& habitats); // base de nube de cada isla del cielo
     static std::vector<Chunk> createUnderground(ID3D11Device* device, const HabitatMap& habitats, const GameData& data); // suelo, techo y paredes de las galerías
     static std::vector<Chunk> createCaveWater(ID3D11Device* device, const HabitatMap& habitats); // lagos subterráneos
     static Mesh createOcean(ID3D11Device* device);
@@ -162,6 +163,7 @@ class Renderer3D {
     std::vector<Chunk> m_water;   // superficie del agua (mar, ríos, lagos, charcas, cascadas)
     std::vector<Chunk> m_cave;    // galerías de cuevas y minas
     std::vector<Chunk> m_caveWater; // agua subterránea
+    std::vector<Chunk> m_skyBase;   // base de nube bajo cada isla del cielo
     struct Lamp { DirectX::XMFLOAT3 position; float reach; DirectX::XMFLOAT3 color; float distance; };
     std::vector<Lamp> m_lamps;    // luces del subsuelo cercanas a la cámara (las kLamps más próximas se envían al shader)
     Mesh m_ocean;                 // el mar hasta el horizonte, fuera del archipiélago

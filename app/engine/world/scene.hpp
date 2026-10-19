@@ -16,6 +16,7 @@
 #include "spawn/chestField.hpp"
 #include "rules/captureRules.hpp"
 #include "rules/companionRules.hpp"
+#include "rules/damageRules.hpp"
 #include "entities/captureTarget.hpp"
 #include "rules/chestRules.hpp"
 #include "rules/evRules.hpp"
@@ -174,6 +175,7 @@ struct Scene {
             [&](GroundItem& item) { world.step(item.body, dt); item.update(dt); },
             [&](int spot) { return GroundSpawn::make(*m_data, spot); });
         updateCompanion(dt);
+        updateStrikes(dt);
         updateWaterfall(dt);
         updateInteraction();
         m_holdClock = (std::max)(0.0f, m_holdClock - dt);
@@ -188,6 +190,17 @@ struct Scene {
     }
 
     const GameData& data() const { return *m_data; }
+
+    // Golpe reciente del acompañante (para dibujar el rayo de los ataques a distancia y el impacto, con el color de su tipo).
+    struct Strike {
+        DirectX::XMFLOAT3 from;
+        DirectX::XMFLOAT3 to;
+        int typeId = -1;
+        bool ranged = false;
+        float age = 0.0f;
+    };
+    static constexpr float STRIKE_TIME = 0.3f;
+    std::vector<Strike> strikes;
 
     // Al empezar una partida nueva el jugador elige su pokémon inicial: aún no tiene ninguno.
     bool needsStarter() const { return storage.empty(); }
@@ -211,7 +224,7 @@ struct Scene {
 
     DirectX::XMMATRIX getViewMatrix() const {
         const DirectX::XMFLOAT3 at = camera.focus(player.body.position), full = camera.eye(player.body.position);
-        const float pull = world.clearFraction(at, full, 0.5f); // una pared (galerías) acerca la cámara
+        const float pull = (std::max)(world.clearFraction(at, full, 0.5f), Camera::MIN_PULL); // una pared (galerías) acerca la cámara
         const DirectX::XMFLOAT3 eye = { at.x + (full.x - at.x) * pull, at.y + (full.y - at.y) * pull, at.z + (full.z - at.z) * pull };
         const float feet = player.body.feet();
         const float floor = player.swimming() ? world.groundHeight(eye.x, eye.z, feet) : world.surfaceHeight(eye.x, eye.z, feet);
@@ -429,7 +442,9 @@ struct Scene {
         }
 
         std::string text;
+        float rarityXp = 1.0f; // la rareza de la especie multiplica la experiencia que da capturarla
         if (const PokemonSpecies* species = m_data->speciesById(target.speciesId())) {
+            rarityXp = m_data->xpMultiplier(*species);
             OwnedPokemon owned;
             owned.speciesId = species->id;
             owned.level = (std::min)(target.level(), progress.levelCap()); // no puede pasar del límite del jugador
@@ -441,7 +456,7 @@ struct Scene {
             text = (owned.shiny ? "* " : "") + species->name + "  Nv. " + std::to_string(owned.level) +
                    (!stored ? " (sin espacio)" : sentToPc ? " (enviado al PC)" : "");
         }
-        if (const int levels = progress.addXp(Xp::CAPTURE); levels > 0) text += "   ¡Nivel " + std::to_string(progress.level()) + "!";
+        if (const int levels = progress.addXp(static_cast<int>(std::lround(static_cast<float>(Xp::CAPTURE) * rarityXp))); levels > 0) text += "   ¡Nivel " + std::to_string(progress.level()) + "!";
         switch (target.throwKind()) {
             case CaptureRules::Throw::LUCKY:       showNotice(Notice::LUCKY, text); break;
             case CaptureRules::Throw::SUPER_LUCKY: showNotice(Notice::SUPER_LUCKY, text); break;
@@ -625,13 +640,18 @@ struct Scene {
         if (fightTarget) best = distance2(fightTarget->body.position);
         const DirectX::XMFLOAT3* goal = nodeTarget ? &nodeTarget->body.position : groundTarget ? &groundTarget->body.position :
                                         fightTarget ? &fightTarget->body.position : nullptr;
+        const bool ranged = species && DamageRules::styleOf(*species) == DamageRules::Style::RANGED;
+        const float fightReach = ranged ? CompanionRules::RANGED_RANGE : CompanionRules::ATTACK_RANGE;
         const float reach = nodeTarget ? Companion::WORK_RANGE + ResourceStyle::look(nodeTarget->typeId()).half :
-                            fightTarget ? CompanionRules::ATTACK_RANGE : Companion::WORK_RANGE;
-        const bool arrived = goal && best <= reach * reach;
+                            fightTarget ? fightReach : Companion::WORK_RANGE;
+        const float approach = fightTarget && ranged ? fightReach * CompanionRules::RANGED_APPROACH : Companion::APPROACH;
+        bool arrived = goal && best <= reach * reach;
+        if (arrived && fightTarget && ranged) arrived = !world.blocked(companion.center(), fightTarget->center()); // sin roca de por medio
+        if (arrived && fightTarget && !ranged) arrived = best <= fightReach * fightReach;
         if (nodeTarget && arrived) nodeTarget->companionWorking();
         const float teamBonus = nodeTarget && arrived ? nodeTarget->teamBonus(false) : 1.0f;
         const float power = arrived ? Companion::workPower(fightTarget ? 1 : level, teamBonus) : 0.0f;
-        if (!companion.update(dt, world, player.body.position, camera.yaw(), power, goal)) return;
+        if (!companion.update(dt, world, player.body.position, camera.yaw(), power, goal, approach)) return;
         if (nodeTarget) workNode(*nodeTarget, false);
         else if (groundTarget) collect(*groundTarget);
         else if (fightTarget) strike(*fightTarget);
@@ -653,6 +673,7 @@ struct Scene {
         for (CaptureTarget* target : wild.loaded()) {
             if (!target->hittable() || target->speciesIndex() < 0 || wild.isHooked(target) || target->body.underground != player.body.underground) continue; // el pescado es del jugador
             if (mode == CompanionRules::Mode::CAPTURE && target->hpFraction() <= CompanionRules::CAPTURE_STOP_HP) continue;
+            if (!hitOn(*target).lands()) continue; // inmune a sus tipos: no lo ataca
             const float dx = target->body.position.x - player.body.position.x, dz = target->body.position.z - player.body.position.z;
             if (dx * dx + dz * dz < bestDistance) {
                 bestDistance = dx * dx + dz * dz;
@@ -662,16 +683,31 @@ struct Scene {
         return best;
     }
 
+    // Lo que el líder del equipo le haría a un salvaje de un golpe (DamageRules); sin líder o sin datos, nada.
+    DamageRules::Hit hitOn(const CaptureTarget& target) const {
+        const OwnedPokemon* lead = storage.active();
+        const PokemonSpecies* attacker = lead ? m_data->speciesById(lead->speciesId) : nullptr;
+        const PokemonSpecies* defender = m_data->speciesById(target.speciesId());
+        if (!attacker || !defender) return {};
+        return DamageRules::compute(*m_data, *attacker, lead->level, *defender, target.level());
+    }
+
+    void updateStrikes(float dt) {
+        for (Strike& strike : strikes) strike.age += dt;
+        strikes.erase(std::remove_if(strikes.begin(), strikes.end(), [](const Strike& s) { return s.age >= STRIKE_TIME; }), strikes.end());
+    }
+
     // Un golpe del acompañante. Si derrota al salvaje, este gana experiencia (y puede subir de nivel o evolucionar).
     void strike(CaptureTarget& target) {
         const OwnedPokemon* lead = storage.active();
         const PokemonSpecies* attacker = lead ? m_data->speciesById(lead->speciesId) : nullptr;
-        const PokemonSpecies* defender = m_data->speciesById(target.speciesId());
-        if (!attacker || !defender) return;
+        if (!attacker) return;
 
+        const DamageRules::Hit hit = hitOn(target);
+        if (!hit.lands()) return;
+        strikes.push_back({ companion.center(), target.center(), hit.typeId, hit.style == DamageRules::Style::RANGED, 0.0f });
         const std::string name = attacker->name;
-        const int level = lead->level;
-        if (!target.damage(CompanionRules::damageFraction(level, attacker->stats.attack, target.level(), defender->stats.defense))) return;
+        if (!target.damage(hit.fraction)) return;
 
         const int xp = PokemonRules::battleXp(target.level());
         const PokemonStorage::XpResult result = storage.addXp(storage.activeIndex(), xp, progress.levelCap());

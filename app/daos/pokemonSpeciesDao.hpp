@@ -1,6 +1,5 @@
 #pragma once
 #include <vector>
-#include "../models/pokemon/ability.hpp"
 #include "../models/pokemon/pokemonSpecies.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "daoRow.hpp"
@@ -18,6 +17,7 @@ class PokemonSpeciesDao {
             entry.skillLevel = DaoRow::integer(row, "skill_level");
             entry.abilityId = DaoRow::integer(row, "ability_id") > 0 ? DaoRow::integer(row, "ability_id") : -1; // NULL = sin habilidad activa
             entry.generationId = DaoRow::integer(row, "generation_id");
+            entry.rarityId = DaoRow::integer(row, "rarity_id");
             entry.passiveId = DaoRow::integer(row, "passive_id") > 0 ? DaoRow::integer(row, "passive_id") : -1; // NULL = sin pasiva
             entry.types.push_back(DaoRow::integer(row, "type1_id"));
             if (DaoRow::integer(row, "type2_id") > 0) entry.types.push_back(DaoRow::integer(row, "type2_id"));
@@ -34,15 +34,6 @@ class PokemonSpeciesDao {
         loadEvolutions(species);
         loadSpawnProfiles(species);
         return species;
-    }
-
-    std::vector<Ability> findAbilities() const {
-        std::vector<Ability> abilities;
-        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, floats FROM ability ORDER BY id;")) {
-            abilities.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::text(row, "description"),
-                                  DaoRow::integer(row, "floats") != 0 });
-        }
-        return abilities;
     }
 
     private:
@@ -88,5 +79,5 @@ class PokemonSpeciesDao {
 
     static constexpr const char* SELECT_POKEMON =
         "SELECT id, name, description, skill_id, skill_level, ability_id, passive_id, type1_id, type2_id, "
-        "hp, attack, sp_attack, defense, sp_defense, speed, catch_rate, min_level, max_level, generation_id, starter, swims FROM pokemon ORDER BY id;";
+        "hp, attack, sp_attack, defense, sp_defense, speed, catch_rate, min_level, max_level, generation_id, rarity_id, starter, swims FROM pokemon ORDER BY id;";
 };
