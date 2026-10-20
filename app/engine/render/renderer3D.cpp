@@ -285,10 +285,10 @@ namespace {
             float full;
             if (cloud)                { shallow = float3(0.93f, 0.96f, 1.0f); deep = float3(0.60f, 0.73f, 0.95f); full = 2.0f; }
             else if (k < 0.5f || open) { shallow = float3(0.30f, 0.80f, 0.84f); deep = float3(0.03f, 0.18f, 0.42f); full = 7.0f; }
-            else if (k < 1.5f)        { shallow = float3(0.38f, 0.74f, 0.74f); deep = float3(0.10f, 0.36f, 0.52f); full = 2.5f; }
-            else if (k < 2.5f)        { shallow = float3(0.30f, 0.68f, 0.74f); deep = float3(0.06f, 0.28f, 0.46f); full = 4.0f; }
-            else if (k < 3.5f)        { shallow = float3(0.30f, 0.46f, 0.16f); deep = float3(0.10f, 0.24f, 0.10f); full = 0.8f; }
-            else                      { shallow = float3(0.80f, 0.92f, 0.96f); deep = float3(0.45f, 0.70f, 0.85f); full = 1.5f; }
+            else if (k < 1.5f)        { shallow = float3(0.38f, 0.74f, 0.74f); deep = float3(0.10f, 0.36f, 0.52f); full = 4.5f; }
+            else if (k < 2.5f)        { shallow = float3(0.30f, 0.68f, 0.74f); deep = float3(0.06f, 0.28f, 0.46f); full = 8.0f; }
+            else if (k < 3.5f)        { shallow = float3(0.30f, 0.46f, 0.16f); deep = float3(0.10f, 0.24f, 0.10f); full = 2.0f; }
+            else                      { shallow = float3(0.80f, 0.92f, 0.96f); deep = float3(0.45f, 0.70f, 0.85f); full = 3.0f; }
             float tdep = saturate(depth / full);
             float3 base = lerp(shallow, deep, sqrt(tdep));
             float alpha = cloud ? lerp(0.55f, 0.88f, sqrt(tdep)) : (k > 2.5f && k < 3.5f) ? lerp(0.55f, 0.92f, tdep) : (k > 3.5f && k < 4.5f) ? 0.85f : lerp(0.28f, 0.96f, sqrt(tdep));

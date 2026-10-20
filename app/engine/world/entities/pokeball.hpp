@@ -19,15 +19,19 @@ namespace PokeballStyle {
 
     inline const Look& look(int typeId) {
         static const Look pokeball  = { { 0.86f, 0.16f, 0.16f }, DEFAULT_MODEL, true, 0.0f };           // Poké Ball: roja
-        static const Look superBall = { { 0.16f, 0.39f, 0.90f }, DEFAULT_MODEL, true, 0.0f };           // Super Ball: azul
-        static const Look ultraBall = { { 0.96f, 0.80f, 0.16f }, DEFAULT_MODEL, true, 0.0f };           // Ultra Ball: amarilla
+        static const Look superBall = { { 0.16f, 0.39f, 0.90f }, "pokeball/superball", false, 0.0f };  // Super Ball: modelo propio
+        static const Look ultraBall = { { 0.96f, 0.80f, 0.16f }, "pokeball/ultraball", false, 0.0f };  // Ultra Ball: modelo propio
         static const Look starter   = { { 0.62f, 0.26f, 0.85f }, "pokeball/starterball", false, 0.0f }; // Starter Ball: modelo propio (solo la lleva el pokémon inicial)
+        static const Look shinyBall = { { 0.95f, 0.78f, 0.95f }, "pokeball/shinyball", false, 0.0f };   // Shiny Ball: modelo propio
+        static const Look honorBall = { { 0.92f, 0.92f, 0.96f }, "pokeball/honorball", false, 0.0f };   // Honor Ball: modelo propio (regalo de la tienda)
         static const Look unknown   = { { 0.70f, 0.70f, 0.70f }, DEFAULT_MODEL, true, 0.0f };
         switch (typeId) {
             case 1:  return pokeball;
             case 2:  return superBall;
             case 3:  return ultraBall;
             case 4:  return starter;
+            case 5:  return shinyBall;
+            case 6:  return honorBall;
             default: return unknown;
         }
     }
@@ -50,6 +54,8 @@ struct Pokeball {
     bool spent = false;                             // alcanzó a un pokémon: se gasta aunque falle la captura
     int typeId = -1;                                // tabla pokeball: el tipo de bola lanzada
     float captureMultiplier = 1.0f;                 // del tipo de bola lanzada
+    float shinyMultiplier = 1.0f;                   // ídem frente a un shiny
+    float multiplierFor(bool shiny) const { return shiny ? shinyMultiplier : captureMultiplier; }
     float yaw = 0.0f;                               // orientación del modelo: hacia donde avanza
     float spin = 0.0f;                              // giro sobre el eje lateral: inclinación al volar, rodar en el suelo (rad)
     float twist = 0.0f;                             // giro sobre el eje del botón (rad)

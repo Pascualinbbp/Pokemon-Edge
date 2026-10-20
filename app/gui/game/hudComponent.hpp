@@ -25,6 +25,7 @@ namespace HudComponent {
             { "¡SIN UNIDADES!",             IM_COL32(255, 150, 40, 255) },
             { "¡HAS OBTENIDO!",             IM_COL32(255, 215, 70, 255) },
             { "¡SUBES DE NIVEL!",           IM_COL32(120, 220, 255, 255) },
+            { "¡TE HAS DESMAYADO!",         IM_COL32(235, 70, 60, 255) },
         };
 
         // Color según la probabilidad de captura: verde muy alta, amarillo buena, naranja dudosa, rojo muy baja.
@@ -92,6 +93,15 @@ namespace HudComponent {
                 dl->AddText(ImVec2(at.x, y), IM_COL32(255, 215, 90, 235), status.regionName->c_str());
                 y += ImGui::GetFontSize() + 4.0f;
             }
+            if (status.health < 0.999f || status.hurt > 0.0f) {
+                const float k = (std::clamp)(status.health, 0.0f, 1.0f);
+                const ImU32 fill = k < 0.25f ? IM_COL32(235, 70, 60, 255) : k < 0.5f ? IM_COL32(255, 170, 50, 255) : IM_COL32(90, 220, 120, 255);
+                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 255, 255, 235), "Vida");
+                const ImVec2 bar(at.x, y + ImGui::GetFontSize() + 2.0f);
+                dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH, bar.y + 8.0f), IM_COL32(255, 255, 255, 50), 4.0f);
+                dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH * k, bar.y + 8.0f), fill, 4.0f);
+                y += ImGui::GetFontSize() + 18.0f;
+            }
             if (status.showOxygen) {
                 const float k = (std::clamp)(status.oxygen, 0.0f, 1.0f);
                 const ImU32 fill = status.exhausted || k < 0.25f ? IM_COL32(235, 70, 60, 255) : IM_COL32(90, 190, 255, 255);
@@ -105,6 +115,7 @@ namespace HudComponent {
         // Tinte de pantalla: azul bajo el agua, oscuridad en cuevas y minas.
         inline void drawTint(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            if (status.hurt > 0.0f) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(220, 20, 20, static_cast<int>(110.0f * status.hurt)));
             if (status.underwater) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(20, 70, 120, 110));
             if (status.darkness > 0.0f) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(0, 0, 0, static_cast<int>(120.0f * status.darkness))); // cueva y mina: oscuras
         }
@@ -180,7 +191,7 @@ namespace HudComponent {
             }
 
             const Inventory::BallSlot slot = inventory.selectedBall();
-            std::snprintf(buffer, sizeof(buffer), "%s   x%d   Captura x%.1f", slot.type.name.c_str(), slot.count, slot.type.captureMultiplier);
+            std::snprintf(buffer, sizeof(buffer), "%s   x%d   Captura %s", slot.type.name.c_str(), slot.count, slot.type.ratio().c_str());
             const ImU32 textColor = slot.count > 0 ? IM_COL32(255, 255, 255, a) : IM_COL32(235, 70, 60, a);
             const float nameY = centerY + SELECTED_RADIUS + 26.0f;
             centered(dl, ImVec2(screen.x * 0.5f, nameY), buffer, 1.0f, textColor);

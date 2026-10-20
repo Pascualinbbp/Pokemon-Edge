@@ -11,19 +11,19 @@ class Camera {
     static constexpr float DISTANCE      = 7.0f;
     static constexpr float TARGET_HEIGHT = 0.7f;    // el punto de mira queda algo elevado sobre la base del objetivo
     static constexpr float SENSITIVITY   = 0.0025f; // radianes por píxel
-    static constexpr float MIN_PITCH     = 0.05f;
-    static constexpr float MAX_PITCH     = 1.45f;
+    static constexpr float MIN_PITCH     = -0.85f; // la cámara puede ir por debajo del jugador y mirar al cielo (el suelo la frena)
+    static constexpr float MAX_PITCH     = 1.53f;
     static constexpr float FOV           = 0.7853982f; // 45°
 
     // Cámara de apuntado
     static constexpr float LEVEL_PITCH = 0.6f;    // inclinación de partida: se considera "mirar al frente"
-    static constexpr float SWIM_MIN_PITCH = -1.0f;  // nadando la cámara puede ir por debajo y mirar hacia arriba
+    static constexpr float SWIM_MIN_PITCH = -1.3f;  // nadando la cámara puede ir por debajo y mirar hacia arriba
 
     static constexpr float AIM_DISTANCE     = 3.2f;
     static constexpr float AIM_TARGET_HEIGHT = 1.3f;   // altura del hombro
     static constexpr float AIM_SHOULDER     = 0.8f;    // desplazamiento lateral a la derecha
     static constexpr float AIM_FOV          = 0.62f;
-    static constexpr float AIM_MIN_PITCH    = -0.3f;   // al apuntar se puede mirar algo hacia arriba
+    static constexpr float AIM_MIN_PITCH    = -1.1f;   // al apuntar se puede mirar bien hacia arriba
     static constexpr float AIM_SENSITIVITY_SCALE = 0.6f; // más precisión al apuntar
     static constexpr float BLEND_SPEED      = 7.0f;    // la transición dura ~1/7 s
     static constexpr float LOCK_SMOOTH      = 10.0f;   // rapidez con la que la cámara se fija al objetivo

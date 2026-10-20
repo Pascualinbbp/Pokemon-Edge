@@ -169,7 +169,7 @@ namespace InventoryComponent {
             char text[96];
             if (item->category == ItemCategory::POKEBALL) {
                 if (const PokeballType* type = data.ball(item->refId)) {
-                    std::snprintf(text, sizeof(text), "Ratio de captura: x%.1f", type->captureMultiplier);
+                    std::snprintf(text, sizeof(text), "Ratio de captura: %s", type->ratio().c_str());
                     ImGui::TextUnformatted(text);
                 }
             } else if (const Tool* tool = data.toolOf(*item)) {

@@ -37,6 +37,7 @@
 #include "entities/pokeball.hpp"
 #include "state/pokemonStorage.hpp"
 #include "spawn/resourceSpawn.hpp"
+#include "state/playerHealth.hpp"
 #include "spawn/spawnField.hpp"
 
 struct Scene {
@@ -60,6 +61,7 @@ struct Scene {
     static constexpr size_t MAX_BALLS = 12;
     static constexpr float MAX_SUBSTEP = 1.0f / 120.0f; // paso máximo de la física de los proyectiles
     static constexpr float NOTICE_TIME = 2.0f;
+    static constexpr float CONCEAL_RADIUS = 1.6f;      // a esta distancia de un matorral el jugador queda oculto
     static constexpr float PROP_RANGE = 40.0f;         // solo los nodos tan cerca del jugador cuentan como sólidos
 
     Physics::World world;
@@ -78,6 +80,7 @@ struct Scene {
     SpawnField<GroundItem> groundItems;
     PokemonStorage storage;   // equipo (6) y PC
     PlayerProgress progress;  // nivel, experiencia y medallas del jugador
+    PlayerHealth health;      // vida del jugador (caídas, ahogamiento)
     ResearchMachine machine;  // máquina de investigación (fija)
     bool researchRequested = false; // el jugador ha usado la máquina: la interfaz abre su pantalla
     Companion companion;      // el líder del equipo, que acompaña al jugador y trabaja recursos
@@ -103,6 +106,7 @@ struct Scene {
             { { -7.0f, BASE + 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
         };
         nodes = ResourceSpawn::generate(gameData, habitats, worldSeed, world);
+        m_home = player.body.position;
         for (const Skill& skill : gameData.skills) if (PlayerActions::parse(skill.animation) == PlayerAction::FISH) m_fishSkill = skill.id;
     }
 
@@ -154,6 +158,7 @@ struct Scene {
         InputState moveInput = input;
         if (fishing.hooked()) moveInput.crouch = moveInput.crouchHeld = false; // los botones de decidir (Liberar) no agachan
         player.update(dt, moveInput, camera.yaw(), camera.lookAngle(), world);
+        updateHealth(dt);
 
         weather.update(dt);
         throwCooldown = (std::max)(0.0f, throwCooldown - dt);
@@ -169,7 +174,11 @@ struct Scene {
         }
         updateBalls(dt);
         chests.update(dt, dayCycle.day(), player.body.position.x, player.body.position.z, *m_data, habitats, world);
-        for (ResourceNode& node : nodes) node.update(dt);
+        m_concealed = false;
+        for (ResourceNode& node : nodes) {
+            node.update(dt);
+            if (!m_concealed && concealsPlayer(node)) m_concealed = true;
+        }
         exploration.reveal(player.body.position.x, player.body.position.z);
         groundItems.update(dt, GroundSpawn::DELAY,
             [&](GroundItem& item) { world.step(item.body, dt); item.update(dt); },
@@ -269,7 +278,11 @@ struct Scene {
             }
         }
         if (!noticeText.empty()) s.noticeText = &noticeText;
-        if (m_interaction.kind == Interaction::CHEST) {
+        if (m_interaction.kind == Interaction::WEAKENED && m_weak) {
+            const PokemonSpecies* species = m_data->speciesById(m_weak->speciesId());
+            s.interactVerb = CAPTURE_VERB;
+            s.interactTarget = species ? &species->name : &GROUND_NAME;
+        } else if (m_interaction.kind == Interaction::CHEST) {
             s.interactVerb = CHEST_VERB;
             s.interactTarget = &m_data->chests[chests.entities[m_interaction.index].typeIndex()].name;
         } else if (m_interaction.kind == Interaction::NODE) {
@@ -295,8 +308,8 @@ struct Scene {
             const CaptureTarget& t = *m_aimTarget;
             s.hasAimTarget = true;
             s.behind = isBehind(t);
-            s.hidden = player.crouched();
-            s.chancePercent = static_cast<int>(std::lround(chancePercent(t, inventory.captureMultiplier())));
+            s.hidden = m_concealed;
+            s.chancePercent = static_cast<int>(std::lround(chancePercent(t, inventory.captureMultiplier(t.shiny()))));
         }
         return s;
     }
@@ -318,6 +331,8 @@ struct Scene {
         const HabitatMap::Region* region = habitats.regionAt(p.x, p.z);
         s.temperature = temperatureAt(p.x, p.z);
         s.altitude = (std::max)(0.0f, p.y);
+        s.health = health.fraction();
+        s.hurt = health.hurtFlash();
         s.oxygen = player.oxygen();
         s.exhausted = player.exhausted();
         s.showOxygen = player.diving() || player.exhausted() || !player.oxygenFull();
@@ -407,6 +422,7 @@ struct Scene {
             case Interaction::NODE:    return nodeAnchor(nodes[m_interaction.index]);
             case Interaction::GROUND:  return above(groundItems.entities[m_interaction.index].body, 0.9f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
+            case Interaction::WEAKENED: return m_weak ? DirectX::XMFLOAT3{ m_weak->body.position.x, m_weak->body.position.y + CaptureTarget::SIZE + 0.9f, m_weak->body.position.z } : DirectX::XMFLOAT3{};
             default:                   return {};
         }
     }
@@ -417,6 +433,25 @@ struct Scene {
     }
 
     // --- Porcentaje de captura ---
+    // ¿Oculta este nodo al jugador? Solo los matorrales y la hierba alta (forma BUSH) y (con o sin frutos).
+    // Daño por caída (física: la altura equivalente a la velocidad de impacto) y por ahogarse; si la vida llega a 0 vuelve al inicio.
+    void updateHealth(float dt) {
+        health.update(dt);
+        health.hurt(HealthRules::fallDamage(player.takeImpact()));
+        if (player.drowning()) health.hurt(HealthRules::DROWN_PER_SECOND * dt);
+        if (!health.dead()) return;
+        player.body.position = m_home;
+        player.body.velocity = { 0.0f, 0.0f, 0.0f };
+        health.restore();
+        showNotice(Notice::FAINTED);
+    }
+
+    bool concealsPlayer(const ResourceNode& node) const {
+        if (ResourceStyle::look(node.typeId()).shape != ResourceStyle::Shape::BUSH) return false;
+        const float dx = node.body.position.x - player.body.position.x, dz = node.body.position.z - player.body.position.z;
+        return dx * dx + dz * dz <= CONCEAL_RADIUS * CONCEAL_RADIUS && std::fabs(node.body.position.y - player.body.position.y) < 1.5f;
+    }
+
     bool isBehind(const CaptureTarget& t) const {
         return CaptureRules::isBehind(t.body.position, t.yaw(), player.body.position);
     }
@@ -424,7 +459,7 @@ struct Scene {
     float chancePercent(const CaptureTarget& t, float ballMultiplier) const {
         const PokemonSpecies* species = m_data->speciesById(t.speciesId());
         const float base = species ? CaptureRules::basePercent(species->catchRate, t.level(), progress.level()) * CaptureRules::hpFactor(t.hpFraction()) : 0.0f;
-        return CaptureRules::percent(base, isBehind(t), player.crouched(), ballMultiplier);
+        return CaptureRules::percent(base, isBehind(t), m_concealed, ballMultiplier);
     }
 
     void showNotice(Notice kind, std::string text = {}) {
@@ -506,12 +541,15 @@ struct Scene {
     }
 
     // Capturar al enganchado: la pokéball sale de la mano hacia él (como un lanzamiento normal).
-    void captureHooked() {
+    void captureHooked() { captureDirect(wild.hooked()); }
+
+    // Lanza la pokéball seleccionada directamente a un pokémon (el enganchado o el debilitado por el acompañante).
+    void captureDirect(const CaptureTarget& wildTarget) {
         if (!inventory.canThrow()) {
             showNotice(Notice::OUT_OF_STOCK);
             return;
         }
-        const DirectX::XMFLOAT3 target = wild.hooked().center();
+        const DirectX::XMFLOAT3 target = wildTarget.center();
         const DirectX::XMFLOAT3 hand = handPosition();
         DirectX::XMFLOAT3 dir = { target.x - hand.x, target.y - hand.y, target.z - hand.z };
         const float length = (std::max)(std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z), 1.0e-3f);
@@ -745,6 +783,7 @@ struct Scene {
         float best = 1.0e9f;
         m_interaction = {};
         m_missingSkill = -1;
+        m_weak = weakenedTarget();
         if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
         if (const int i = nearestIn(groundItems.entities, [](const GroundItem& g) { return g.available(); }, best); i >= 0) m_interaction = { Interaction::GROUND, i };
         const float mx = machine.body.position.x - player.body.position.x, mz = machine.body.position.z - player.body.position.z;
@@ -762,9 +801,32 @@ struct Scene {
                 m_missingPos = nodeAnchor(node);
             }
         }
+        if (m_weak) m_interaction = { Interaction::WEAKENED, 0 }; // capturar al debilitado tiene prioridad
+    }
+
+    // En modo captura, el salvaje más cercano que el acompañante ha dejado debilitado (con la vida en o bajo CAPTURE_STOP_HP) y que se
+    // puede capturar ya: aparece la ayuda de interacción "Capturar" sobre él.
+    const CaptureTarget* weakenedTarget() const {
+        if (storage.mode != CompanionRules::Mode::CAPTURE || !storage.active() || fishing.active() || m_aiming) return nullptr;
+        const CaptureTarget* best = nullptr;
+        float bestDistance = CompanionRules::WEAK_REACH * CompanionRules::WEAK_REACH;
+        for (const CaptureTarget* target : wild.loaded()) {
+            if (!target->hittable() || target->speciesIndex() < 0 || wild.isHooked(target) || target->body.underground != player.body.underground) continue;
+            if (target->hpFraction() > CompanionRules::CAPTURE_STOP_HP) continue;
+            const float dx = target->body.position.x - player.body.position.x, dz = target->body.position.z - player.body.position.z;
+            if (dx * dx + dz * dz < bestDistance) {
+                bestDistance = dx * dx + dz * dz;
+                best = target;
+            }
+        }
+        return best;
     }
 
     void interact() {
+        if (m_interaction.kind == Interaction::WEAKENED && m_weak) {
+            captureDirect(*m_weak);
+            return;
+        }
         if (m_interaction.kind == Interaction::CHEST) {
             player.act(PlayerAction::OPEN);
             openChest(chests.entities[m_interaction.index]);
@@ -974,6 +1036,7 @@ struct Scene {
         Pokeball ball;
         ball.typeId = type.id;
         ball.captureMultiplier = type.captureMultiplier;
+        ball.shinyMultiplier = type.shinyMultiplier;
         ball.body.position = handPosition();
         ball.body.velocity = launchVelocity(ball.body.position, aim, dir);
 
@@ -1021,7 +1084,7 @@ struct Scene {
                 ball.age += h;
                 for (CaptureTarget* target : wild.loaded()) {
                     if (!target->hitBy(ball.body.position, Pokeball::RADIUS + Pokeball::CONTACT_MARGIN)) continue;
-                    target->beginCapture(ball, CaptureRules::roll(chancePercent(*target, ball.captureMultiplier)), camera.yaw(), world);
+                    target->beginCapture(ball, CaptureRules::roll(chancePercent(*target, ball.multiplierFor(target->shiny()))), camera.yaw(), world);
                     ball.spent = true;
                     ball.age = Pokeball::LIFETIME; // la bola pasa a ser la de la animación de captura
                     break;
@@ -1041,7 +1104,7 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, WEAKENED } kind = NONE;
         int index = -1;
     };
 
@@ -1051,6 +1114,7 @@ struct Scene {
     }
 
     static constexpr const char* CHEST_VERB = "Abrir";
+    static constexpr const char* CAPTURE_VERB = "Capturar";
     static constexpr const char* PICK_VERB = "Recoger";
     static constexpr const char* USE_VERB = "Usar";
     inline static const std::string GROUND_NAME = "objeto brillante";
@@ -1081,6 +1145,9 @@ struct Scene {
     DirectX::XMFLOAT3 m_missingPos = {};
     int m_missingLevel = 0;    // nivel que exige ese recurso
     Interaction m_interaction; // lo que el jugador puede usar ahora mismo (cofre o recurso cercano)
+    DirectX::XMFLOAT3 m_home = {};         // dónde reaparece el jugador al quedarse sin vida
+    bool m_concealed = false;              // el jugador está oculto entre matorrales: los pokémon no lo han detectado (sigilo)
+    const CaptureTarget* m_weak = nullptr; // salvaje debilitado por el acompañante que se puede capturar ahora (Interaction::WEAKENED)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
     float m_lockHidden = 0.0f; // segundos que lleva tapado el pokémon fijado
     CaptureTarget* m_aimTarget = nullptr;  // pokémon al que apunta la cruceta dentro del alcance

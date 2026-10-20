@@ -146,8 +146,10 @@ class HabitatMap {
     // Oscuridad (0..1) de quien está en (x, z) a la altura 'feet': crece con la roca que tiene encima, así entrar es gradual.
     float darkness(float x, float z, float feet) const {
         if (!m_under.under(x, z, feet)) return 0.0f;
-        return smooth(0.5f, DARK_DEPTH, m_ground.sample(x, z) - feet);
+        const float dark = smooth(0.5f, DARK_DEPTH, m_ground.sample(x, z) - feet);
+        return x * x + z * z > m_worldRadius * m_worldRadius ? dark * CLOUD_CAVE_DARKNESS : dark; // las cuevas de nube son claras
     }
+    static constexpr float CLOUD_CAVE_DARKNESS = 0.3f;
     // Sistema de cueva o mina que contiene el punto (nullptr = ninguno).
     const Underground::System* systemAt(float x, float z) const {
         for (const Underground::System& s : m_under.systems()) if (x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ && m_under.cell(x, z)) return &s;
@@ -588,15 +590,20 @@ class HabitatMap {
     }
 
     // ---- Ríos ----
-    // Camino de un río: baja por la máxima pendiente (con meandros) hasta el mar.
+    // Camino de un río: baja por la máxima pendiente (con meandros) hasta el mar. Si se atasca en una hondonada, se encamina hacia la costa
+    // (el cauce la atraviesa excavando).
     std::vector<PathPoint> tracePath(float x, float z) {
         std::vector<PathPoint> path;
-        float dx = 0.0f, dz = 0.0f;
+        float dx = 0.0f, dz = 0.0f, lowest = 1.0e9f;
+        int stalled = 0;
         const float seed = between(0.0f, 100.0f);
-        for (int step = 0; step < 1100; ++step) {
+        for (int step = 0; step < 1400; ++step) {
             const float gx = (ground(x + 5.0f, z) - ground(x - 5.0f, z)) / 10.0f, gz = (ground(x, z + 5.0f) - ground(x, z - 5.0f)) / 10.0f;
             const float sx = (m_coast.sample(x + 5.0f, z) - m_coast.sample(x - 5.0f, z)) / 10.0f, sz = (m_coast.sample(x, z + 5.0f) - m_coast.sample(x, z - 5.0f)) / 10.0f;
-            float tx = -gx - 0.10f * sx, tz = -gz - 0.10f * sz;
+            const float here = ground(x, z);
+            if (here < lowest - 0.15f) { lowest = here; stalled = 0; } else ++stalled;
+            const float toSea = stalled > 20 ? 1.0f : 0.10f; // atascado: manda la dirección al mar
+            float tx = -gx * (stalled > 20 ? 0.3f : 1.0f) - toSea * sx, tz = -gz * (stalled > 20 ? 0.3f : 1.0f) - toSea * sz;
             float length = std::sqrt(tx * tx + tz * tz);
             if (length < 1.0e-5f) { tx = -sx; tz = -sz; length = std::sqrt(tx * tx + tz * tz); if (length < 1.0e-5f) break; }
             tx /= length; tz /= length;
@@ -606,7 +613,7 @@ class HabitatMap {
             length = std::sqrt(dx * dx + dz * dz);
             if (length < 1.0e-5f) break;
             dx /= length; dz /= length;
-            path.push_back({ x, z, ground(x, z), 0.0f, 0.0f, 0.0f, dx, dz, false });
+            path.push_back({ x, z, here, 0.0f, 0.0f, 0.0f, dx, dz, false });
             if (path.back().terrain < 0.25f && m_coast.sample(x, z) < 12.0f) break; // llegó al mar
             if (m_coast.sample(x, z) < -4.0f) break;
             x += dx * Physics::Heightfield::CELL; z += dz * Physics::Heightfield::CELL;
@@ -616,7 +623,7 @@ class HabitatMap {
         for (size_t i = 0; i < path.size(); ++i) { // alisa el terreno a lo largo del cauce
             float sum = 0.0f;
             int k = 0;
-            for (int j = -4; j <= 4; ++j) { const int index = static_cast<int>(i) + j; if (index >= 0 && index < static_cast<int>(path.size())) { sum += path[index].terrain; ++k; } }
+            for (int j = -2; j <= 2; ++j) { const int index = static_cast<int>(i) + j; if (index >= 0 && index < static_cast<int>(path.size())) { sum += path[index].terrain; ++k; } }
             smoothed[i] = sum / k;
         }
         for (size_t i = 0; i < path.size(); ++i) path[i].terrain = smoothed[i];
@@ -625,28 +632,58 @@ class HabitatMap {
 
     struct RiverStyle { float widthMin, widthMax, depthMin, depthMax; };
 
-    // Excava un río: el nivel del agua solo baja; con 'fall' hay una cascada (caída forzada) en el tramo más empinado.
-    bool carveRiver(float startX, float startZ, float startLevel, bool fall, const RiverStyle& style) {
+    static constexpr int FALL_WINDOW = 3;         // pasos del cauce con los que se mide si el terreno cae en picado
+    static constexpr float FALL_MIN_DROP = 2.2f;  // desnivel (m) en esa ventana desde el que hay cascada
+    static constexpr int FALL_STEPS = 3;          // pasos del cauce que dura la caída del agua
+
+    // Excava un río que baja hasta el mar: el nivel del agua solo baja, el cauce abre un valle y donde el terreno cae en picado (o, con
+    // 'forceFall', en el tramo más empinado si no hay ninguno) el agua se despeña en cascada. Hasta 'maxFalls' cascadas. false si no llega al mar.
+    bool carveRiver(float startX, float startZ, float startLevel, int maxFalls, bool forceFall, const RiverStyle& style) {
         std::vector<PathPoint> path = tracePath(startX, startZ);
-        if (path.size() < (fall ? 45u : 24u)) return false;
         const int n = static_cast<int>(path.size());
-        int cascade = -1;
-        float drop = 0.0f;
-        if (fall) {
-            float bestDrop = 0.0f;
-            for (int i = static_cast<int>(0.18f * n); i < static_cast<int>(0.65f * n) && i + 25 < n; ++i) {
-                const float d = path[i].terrain - path[i + 25].terrain;
-                if (path[i].terrain >= 3.0f && d > bestDrop) { bestDrop = d; cascade = i; }
-            }
-            if (cascade < 0) cascade = n / 3;
-            drop = (std::clamp)(between(3.0f, 5.2f), 2.2f, (std::max)(2.2f, 0.8f * bestDrop));
+        if (n < 24 || path.back().terrain > 2.5f) return false;
+        struct Fall { int lip; int end; float forced; };
+        std::vector<Fall> falls;
+        for (int i = 3; i + FALL_WINDOW < n && static_cast<int>(falls.size()) < maxFalls; ++i) {
+            if (path[i].terrain < 2.5f || path[i].terrain - path[i + FALL_WINDOW].terrain < FALL_MIN_DROP) continue;
+            int end = i + FALL_WINDOW;
+            while (end + 1 < n && end - i < 9 && path[end].terrain - path[end + 1].terrain > 0.8f) ++end;
+            falls.push_back({ i, end, 0.0f });
+            i = end + 14; // cascadas separadas
         }
+        for (int wanted = forceFall ? 2 : 0; static_cast<int>(falls.size()) < wanted;) { // sin cortados naturales: se talla la caída en el tramo más empinado libre
+            int best = -1;
+            float bestDrop = 0.0f;
+            for (int i = static_cast<int>(0.12f * n); i < static_cast<int>(0.75f * n) && i + 8 < n; ++i) {
+                bool free = true;
+                for (const Fall& f : falls) if (i > f.lip - 16 && i < f.end + 16) free = false;
+                const float d = path[i].terrain - path[i + 8].terrain;
+                if (free && path[i].terrain >= 4.0f && d > bestDrop) { bestDrop = d; best = i; }
+            }
+            if (best < 0) break;
+            falls.push_back({ best, best + FALL_STEPS, (std::clamp)(between(4.0f, 8.0f), 3.0f, (std::max)(3.0f, 0.9f * bestDrop)) });
+        }
+        std::sort(falls.begin(), falls.end(), [](const Fall& a, const Fall& b) { return a.lip < b.lip; });
         float level = startLevel > -1.0e8f ? startLevel : path.front().terrain - 0.35f;
-        constexpr int FALL_STEPS = 6;
+        size_t fall = 0;
+        float lipLevel = level, fallTo = level;
         for (int i = 0; i < n; ++i) {
             PathPoint& p = path[i];
-            if (fall && i >= cascade && i < cascade + FALL_STEPS) { level -= drop / FALL_STEPS; p.cascade = true; }
-            else level = (std::min)(level, p.terrain - 0.35f);
+            const float target = p.terrain - 0.35f;
+            if (fall < falls.size() && i == falls[fall].lip) { // borde de la cascada: el agua sigue a este nivel y cae a partir de aquí
+                level = (std::min)(level, target);
+                lipLevel = level;
+                const Fall& f = falls[fall];
+                fallTo = f.forced > 0.0f ? level - f.forced : (std::min)(level - 2.5f, path[f.end].terrain - 0.35f);
+                fallTo = (std::max)(fallTo, 0.12f);
+            } else if (fall < falls.size() && i > falls[fall].lip && i <= falls[fall].lip + FALL_STEPS) {
+                const float t = static_cast<float>(i - falls[fall].lip) / FALL_STEPS;
+                level = (std::min)(level, lipLevel + (fallTo - lipLevel) * t);
+                p.cascade = true;
+                if (i == falls[fall].lip + FALL_STEPS) ++fall;
+            } else {
+                level = (std::min)(level, target);
+            }
             level = (std::max)(level, 0.12f);
             const float t = static_cast<float>(i) / n;
             p.level = level;
@@ -660,7 +697,7 @@ class HabitatMap {
         std::vector<int> owner(static_cast<size_t>(c) * c, -1);
         for (int i = 0; i < n; ++i) {
             const PathPoint& p = path[i];
-            const float reach = p.halfWidth + 10.0f;
+            const float reach = p.halfWidth + VALLEY;
             const int c0 = nearestCol(p.x - reach), c1 = nearestCol(p.x + reach), r0 = nearestCol(p.z - reach), r1 = nearestCol(p.z + reach);
             for (int row = r0; row <= r1; ++row) {
                 for (int col = c0; col <= c1; ++col) {
@@ -674,25 +711,29 @@ class HabitatMap {
                 }
             }
         }
+        const int firstLip = falls.empty() ? -1 : falls.front().lip;
         for (const int index : touched) {
             const int i = owner[index];
             const PathPoint& p = path[i];
             const float d = best[index], hw = p.halfWidth;
-            const float bank = d < hw ? p.bed + (p.level - p.bed) * (d / hw) * (d / hw) : p.level + (d - hw) * 0.7f;
+            const float bank = d < hw ? p.bed + (p.level - p.bed) * (d / hw) * (d / hw) : p.level + (d - hw) * VALLEY_SLOPE; // paredes del valle
             float& g = m_ground.data()[index];
             if (bank >= g) continue;
             g = bank;
             if (d < hw + 0.1f && g < p.level) {
-                const bool upper = fall && i < cascade;
+                const bool upper = firstLip >= 0 && i <= firstLip;
                 m_level[index] = p.level;
                 m_kind[index] = p.cascade ? CASCADE : upper ? UPPER_RIVER : RIVER;
-                const float speed = p.cascade ? 4.5f : upper ? 1.6f : 1.1f;
+                const float speed = p.cascade ? 5.0f : upper ? 1.6f : 1.1f;
                 m_flowX.data()[index] = p.tx * speed;
                 m_flowZ.data()[index] = p.tz * speed;
             }
         }
         return true;
     }
+
+    static constexpr float VALLEY = 16.0f;        // hasta dónde (m, desde la orilla) el cauce modela el valle
+    static constexpr float VALLEY_SLOPE = 0.5f;   // pendiente de las paredes del valle
 
     // Punto de salida de un lago: el lado más bajo de su orilla.
     bool outlet(const Basin& lake, float& x, float& z, float minCoast) const {
@@ -706,6 +747,8 @@ class HabitatMap {
         return lowest < 1.0e8f;
     }
 
+    // Ríos de montaña: nacen en las cumbres (o en un lago alto), bajan abriendo valles, saltan en cascadas y acaban en el mar.
+    // Ríos de llanura: salen de los lagos y bajan al mar. Los lagos no tienen corriente.
     void carveRivers(const GameData& data) {
         const Habitat* river = nullptr;
         const Habitat* upper = nullptr;
@@ -714,37 +757,40 @@ class HabitatMap {
             if (habitat.placement == HabitatPlacement::UPPER_RIVER) upper = &habitat;
         }
         if (!river && !upper) return;
-        const RiverStyle style{ river ? river->minRadius : 2.4f, river ? river->maxRadius : 3.4f, river ? -river->maxAltitude : 1.0f, river ? -river->minAltitude : 1.6f };
-        // Ríos con cascada: nacen en un lago alto o, si no hay, en un punto alto de la montaña.
-        const int falls = upper ? betweenInt((std::max)(1, upper->minZones), (std::max)(1, upper->maxZones)) : 0;
-        std::vector<Basin> sources;
-        for (const Basin& basin : m_basins) if (basin.kind == UPPER_LAKE) sources.push_back(basin);
-        int made = 0;
-        for (int i = 0; made < falls && i < 40; ++i) {
-            float x = 0.0f, z = 0.0f, level = -1.0e9f;
-            if (i < static_cast<int>(sources.size())) {
-                if (!outlet(sources[i], x, z, 20.0f)) continue;
-                level = sources[i].level;
-            } else {
-                float bestHeight = 0.0f;
-                for (int k = 0; k < 120; ++k) {
-                    const Island& island = m_islands.front();
-                    const float a = between(0.0f, 6.2831853f), r = std::sqrt(between(0.0f, 1.0f)) * island.r * 0.8f;
-                    const float px = island.x + std::cos(a) * r, pz = island.z + std::sin(a) * r, t = ground(px, pz);
-                    if (t > bestHeight && t < SNOW_LINE - 3.0f && t > 8.0f && coastSigned(px, pz) > 40.0f) { bestHeight = t; x = px; z = pz; }
-                }
-                if (bestHeight <= 0.0f) continue;
-            }
-            if (carveRiver(x, z, level, true, style)) ++made;
+        const RiverStyle style{ river ? river->minRadius : 2.4f, river ? river->maxRadius : 3.4f, river ? -river->maxAltitude : 2.2f, river ? -river->minAltitude : 3.2f };
+        const int mountain = upper ? (std::max)(2, betweenInt((std::max)(1, upper->minZones), (std::max)(1, upper->maxZones))) : 0;
+        struct Source { float x, z, level; };
+        std::vector<Source> sources;
+        for (const Basin& basin : m_basins) {
+            float x = 0.0f, z = 0.0f;
+            if (basin.kind == UPPER_LAKE && outlet(basin, x, z, 20.0f)) sources.push_back({ x, z, basin.level });
         }
-        // Ríos normales: salen de lagos medios y bajan al mar.
+        // cumbres: los puntos más altos de la isla principal (sin entrar en la nieve perpetua), separados entre sí
+        struct Peak { float x, z, h; };
+        std::vector<Peak> peaks;
+        const Island& island = m_islands.front();
+        for (int k = 0; k < 900; ++k) {
+            const float a = between(0.0f, 6.2831853f), r = std::sqrt(between(0.0f, 1.0f)) * island.r * 0.85f;
+            const float px = island.x + std::cos(a) * r, pz = island.z + std::sin(a) * r, t = ground(px, pz);
+            if (t > 9.0f && t < SNOW_LINE + 6.0f && coastSigned(px, pz) > 40.0f && std::sqrt(px * px + pz * pz) > PLATEAU_FADE + 10.0f && m_kind[nearestNode(px, pz)] == DRY) peaks.push_back({ px, pz, t });
+        }
+        std::sort(peaks.begin(), peaks.end(), [](const Peak& a, const Peak& b) { return a.h > b.h; });
+        for (const Peak& peak : peaks) {
+            bool apart = true;
+            for (const Source& other : sources) if ((peak.x - other.x) * (peak.x - other.x) + (peak.z - other.z) * (peak.z - other.z) < 70.0f * 70.0f) apart = false;
+            if (apart) sources.push_back({ peak.x, peak.z, -1.0e9f });
+        }
+        int made = 0;
+        for (size_t i = 0; i < sources.size() && made < mountain; ++i) {
+            if (carveRiver(sources[i].x, sources[i].z, sources[i].level, 3, true, style)) ++made;
+        }
         const int plain = river ? betweenInt((std::max)(1, river->minZones), (std::max)(1, river->maxZones)) : 0;
         made = 0;
         for (const Basin& lake : m_basins) {
             if (made >= plain) break;
             float x = 0.0f, z = 0.0f;
             if (lake.kind != LAKE || !outlet(lake, x, z, 10.0f)) continue;
-            if (carveRiver(x, z, lake.level, false, style)) ++made;
+            if (carveRiver(x, z, lake.level, 1, false, style)) ++made;
         }
     }
 
@@ -757,6 +803,7 @@ class HabitatMap {
                 const float g = m_ground.at(col, row), s = m_coast.at(col, row);
                 if (m_kind[index] != DRY && g < m_level[index]) {
                     m_surface.at(col, row) = m_level[index];
+                    if (m_kind[index] == LAKE || m_kind[index] == UPPER_LAKE || m_kind[index] == POND) m_flowX.at(col, row) = m_flowZ.at(col, row) = 0.0f; // agua quieta: solo la mueve el viento
                 } else {
                     m_kind[index] = DRY;
                     m_flowX.at(col, row) = m_flowZ.at(col, row) = 0.0f;
@@ -856,7 +903,7 @@ class HabitatMap {
                 candidates.push_back({ x, z, std::cos(dirAngle), std::sin(dirAngle), (std::min)(slope, 0.9f) * 10.0f + between(0.0f, 4.0f) + h * 0.05f });
             }
             std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
-            for (size_t i = 0; i < candidates.size() && i < 10; ++i) {
+            for (size_t i = 0; i < candidates.size() && i < 24; ++i) {
                 Underground::System system;
                 const Candidate& c = candidates[i];
                 if (!m_under.carve(plan, { c.x, c.z, c.dirX, c.dirZ }, { m_ground, m_surface, m_kind }, m_noise, *m_random, system) || system.radius < 6.0f) continue;
@@ -951,7 +998,109 @@ class HabitatMap {
         for (int h = 0; h < m_habitats; ++h) {
             if (data.habitats[h].placement == HabitatPlacement::SKY_LAND) scatterPatches(data, h);
         }
+        m_hills.clear();
+        for (int h = 0; h < m_habitats; ++h) {
+            if (data.habitats[h].placement != HabitatPlacement::SKY_CAVE) continue;
+            const int count = betweenInt(data.habitats[h].minZones, data.habitats[h].maxZones);
+            for (int i = 0; i < count; ++i) buildCloudCave(data, h);
+        }
+        buildSkyLand(data);
         for (const Region& region : m_regions) if (region.kind == HabitatPlacement::SKY) placeUpdraft(region);
+    }
+
+    // Los hábitats de la superficie (los de colocación libre) también aparecen sobre el suelo de nube: cada isla recibe parcelas de unos
+    // pocos hábitats distintos, así que no hay dos islas iguales.
+    void buildSkyLand(const GameData& data) {
+        std::vector<int> land;
+        for (int h = 0; h < m_habitats; ++h) if (data.habitats[h].placement == HabitatPlacement::ANY) land.push_back(h);
+        if (land.empty()) return;
+        for (size_t r = 0; r < m_regions.size(); ++r) {
+            const Region region = m_regions[r];
+            if (region.kind != HabitatPlacement::SKY || region.floorRadius < 18.0f) continue;
+            const int count = betweenInt(2, region.floorRadius > 30.0f ? 5 : 3);
+            for (int i = 0; i < count; ++i) {
+                for (int attempt = 0; attempt < 60; ++attempt) {
+                    const int h = land[static_cast<size_t>(betweenInt(0, static_cast<int>(land.size()) - 1))];
+                    const Habitat& info = data.habitats[h];
+                    const float radius = (std::min)(between(info.minRadius, info.maxRadius) * 0.45f, region.floorRadius * 0.38f);
+                    if (radius < 6.0f) continue;
+                    const float angle = between(0.0f, 6.2831853f), dist = between(0.0f, (std::max)(0.0f, region.floorRadius * 0.72f - radius * 0.5f));
+                    const float shape = skyShape(region, std::cos(angle), std::sin(angle));
+                    Zone zone;
+                    zone.habitat = h;
+                    zone.x = region.x + std::cos(angle) * dist * shape; zone.z = region.z + std::sin(angle) * dist * shape;
+                    zone.radius = radius;
+                    zone.stretch = between(info.minStretch, (std::max)(info.minStretch, info.maxStretch));
+                    zone.altitude = (std::max)(1.2f, between(info.minAltitude, info.maxAltitude) * 0.45f);
+                    zone.roughness = info.roughness * 0.5f;
+                    const float tilt = between(0.0f, 6.2831853f);
+                    zone.cosA = std::cos(tilt); zone.sinA = std::sin(tilt);
+                    for (float& phase : zone.lobe) phase = between(0.0f, 6.2831853f);
+                    bool apart = true;
+                    for (const Zone& other : m_skyZones) {
+                        const float dx = zone.x - other.x, dz = zone.z - other.z, need = (zone.radius * zone.stretch + other.radius * other.stretch) * 0.85f;
+                        if (dx * dx + dz * dz < need * need) apart = false;
+                    }
+                    for (const Zone& other : m_hills) { // sin pisar las colinas de las cuevas de nube
+                        const float dx = zone.x - other.x, dz = zone.z - other.z, need = (zone.radius * zone.stretch + other.radius) * 1.15f;
+                        if (dx * dx + dz * dz < need * need) apart = false;
+                    }
+                    if (!apart) continue;
+                    raiseIslet(zone, region.floorY);
+                    m_skyZones.push_back(zone);
+                    m_sites.push_back(zone);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Cueva de nube: una colina en el suelo de una isla grande con una boca en su ladera y galerías por dentro.
+    void buildCloudCave(const GameData& data, int habitat) {
+        const Habitat& info = data.habitats[habitat];
+        Underground::Plan plan;
+        plan.kind = Underground::Kind::CAVE;
+        plan.habitat = habitat;
+        plan.radius = between(info.minRadius, info.maxRadius);
+        plan.minFill = 0.2f;
+        plan.maxDrop = 4.0f; // bajo el suelo de nube no hay roca: las galerías casi no bajan
+        std::vector<size_t> islands;
+        for (size_t i = 0; i < m_regions.size(); ++i) if (m_regions[i].kind == HabitatPlacement::SKY && m_regions[i].floorRadius >= 24.0f) islands.push_back(i);
+        if (islands.empty()) return;
+        for (int attempt = 0; attempt < 30; ++attempt) {
+            const Region region = m_regions[islands[static_cast<size_t>(betweenInt(0, static_cast<int>(islands.size()) - 1))]];
+            Zone hill;
+            hill.habitat = region.habitat;
+            hill.radius = (std::min)(plan.radius * 1.1f, region.floorRadius * 0.5f);
+            const float angle = between(0.0f, 6.2831853f), dist = between(0.0f, (std::max)(0.0f, region.floorRadius * 0.5f));
+            hill.x = region.x + std::cos(angle) * dist; hill.z = region.z + std::sin(angle) * dist;
+            hill.altitude = between(12.0f, 16.0f);
+            hill.roughness = 0.8f;
+            for (const Zone& other : m_hills) {
+                const float dx = hill.x - other.x, dz = hill.z - other.z, need = (hill.radius + other.radius) * 1.1f;
+                if (dx * dx + dz * dz < need * need) { hill.radius = 0.0f; break; }
+            }
+            if (hill.radius < 8.0f) continue;
+            raiseIslet(hill, region.floorY);
+            m_hills.push_back(hill);
+            float bestX = hill.x, bestZ = hill.z, bestSlope = -1.0f;
+            for (int k = 0; k < 48; ++k) { // la boca, donde la ladera es más empinada
+                const float a = k * 0.1308997f, x = hill.x + std::cos(a) * hill.radius * 0.85f, z = hill.z + std::sin(a) * hill.radius * 0.85f;
+                float gx, gz;
+                m_ground.gradient(x, z, gx, gz);
+                const float slope = std::sqrt(gx * gx + gz * gz);
+                if (slope > bestSlope && ground(x, z) > region.floorY + 3.0f) { bestSlope = slope; bestX = x; bestZ = z; }
+            }
+            float gx, gz;
+            m_ground.gradient(bestX, bestZ, gx, gz);
+            const float length = (std::max)(std::sqrt(gx * gx + gz * gz), 1.0e-4f);
+            Underground::System system;
+            if (!m_under.carve(plan, { bestX, bestZ, gx / length, gz / length }, { m_ground, m_surface, m_kind }, m_noise, *m_random, system) || system.radius < 6.0f) continue;
+            Zone site;
+            site.habitat = habitat; site.x = system.x; site.z = system.z; site.radius = system.radius * 0.7f; site.deep = true;
+            m_sites.push_back(site);
+            return;
+        }
     }
 
     // Suelo, mar y abismo de una isla: el relieve, el agua de nube (nivel un poco bajo el suelo) y lo que no existe fuera de ella.
@@ -1097,6 +1246,7 @@ class HabitatMap {
     std::vector<Zone> m_zones, m_sites;
     std::vector<Region> m_regions;
     std::vector<Zone> m_skyZones;
+    std::vector<Zone> m_hills;       // colinas de las cuevas de nube (la tierra del cielo no las pisa)
     Underground m_under;
     std::vector<int> m_hallHabitats; // hábitats de salas (HALL) de cuevas y minas
     int m_deepWater = -1;            // hábitat del agua subterránea

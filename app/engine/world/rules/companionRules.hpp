@@ -23,5 +23,6 @@ namespace CompanionRules {
     inline constexpr float ATTACK_RANGE = 2.4f;      // distancia al centro del salvaje para golpearlo de cerca (ataque > ataque especial)
     inline constexpr float RANGED_RANGE = 8.0f;      // y de lejos (ataque especial > ataque)
     inline constexpr float RANGED_APPROACH = 0.75f;  // fracción del alcance a la que se detiene un atacante a distancia
+    inline constexpr float WEAK_REACH = 14.0f;       // distancia a la que se puede capturar al salvaje debilitado
     inline constexpr float CAPTURE_STOP_HP = 0.3f;   // en modo captura deja de atacar por debajo de esta fracción de vida
 }

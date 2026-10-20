@@ -8,7 +8,7 @@
 // Reglas del porcentaje de captura: bonificaciones fijas sobre el porcentaje base del pokémon.
 namespace CaptureRules {
     inline constexpr float BACK_MULTIPLIER = 1.15f;    // el jugador está por detrás del pokémon
-    inline constexpr float STEALTH_MULTIPLIER = 1.25f; // el jugador va agachado: el pokémon no lo ha detectado
+    inline constexpr float STEALTH_MULTIPLIER = 1.25f; // el jugador está oculto entre matorrales: el pokémon no lo ha detectado
     inline constexpr float MAX_PERCENT = 99.0f;
     inline constexpr float BEHIND_DOT = -0.25f;       // por debajo de este valor se considera "por la espalda"
 

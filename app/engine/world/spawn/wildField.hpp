@@ -29,6 +29,7 @@ class WildField {
     static constexpr float UNLOAD_RADIUS = 95.0f;   // fuera de este, desaparece (el margen evita parpadeos)
     static constexpr float EDGE = 1.5f;             // separación de los pokémon al borde de su chunk
     static constexpr int POINT_TRIES = 10;
+    static constexpr int DEEP_TRIES = 80;           // las galerías ocupan poco del chunk: se prueban más puntos (y bajo tierra no hay semicírculo)
 
     // Los pokémon solo nacen en el semicírculo que el jugador tiene delante (hacia donde mira la cámara, yaw).
     // assign elige especie, nivel y brillo del recién colocado; devuelve false si ahí no puede vivir ninguno.
@@ -167,13 +168,13 @@ class WildField {
     // Punto del chunk fuera de la zona de exclusión del jugador y de otros pokémon, con la altura de sus pies (la del suelo de la galería si
     // 'deep': solo en galerías cubiertas). false si no se encuentra.
     bool pointIn(int col, int row, float px, float pz, const HabitatMap& habitats, bool deep, DirectX::XMFLOAT2& out, float& y, const CaptureTarget* ignore = nullptr) const {
-        for (int i = 0; i < POINT_TRIES; ++i) {
+        for (int i = 0; i < (deep ? DEEP_TRIES : POINT_TRIES); ++i) {
             out = { -Physics::World::HALF_SIZE + col * CHUNK + RandomUtil::range(EDGE, CHUNK - EDGE),
                     -Physics::World::HALF_SIZE + row * CHUNK + RandomUtil::range(EDGE, CHUNK - EDGE) };
             const float dx = out.x - px, dz = out.y - pz;
             const float d2 = dx * dx + dz * dz;
             const bool inFront = dx * m_view.x + dz * m_view.y >= 0.0f; // semicírculo delantero
-            if (!inFront || d2 <= EXCLUSION_RADIUS * EXCLUSION_RADIUS || d2 > SPAWN_RADIUS * SPAWN_RADIUS || crowded(col, row, out, ignore)) continue;
+            if ((!inFront && !deep) || d2 <= EXCLUSION_RADIUS * EXCLUSION_RADIUS || d2 > SPAWN_RADIUS * SPAWN_RADIUS || crowded(col, row, out, ignore)) continue;
             if (deep) {
                 if (!habitats.under().covered(out.x, out.y) || habitats.under().depthAt(out.x, out.y) > 0.4f) continue; // galería cubierta y seca
                 y = habitats.under().floorAt(out.x, out.y);

@@ -9,7 +9,7 @@
 #include "../world/state/inventory.hpp"
 
 // Avisos grandes en pantalla.
-enum class Notice { NONE, CAPTURED, ESCAPED, LUCKY, SUPER_LUCKY, OUT_OF_STOCK, REWARD, LEVEL_UP };
+enum class Notice { NONE, CAPTURED, ESCAPED, LUCKY, SUPER_LUCKY, OUT_OF_STOCK, REWARD, LEVEL_UP, FAINTED };
 
 // Nombre que se dibuja sobre un pokémon (posición en el mundo, sobre su cabeza).
 struct NameTag {
@@ -61,6 +61,8 @@ struct GameStatus {
     // Mundo vertical: temperatura, altura, aire, región y capa.
     float temperature = 20.0f;                   // °C donde está el jugador (baja con la altura)
     float altitude = 0.0f;                       // m sobre el mar
+    float health = 1.0f;                         // vida (0..1)
+    float hurt = 0.0f;                           // 0..1: destello de dolor
     float oxygen = 1.0f;                         // aire restante (0..1)
     bool showOxygen = false;                     // el medidor solo se ve bajo el agua o recuperándose
     bool exhausted = false;                      // sin aire
@@ -80,5 +82,5 @@ struct GameStatus {
     bool hasAimTarget = false;
     int chancePercent = 0;      // porcentaje de captura (ya con bonificaciones)
     bool behind = false;        // bonificación por la espalda
-    bool hidden = false;        // bonificación por sigilo (agachado)
+    bool hidden = false;        // bonificación por sigilo (oculto entre matorrales)
 };

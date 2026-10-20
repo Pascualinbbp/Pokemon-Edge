@@ -11,9 +11,8 @@ namespace Physics {
         public:
         static constexpr float GRAVITY = 20.0f;
         static constexpr float HALF_SIZE = 448.0f; // las mallas del mundo cubren de -HALF_SIZE a +HALF_SIZE; el mundo jugable es el archipiélago y las regiones
-        static constexpr float CLIMB_SLOPE = 0.85f; // pendiente (m de subida por m) desde la que no se anda: se escala
-        static constexpr float CLIMB_MAX = 2.4f;    // más empinado que esto es una pared: no se puede subir
-        static constexpr float SWIM_DEPTH = 0.6f;  // con más agua que esto no se camina: se nada
+        static constexpr float CLIMB_SLOPE = 5.0f;  // pendiente (m de subida por m, unos 79º) desde la que andar no tiene sentido: se escala
+            static constexpr float SWIM_DEPTH = 0.6f;  // con más agua que esto no se camina: se nada
         static constexpr float START_HEIGHT = 1.0f; // altura del terreno plano de la zona de inicio (paredes, máquina...)
         static constexpr float SUBMERGED = 0.4f;   // fracción de la altura de un cuerpo que se hunde al flotar
         static constexpr float STEP_HEIGHT = 0.3f; // desnivel que se sube andando; por debajo de la cara superior menos esto, el sólido bloquea

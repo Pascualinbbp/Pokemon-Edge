@@ -27,6 +27,8 @@ namespace ResourceStyle {
             case 8:  return { Shape::CONIFER, { 0.34f, 0.22f, 0.12f }, { 0.10f, 0.42f, 0.24f }, false, 0.35f, 3.8f }; // pino
             case 9:  return { Shape::TREE, { 0.86f, 0.84f, 0.78f }, { 0.52f, 0.72f, 0.22f }, false, 0.3f, 3.4f };   // abedul
             case 10: return { Shape::PALM, { 0.55f, 0.40f, 0.22f }, { 0.28f, 0.62f, 0.22f }, false, 0.3f, 3.8f };   // palmera
+            case 11: return { Shape::TREE, { 0.30f, 0.20f, 0.16f }, { 0.98f, 0.68f, 0.80f }, false, 0.3f, 3.6f };   // cerezo en flor
+            case 12: return { Shape::BUSH, { 0.28f, 0.58f, 0.24f }, { 0.96f, 0.45f, 0.72f }, true,  0.5f, 0.6f };   // flores silvestres
             case 4:  return { Shape::ROCK, { 0.42f, 0.42f, 0.45f }, { 0.07f, 0.07f, 0.08f }, true,  0.85f, 1.1f }; // filón de carbón
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca
         }

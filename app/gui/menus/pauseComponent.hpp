@@ -11,10 +11,10 @@ namespace PauseComponent {
     namespace detail {
         inline constexpr float MARGIN = 36.0f;
         inline constexpr float PANEL_WIDTH = 400.0f;
-        inline constexpr float ROW_HEIGHT = 76.0f;
-        inline constexpr float ROW_GAP = 10.0f;
+        inline constexpr float ROW_HEIGHT = 66.0f;
+        inline constexpr float ROW_GAP = 8.0f;
 
-        enum class Icon { BAG, POKEBALL, DEX, MAP, CONTROLS, EXIT };
+        enum class Icon { BAG, POKEBALL, DEX, TYPES, MAP, CONTROLS, EXIT };
 
         inline void drawIcon(ImDrawList* dl, const ImVec2& c, float r, Icon icon) {
             const ImU32 white = IM_COL32(255, 255, 255, 255);
@@ -30,6 +30,12 @@ namespace PauseComponent {
                     dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y - r * 0.85f), ImVec2(c.x + r * 0.7f, c.y + r * 0.85f), white, r * 0.2f);
                     dl->AddRectFilled(ImVec2(c.x - r * 0.45f, c.y - r * 0.6f), ImVec2(c.x + r * 0.45f, c.y + r * 0.05f), IM_COL32(40, 40, 55, 255), r * 0.1f);
                     dl->AddCircleFilled(ImVec2(c.x, c.y + r * 0.5f), r * 0.17f, IM_COL32(230, 70, 60, 255));
+                    break;
+                case Icon::TYPES: // cuadrícula de 3x3 casillas
+                    for (int y = 0; y < 3; ++y) for (int x = 0; x < 3; ++x) {
+                        const ImVec2 a(c.x + (x - 1.5f) * r * 0.62f, c.y + (y - 1.5f) * r * 0.62f);
+                        dl->AddRectFilled(a, ImVec2(a.x + r * 0.5f, a.y + r * 0.5f), (x + y) % 3 == 0 ? IM_COL32(110, 220, 120, 255) : (x + y) % 3 == 1 ? IM_COL32(240, 160, 60, 255) : white, r * 0.08f);
+                    }
                     break;
                 case Icon::MAP:
                     dl->AddRectFilled(ImVec2(c.x - r * 0.8f, c.y - r * 0.7f), ImVec2(c.x + r * 0.8f, c.y + r * 0.7f), white, r * 0.15f);
@@ -96,11 +102,13 @@ namespace PauseComponent {
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
         if (option(2, Icon::DEX, "Pokédex", "Pokémon vistos y capturados", width)) state = GameState::POKEDEX;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
-        if (option(3, Icon::MAP, "Mapa", "Zonas exploradas y sus hábitats", width)) state = GameState::MAP;
+        if (option(3, Icon::TYPES, "Tipos", "Tabla de fortalezas y debilidades", width)) state = GameState::TYPES;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
-        if (option(4, Icon::CONTROLS, "Controles", "Teclado y mando", width)) state = GameState::CONTROLS;
+        if (option(4, Icon::MAP, "Mapa", "Zonas exploradas y sus hábitats", width)) state = GameState::MAP;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
-        if (option(5, Icon::EXIT, "Menú principal", "Guarda la partida y sale", width)) state = GameState::MAIN_MENU;
+        if (option(5, Icon::CONTROLS, "Controles", "Teclado y mando", width)) state = GameState::CONTROLS;
+        ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
+        if (option(6, Icon::EXIT, "Menú principal", "Guarda la partida y sale", width)) state = GameState::MAIN_MENU;
 
         if (GuiInput::backPressed() || GuiInput::startPressed()) state = GameState::PLAYING;
     }

@@ -18,8 +18,8 @@ struct ResourceChance {
 // UPPER_LAKE / POND: agua dulce (UPPER = aguas arriba de una cascada; POND = charcas de un pantano, besideId); PEAK: tierra por encima de
 // la línea de nieve; CAVE / MINE: sistemas de galerías BAJO el terreno a los que se entra andando por una boca (muchos, de varios tamaños);
 // HALL: tipo de sala dentro de una cueva o mina (besideId = el hábitat de cueva o mina al que pertenece; -1 = cualquiera);
-// UNDERGROUND_WATER: agua de las grutas; SKY: suelo de nubes de las islas del cielo; SKY_LAND: parcelas de tierra sobre las nubes; SKY_SEA: mar de nubes.
-enum class HabitatPlacement { ANY, COAST, BESIDE, SEA, RIVER, UPPER_RIVER, LAKE, UPPER_LAKE, POND, PEAK, CAVE, MINE, HALL, UNDERGROUND_WATER, SKY, SKY_LAND, SKY_SEA };
+// UNDERGROUND_WATER: agua de las grutas; SKY: suelo de nubes de las islas del cielo; SKY_LAND: parcelas de tierra sobre las nubes; SKY_SEA: mar de nubes; SKY_CAVE: cuevas excavadas en colinas del suelo de nube.
+enum class HabitatPlacement { ANY, COAST, BESIDE, SEA, RIVER, UPPER_RIVER, LAKE, UPPER_LAKE, POND, PEAK, CAVE, MINE, HALL, UNDERGROUND_WATER, SKY, SKY_LAND, SKY_SEA, SKY_CAVE };
 
 struct Habitat {
     int id = -1;

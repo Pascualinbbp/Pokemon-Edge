@@ -31,6 +31,8 @@ class Underground {
     static constexpr float MAX_DROP = 16.0f;     // lo más que baja el suelo respecto a la boca
     static constexpr float TRENCH_LENGTH = 10.0f; // explanada tallada ante la boca
     static constexpr float TRENCH_HALF = 4.5f;
+    static constexpr float MIN_RADIUS = 6.0f;    // alcance mínimo de un sistema
+    static constexpr float MIN_FILL = 0.3f;      // fracción del tamaño pedido que debe alcanzar como mínimo
     static constexpr float MIN_SURFACE = 2.5f;   // el terreno de encima debe estar al menos a esta altura sobre el mar
 
     enum class Kind : uint8_t { CAVE, MINE };
@@ -72,7 +74,7 @@ class Underground {
     };
 
     // Qué se quiere generar: tipo, hábitat de las galerías, tamaño, hábitats posibles de las salas y del agua subterránea (-1 = ninguno).
-    struct Plan { Kind kind = Kind::CAVE; int habitat = 0; float radius = 30.0f; std::vector<int> halls; int water = -1; };
+    struct Plan { Kind kind = Kind::CAVE; int habitat = 0; float radius = 30.0f; std::vector<int> halls; int water = -1; float maxDrop = MAX_DROP; float minFill = MIN_FILL; };
     struct Mouth { float x = 0.0f, z = 0.0f, dirX = 1.0f, dirZ = 0.0f; };
     // El terreno del mundo: se talla y se eleva en la boca. 'notDry' != 0 donde hay agua (no se excava ahí).
     struct Terrain { Physics::Heightfield& height; Physics::Heightfield& surface; const std::vector<uint8_t>& notDry; };
@@ -208,44 +210,44 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
                 if (depth < 2 && s > 8.0f && s < length - 8.0f && chance(0.16f)) {
                     walk(x, z, heading + (chance(0.5f) ? -1.0f : 1.0f) * uni(0.6f, 1.4f), length * uni(0.35f, 0.65f), r * 0.85f, depth + 1);
                 }
-                if (s > 12.0f && chance(0.06f)) addHall(x, z, uni(5.0f, (std::max)(6.0f, (std::min)(0.3f * R, 24.0f))), 0.6f);
+                if (s > 12.0f && chance(0.06f)) addHall(x, z, uni(7.0f, (std::max)(8.0f, (std::min)(0.4f * R, 34.0f))), 0.6f);
             }
-            if (depth == 0 || chance(0.6f)) addHall(x, z, uni(6.0f, (std::max)(7.0f, (std::min)(0.34f * R, 26.0f))), 0.65f);
+            if (depth == 0 || chance(0.6f)) addHall(x, z, uni(9.0f, (std::max)(10.0f, (std::min)(0.45f * R, 38.0f))), 0.65f);
         };
-        walk(mouth.x + mouth.dirX * 2.0f, mouth.z + mouth.dirZ * 2.0f, heading0, R * 1.5f, uni(2.8f, 3.6f), 0);
+        walk(mouth.x + mouth.dirX * 2.0f, mouth.z + mouth.dirZ * 2.0f, heading0, R * 2.1f, uni(4.2f, 5.4f), 0);
     } else {
         // galería principal: tramos rectos con pequeñas desviaciones; transversales a ambos lados
         float x = mouth.x + mouth.dirX * 2.0f, z = mouth.z + mouth.dirZ * 2.0f, heading = heading0, s = 0.0f, nextCross = uni(14.0f, 20.0f);
-        const float length = (std::max)(R * 1.3f, 18.0f);
+        const float length = (std::max)(R * 1.9f, 26.0f);
         Lane main{ { x, z } };
         bool side = chance(0.5f);
         float segment = uni(22.0f, 34.0f);
         while (s < length) {
             constexpr float STEP = 4.0f;
             const float nx = x + std::cos(heading) * STEP, nz = z + std::sin(heading) * STEP;
-            caps.push_back({ x, z, nx, nz, 3.1f });
+            caps.push_back({ x, z, nx, nz, 4.3f });
             x = nx; z = nz; s += STEP;
             main.push_back({ x, z });
             if (s >= nextCross && s < length - 10.0f) {
                 nextCross += uni(18.0f, 26.0f);
                 const float a = heading + (side ? 1.5708f : -1.5708f) + uni(-0.1f, 0.1f);
                 side = !side;
-                const float len = (std::max)(10.0f, R * uni(0.25f, 0.55f));
+                const float len = (std::max)(10.0f, R * uni(0.4f, 0.8f));
                 float cx = x, cz = z;
                 Lane lane{ { cx, cz } };
                 for (float t = 0.0f; t < len; t += STEP) {
                     const float mx = cx + std::cos(a) * STEP, mz = cz + std::sin(a) * STEP;
-                    caps.push_back({ cx, cz, mx, mz, 2.8f });
+                    caps.push_back({ cx, cz, mx, mz, 3.9f });
                     cx = mx; cz = mz;
                     lane.push_back({ cx, cz });
                 }
                 if (chance(0.55f)) lanes.push_back(lane);
-                if (chance(0.7f)) addHall(cx + std::cos(a) * 3.0f, cz + std::sin(a) * 3.0f, uni(4.5f, 8.0f), 0.2f);
+                if (chance(0.7f)) addHall(cx + std::cos(a) * 3.0f, cz + std::sin(a) * 3.0f, uni(6.0f, 11.0f), 0.2f);
             }
             if (s >= segment) { heading += uni(-0.3f, 0.3f); segment += uni(22.0f, 34.0f); }
         }
         lanes.insert(lanes.begin(), main);
-        if (R >= 20.0f) addHall(x + std::cos(heading) * 4.0f, z + std::sin(heading) * 4.0f, uni(6.0f, 10.0f), 0.3f);
+        if (R >= 20.0f) addHall(x + std::cos(heading) * 4.0f, z + std::sin(heading) * 4.0f, uni(9.0f, 14.0f), 0.3f);
     }
 
     // ---- 2. Campo de apertura: dónde hay hueco ----
@@ -366,7 +368,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
                 if (!inSet[i] || dist[i] >= INF) { if (ok[i]) { ok[i] = 0; changed = true; } continue; }
                 const float x = height.nodeCoord(c), z = height.nodeCoord(r), d = dist[i], away = mouthDist[i]; // d: recorrido; away: en línea recta desde la boca
                 const float open = smooth(DOOR, DOOR + 6.0f, away);
-                float floor = S0 - (std::min)(DROP * (std::max)(0.0f, d - DOOR), MAX_DROP) + 0.35f * noise.fbm(x * 0.13f + 3.0f, z * 0.13f, 2) * open;
+                float floor = S0 - (std::min)(DROP * (std::max)(0.0f, d - DOOR), plan.maxDrop) + 0.35f * noise.fbm(x * 0.13f + 3.0f, z * 0.13f, 2) * open;
                 float tall = cave ? 3.4f + 1.3f * (0.5f + 0.5f * noise.value(x * 0.09f, z * 0.09f)) : 3.0f + 0.15f * noise.value(x * 0.2f, z * 0.2f);
                 float level = -INF, strength = 0.0f, bowlDrop = 0.0f;
                 int hallHabitat = -1;
@@ -375,7 +377,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
                     const float dc = std::hypot(x - h.x, z - h.z);
                     const float w = 1.0f - smooth(0.55f * h.r, 1.05f * h.r, dc);
                     if (w <= 0.0f) continue;
-                    const float L = S0 - (std::min)(DROP * (std::max)(0.0f, h.dist - DOOR), MAX_DROP); // nivel del suelo en el centro de la sala
+                    const float L = S0 - (std::min)(DROP * (std::max)(0.0f, h.dist - DOOR), plan.maxDrop); // nivel del suelo en el centro de la sala
                     const float roof = cave ? (std::min)(14.0f, 4.2f + 0.5f * h.r) * (0.9f + 0.1f * noise.value(x * 0.07f, z * 0.07f)) : 4.4f + 0.15f * h.r;
                     const float dome = w * (1.0f - 0.3f * smooth(0.3f * h.r, h.r, dc));
                     tall += (roof - tall) * dome;
@@ -409,6 +411,15 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
     bool any = false;
     for (size_t i = 0; i < ok.size() && !any; ++i) any = ok[i] && inSet[i];
     if (!any) return false;
+    { // un sistema que se queda muy corto (la roca de encima no deja sitio) se descarta antes de tocar el terreno
+        float lx = INF, hx = -INF, lz = INF, hz = -INF;
+        for (int r = r0; r <= r1; ++r) for (int c = c0; c <= c1; ++c) {
+            if (!ok[at(c, r)] || !inSet[at(c, r)]) continue;
+            lx = (std::min)(lx, height.nodeCoord(c)); hx = (std::max)(hx, height.nodeCoord(c));
+            lz = (std::min)(lz, height.nodeCoord(r)); hz = (std::max)(hz, height.nodeCoord(r));
+        }
+        if (0.5f * (std::max)(hx - lx, hz - lz) < (std::max)(MIN_RADIUS, plan.minFill * plan.radius)) return false;
+    }
 
     // ---- 4. Terreno: boca tallada, explanada y montículo que cubre el principio de la galería ----
     std::vector<float> raised(field.size(), -INF);

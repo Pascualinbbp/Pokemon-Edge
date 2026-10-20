@@ -124,7 +124,7 @@ class Inventory {
     int selectedIndex() const { return m_selected; }
     BallSlot ball(int index) const { return { *m_balls[index].type, m_slots[m_balls[index].slot].count }; }
     BallSlot selectedBall() const { return ball(m_selected); }
-    float captureMultiplier() const { return hasBalls() ? selectedBall().type.captureMultiplier : 1.0f; }
+    float captureMultiplier(bool shiny = false) const { return hasBalls() ? selectedBall().type.multiplier(shiny) : 1.0f; }
 
     bool canThrow() const { return hasBalls() && selectedBall().count > 0; }
     void consume() { if (canThrow()) --m_slots[m_balls[m_selected].slot].count; }

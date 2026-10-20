@@ -20,9 +20,9 @@ class Player {
     static constexpr float SLIDE_EASE_OUT = 0.2f;  // al final baja hasta la velocidad de correr
     static constexpr float JUMP_SPEED     = 7.0f;
     static constexpr float SWIM_SPEED     = 3.4f;  // nadar en la superficie
-    static constexpr float DIVE_SPEED     = 2.8f;  // nadar sumergido
-    static constexpr float SWIM_SPRINT    = 5.4f;  // nadar rápido (doble toque adelante, como al correr)
-    static constexpr float DIVE_SPRINT    = 4.4f;
+    static constexpr float DIVE_SPEED     = 4.6f;  // nadar sumergido (más rápido que en la superficie)
+    static constexpr float SWIM_SPRINT    = 5.6f;  // nadar rápido (doble toque adelante, como al correr)
+    static constexpr float DIVE_SPRINT    = 7.4f;
     static constexpr float SWIM_JUMP      = 5.0f;  // impulso al "saltar" nadando en la superficie
     static constexpr float DIVE_LOOK      = 0.35f; // mirando hacia abajo más que esto (rad) y avanzando, se sumerge
     static constexpr float DIVE_START_AIR = 0.4f;  // fracción de aire mínima para sumergirse mirando hacia abajo
@@ -30,10 +30,9 @@ class Player {
     static constexpr float STREAM_SPEED   = 18.0f; // velocidad con la que sube la corriente ascendente
     static constexpr float STREAM_ACCEL   = 30.0f;
     static constexpr float STREAM_LAUNCH  = 5.0f;  // impulso horizontal máximo al salir de la corriente
-    static constexpr float SURFACE_RISE   = 4.0f;  // sin aire, el cuerpo sube solo a esa velocidad
+    static constexpr float SURFACE_RISE   = 2.5f;  // sin aire, el cuerpo sube solo a esa velocidad
     static constexpr float DIVE_MIN_DEPTH = 1.3f;  // hace falta al menos esta profundidad para sumergirse
     static constexpr float CLIMB_SPEED    = 2.0f;  // trepar una ladera muy empinada
-    static constexpr float DESCEND_SPEED  = 3.0f;  // bajarla
     static constexpr float OXYGEN_REFILL  = 6.0f;  // el aire se recupera esta vez más rápido de lo que se gasta
 
     Physics::Body body;
@@ -80,11 +79,13 @@ class Player {
             updateSlide(dt, input);
             updateClimb(world, wasGrounded, dirX, dirZ, amount);
             updateHorizontal(dt, wasGrounded, dirX, dirZ, amount);
-            if (wasGrounded && input.jump && !m_climbing) jump(world);
+            if (wasGrounded && input.jump) jump(world); // también trepando: sirve para saltar antes de un precipicio o un hueco
         }
 
+        trackFall(streaming || inWater);
         if (!streaming) world.step(body, dt);
-        if (!streaming && !inWater && !wasGrounded && body.onGround) land(input);
+        if (!streaming && !inWater && !wasGrounded && body.onGround) { m_impact = m_fallSpeed; land(input); }
+        if (body.onGround || streaming || inWater) m_fallSpeed = 0.0f;
 
         updateFacing(dt, cameraYaw);
         m_heightScale = m_sliding ? SLIDE_HEIGHT : ((m_crouching || m_crouchQueued) ? CROUCH_HEIGHT : 1.0f);
@@ -94,6 +95,10 @@ class Player {
     }
 
     bool crouched() const { return m_crouching; }
+    // Velocidad (m/s) con la que acaba de tocar el suelo tras caer; la lee y la borra quien calcule el daño.
+    float takeImpact() { const float v = m_impact; m_impact = 0.0f; return v; }
+    // Sin aire con la cabeza bajo el agua (se ahoga).
+    bool drowning() const { return m_drowning; }
     // Hacia dónde mira el personaje: hacia donde se mueve; al apuntar, trabajar o pescar, hacia donde mira la cámara.
     float facing() const { return m_facing; }
 
@@ -156,7 +161,14 @@ class Player {
         if (m_actionTime >= m_actionDuration) m_action = PlayerAction::NONE;
     }
 
+    // La velocidad de caída máxima desde que se pierde el suelo (se descarta en el agua o en la corriente).
+    void trackFall(bool cushioned) {
+        if (cushioned) { m_fallSpeed = 0.0f; return; }
+        if (!body.onGround) m_fallSpeed = (std::max)(m_fallSpeed, -body.velocity.y);
+    }
+
     void leaveWater() {
+        m_drowning = false;
         m_swimming = m_diving = m_exhausted = false;
         body.underwater = false;
         m_oxygen = oxygenCapacity;
@@ -176,7 +188,7 @@ class Player {
             body.underwater = true;
             body.velocity.y = 0.0f;
         }
-        m_swimming = m_diving = m_climbing = m_sprinting = m_sliding = m_crouching = m_crouchQueued = m_exhausted = false;
+        m_swimming = m_diving = m_climbing = m_sprinting = m_sliding = m_crouching = m_crouchQueued = m_exhausted = m_drowning = false;
         m_oxygen = oxygenCapacity;
         body.velocity.y = (std::min)(STREAM_SPEED, body.velocity.y + STREAM_ACCEL * dt);
         body.position.y += body.velocity.y * dt;
@@ -243,6 +255,7 @@ class Player {
         body.velocity.z = dirZ * horizontal;
 
         const bool headUnder = m_diving && body.position.y + body.collisionHeight < level - 0.1f;
+        m_drowning = headUnder && m_exhausted && !breathesUnderwater;
         if (headUnder && !breathesUnderwater) {
             m_oxygen -= dt * (m_sprinting ? SPRINT_AIR : 1.0f);
             if (m_oxygen <= 0.0f) {
@@ -254,23 +267,22 @@ class Player {
         }
     }
 
-    // Trepa las laderas muy empinadas en vez de andarlas: más lento, sin correr ni saltar; más allá de CLIMB_MAX es una pared.
+    // Trepa las paredes casi verticales (desde CLIMB_SLOPE) en vez de andarlas: más lento y sin correr. Se puede saltar en cualquier momento.
+    // Solo se sube trepando: bajar una ladera, aunque sea empinada, se anda (y bajo tierra se mira el suelo de la galería, no el terreno).
     void updateClimb(const Physics::World& world, bool grounded, float dirX, float dirZ, float amount) {
         m_climbing = false;
-        m_blocked = false;
         m_climbSlope = 0.0f;
         if (!grounded || m_sliding) return;
         const float ahead = amount > 0.0f ? CLIMB_PROBE : 0.0f;
         float gx, gz;
-        world.terrain.gradient(body.position.x + dirX * ahead, body.position.z + dirZ * ahead, gx, gz);
+        world.gradient(body.position.x + dirX * ahead, body.position.z + dirZ * ahead, body.feet(), gx, gz);
         const float along = gx * dirX + gz * dirZ; // subida por metro en la dirección de avance
         const float steepHere = std::sqrt(gx * gx + gz * gz);
         m_climbSlope = amount > 0.0f ? along : 0.0f;
-        m_climbing = steepHere > Physics::World::CLIMB_SLOPE && (amount <= 0.0f || std::fabs(along) > Physics::World::CLIMB_SLOPE * 0.8f);
+        m_climbing = steepHere > Physics::World::CLIMB_SLOPE && (amount <= 0.0f || along > Physics::World::CLIMB_SLOPE * 0.8f);
         if (!m_climbing) return;
         m_sprinting = false;
         m_crouching = false;
-        m_blocked = amount > 0.0f && along > Physics::World::CLIMB_MAX;
     }
 
     // La cámara orbita libremente alrededor del jugador: girarla NO desvía al personaje.
@@ -370,7 +382,7 @@ class Player {
             dirZ = m_slideDirZ;
             speed = slideSpeed();
         } else if (grounded) {
-            if (m_climbing) speed = m_blocked ? 0.0f : (m_climbSlope < 0.0f ? DESCEND_SPEED : CLIMB_SPEED) * amount;
+            if (m_climbing) speed = CLIMB_SPEED * amount;
             else if (amount > 0.0f) speed = groundSpeed() * amount;
         } else {
             // En el aire se conserva el impulso (por ejemplo, el de un salto desde un deslizamiento).
@@ -418,12 +430,14 @@ class Player {
     PlayerAction m_holding = PlayerAction::NONE;
     float m_actionTime = 0.0f, m_actionDuration = 0.0f;
     float m_oxygen = 30.0f;
+    float m_fallSpeed = 0.0f, m_impact = 0.0f;
+    bool m_drowning = false;
     float m_phase = 0.0f, m_speed = 0.0f, m_climbSlope = 0.0f;
     bool m_streaming = false;
     Physics::World::Updraft m_stream;
     DirectX::XMFLOAT3 m_streamFrom = { 0.0f, 0.0f, 0.0f };
     float m_streamProgress = 0.0f;
-    bool m_climbing = false, m_blocked = false, m_swimming = false, m_diving = false, m_exhausted = false;
+    bool m_climbing = false, m_swimming = false, m_diving = false, m_exhausted = false;
     float m_moveYaw = 0.0f;     // ángulo de referencia del movimiento (el de la cámara cuando cambió la entrada)
     float m_prevMoveX = 0.0f;   // entrada del frame anterior
     float m_prevMoveY = 0.0f;
