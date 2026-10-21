@@ -22,6 +22,7 @@ class WildField {
     static constexpr int MAX_PER_CHUNK = MAX_SURFACE + MAX_DEEP; // capacidad fija de cada chunk (las direcciones de sus pokémon no cambian)
     static constexpr int DEEP_GRID = 5;             // puntos por lado con los que se mide cuánta galería hay en un chunk
     static constexpr float SPAWN_RADIUS = 100.0f;   // zona de aparición, centrada en el jugador (invisible)
+    static constexpr float DEEP_EXCLUSION_RADIUS = 14.0f; // ídem en las galerías, que son más pequeñas
     static constexpr float EXCLUSION_RADIUS = 30.0f; // zona pegada al jugador donde nunca nace nada
     static constexpr float SPACING = 10.0f;         // distancia mínima entre dos pokémon al nacer (menor que CHUNK)
     static constexpr int MAX_IN_ZONE = 70;          // máximo de pokémon vivos dentro de la zona de aparición
@@ -174,7 +175,7 @@ class WildField {
             const float dx = out.x - px, dz = out.y - pz;
             const float d2 = dx * dx + dz * dz;
             const bool inFront = dx * m_view.x + dz * m_view.y >= 0.0f; // semicírculo delantero
-            if ((!inFront && !deep) || d2 <= EXCLUSION_RADIUS * EXCLUSION_RADIUS || d2 > SPAWN_RADIUS * SPAWN_RADIUS || crowded(col, row, out, ignore)) continue;
+            if ((!inFront && !deep) || d2 <= (deep ? DEEP_EXCLUSION_RADIUS * DEEP_EXCLUSION_RADIUS : EXCLUSION_RADIUS * EXCLUSION_RADIUS) || d2 > SPAWN_RADIUS * SPAWN_RADIUS || crowded(col, row, out, ignore)) continue;
             if (deep) {
                 if (!habitats.under().covered(out.x, out.y) || habitats.under().depthAt(out.x, out.y) > 0.4f) continue; // galería cubierta y seca
                 y = habitats.under().floorAt(out.x, out.y);

@@ -113,20 +113,71 @@ namespace UndergroundGeometry {
             triangle(index[1], index[2], index[3], n);
         }
 
-        // Pared vertical entre dos nodos contiguos, de 'bottom' a 'top' en cada uno, con la cara hacia 'normal' (horizontal).
-        void wall(int c0, int r0, int c1, int r1, const float bottom[2], const float top[2], const Float3& normal) {
-            if (top[0] - bottom[0] < 0.02f && top[1] - bottom[1] < 0.02f) return;
-            const int cols[2] = { c0, c1 }, rows[2] = { r0, r1 };
-            int index[4];
-            for (int i = 0; i < 2; ++i) {
-                const float x = m_terrain.nodeCoord(cols[i]), z = m_terrain.nodeCoord(rows[i]);
-                const Float3 rock = mix(habitatColor(cols[i], rows[i]), { 0.40f, 0.37f, 0.34f }, 0.55f);
-                const float k = grain(x, bottom[i], z);
-                index[i] = vertex({ x, bottom[i], z }, normal, { rock.x * k * 0.55f, rock.y * k * 0.55f, rock.z * k * 0.55f });
-                index[2 + i] = vertex({ x, (std::max)(top[i], bottom[i]), z }, normal, { rock.x * k * 0.75f, rock.y * k * 0.75f, rock.z * k * 0.75f });
+        // Ruido de valor 3D suave (0..1), fijo por posición: la roca de dos paredes que se tocan coincide en el borde común.
+        static float hash3(int x, int y, int z) {
+            uint32_t h = static_cast<uint32_t>(x) * 374761393u + static_cast<uint32_t>(y) * 668265263u + static_cast<uint32_t>(z) * 2147483647u;
+            h = (h ^ (h >> 13)) * 1274126177u;
+            return static_cast<float>((h ^ (h >> 16)) & 0xFFFF) / 65535.0f;
+        }
+        static float rockNoise(float x, float y, float z) {
+            const int ix = static_cast<int>(std::floor(x)), iy = static_cast<int>(std::floor(y)), iz = static_cast<int>(std::floor(z));
+            const float fx = x - ix, fy = y - iy, fz = z - iz;
+            const float sx = fx * fx * (3.0f - 2.0f * fx), sy = fy * fy * (3.0f - 2.0f * fy), sz = fz * fz * (3.0f - 2.0f * fz);
+            float v = 0.0f;
+            for (int k = 0; k < 8; ++k) {
+                const int dx = k & 1, dy = (k >> 1) & 1, dz = (k >> 2) & 1;
+                v += hash3(ix + dx, iy + dy, iz + dz) * (dx ? sx : 1.0f - sx) * (dy ? sy : 1.0f - sy) * (dz ? sz : 1.0f - sz);
             }
-            triangle(index[0], index[1], index[2], normal);
-            triangle(index[1], index[3], index[2], normal);
+            return v;
+        }
+
+        // Pared entre dos nodos contiguos, de 'bottom' a 'top' en cada uno, con la cara hacia 'normal' (horizontal). Es una malla fina cuya
+        // superficie se abomba hacia la roca con ruido (más en el centro de cada tramo y a media altura, nada en los bordes, que enlazan con el
+        // suelo, el techo y las paredes vecinas): la piedra parece natural y no hay ángulos rectos. Nunca se mete en la galería, así que no
+        // cambia por dónde se puede andar. 'rough' = 0 la deja plana (dinteles).
+        void wall(int c0, int r0, int c1, int r1, const float bottom[2], const float top[2], const Float3& normal, float rough = 1.0f) {
+            if (top[0] - bottom[0] < 0.02f && top[1] - bottom[1] < 0.02f) return;
+            constexpr int NU = 4, NV = 4;
+            const float x0 = m_terrain.nodeCoord(c0), z0 = m_terrain.nodeCoord(r0), x1 = m_terrain.nodeCoord(c1), z1 = m_terrain.nodeCoord(r1);
+            const Float3 rockA = mix(habitatColor(c0, r0), { 0.40f, 0.37f, 0.34f }, 0.55f), rockB = mix(habitatColor(c1, r1), { 0.40f, 0.37f, 0.34f }, 0.55f);
+            Float3 pos[NU + 1][NV + 1];
+            float bulge[NU + 1][NV + 1];
+            for (int i = 0; i <= NU; ++i) {
+                const float u = static_cast<float>(i) / NU;
+                const float x = mixf(x0, x1, u), z = mixf(z0, z1, u);
+                const float lo = mixf(bottom[0], bottom[1], u), hi = (std::max)(mixf(top[0], top[1], u), lo);
+                for (int j = 0; j <= NV; ++j) {
+                    const float v = static_cast<float>(j) / NV, y = mixf(lo, hi, v);
+                    const float edge = std::pow((std::max)(0.0f, std::sin(3.14159265f * u)), 0.7f) * std::pow((std::max)(0.0f, std::sin(3.14159265f * v)), 0.55f);
+                    const float n = 0.55f * rockNoise(x * 0.9f, y * 0.9f, z * 0.9f) + 0.45f * rockNoise(x * 2.3f + 7.0f, y * 2.3f, z * 2.3f + 3.0f);
+                    const float amount = rough * edge * (0.15f + 1.35f * n) * (std::min)(1.0f, 0.5f + 0.25f * (hi - lo));
+                    bulge[i][j] = amount;
+                    pos[i][j] = { x - normal.x * amount, y, z - normal.z * amount };
+                }
+            }
+            int index[NU + 1][NV + 1];
+            for (int i = 0; i <= NU; ++i) {
+                const Float3 rock = mix(rockA, rockB, static_cast<float>(i) / NU);
+                for (int j = 0; j <= NV; ++j) {
+                    // normal por diferencias de la propia malla
+                    const Float3& l = pos[(std::max)(i - 1, 0)][j], &r = pos[(std::min)(i + 1, NU)][j];
+                    const Float3& d = pos[i][(std::max)(j - 1, 0)], &t = pos[i][(std::min)(j + 1, NV)];
+                    const DirectX::XMVECTOR du = DirectX::XMVectorSubtract(DirectX::XMLoadFloat3(&r), DirectX::XMLoadFloat3(&l));
+                    const DirectX::XMVECTOR dv = DirectX::XMVectorSubtract(DirectX::XMLoadFloat3(&t), DirectX::XMLoadFloat3(&d));
+                    Float3 nrm;
+                    const DirectX::XMVECTOR cross = DirectX::XMVector3Cross(du, dv);
+                    if (DirectX::XMVectorGetX(DirectX::XMVector3LengthSq(cross)) < 1.0e-8f) nrm = normal; // malla degenerada (pared sin altura)
+                    else DirectX::XMStoreFloat3(&nrm, DirectX::XMVector3Normalize(cross));
+                    if (nrm.x * normal.x + nrm.z * normal.z < 0.0f) nrm = { -nrm.x, -nrm.y, -nrm.z };
+                    const float v = static_cast<float>(j) / NV;
+                    const float k = grain(pos[i][j].x, pos[i][j].y, pos[i][j].z) * (0.55f + 0.20f * v) * (0.85f + 0.3f * (std::min)(bulge[i][j], 1.0f));
+                    index[i][j] = vertex(pos[i][j], nrm, { rock.x * k, rock.y * k, rock.z * k });
+                }
+            }
+            for (int i = 0; i < NU; ++i) for (int j = 0; j < NV; ++j) {
+                triangle(index[i][j], index[i + 1][j], index[i][j + 1], normal);
+                triangle(index[i + 1][j], index[i + 1][j + 1], index[i][j + 1], normal);
+            }
         }
 
         void addSystem(const Underground::System& system) {
@@ -139,7 +190,7 @@ namespace UndergroundGeometry {
             for (int row = r0; row <= r1; ++row) {
                 for (int col = c0; col <= c1; ++col) {
                     if (!m_under.cellDefined(col, row)) continue;
-                    if (m_batch.vertices.size() + 64 > MAX_VERTICES) flush();
+                    if (m_batch.vertices.size() + 4 * 25 + 16 > MAX_VERTICES) flush();
                     const bool open = m_under.hole(col, row);
                     surface(floor, col, row, 1.0f, 1.0f);
                     if (!open) surface(ceil, col, row, -1.0f, 0.62f);
@@ -161,7 +212,7 @@ namespace UndergroundGeometry {
                         } else if (!open && m_under.hole(col + e.dc, row + e.dr)) {
                             const float low[2] = { ceil.at(e.ca, e.ra), ceil.at(e.cb, e.rb) };
                             const float top[2] = { m_terrain.at(e.ca, e.ra), m_terrain.at(e.cb, e.rb) };
-                            wall(e.ca, e.ra, e.cb, e.rb, low, top, { -e.inward.x, 0.0f, -e.inward.z });
+                            wall(e.ca, e.ra, e.cb, e.rb, low, top, { -e.inward.x, 0.0f, -e.inward.z }, 0.0f);
                         }
                     }
                 }

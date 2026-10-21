@@ -459,7 +459,7 @@ namespace PokemonComponent {
             } else chipAt.x += GuiCards::chip(dl, chipAt, "Sin analizar", IM_COL32(90, 90, 100, 255), 0.8f) + 6.0f;
             if (owned.shiny) chipAt.x += GuiCards::chip(dl, chipAt, "Variocolor", IM_COL32(210, 170, 40, 255), 0.8f) + 6.0f;
             if (storage.bound(owned)) GuiCards::chip(dl, chipAt, "Inicial", IM_COL32(120, 70, 190, 255), 0.8f);
-            if (const PokeballType* ball = data.ball(owned.ballId)) ItemIcon::ball(dl, ImVec2(pos.x + size.x - 26.0f, pos.y + 26.0f), 12.0f, PokeballStyle::color(ball->id));
+            if (const PokeballType* ball = data.ball(owned.ballId)) ItemIcon::ball(dl, ImVec2(pos.x + size.x - 26.0f, pos.y + 26.0f), 12.0f, PokeballStyle::look(ball->id));
 
             // Caramelo: sube un nivel (sin pasar del límite del jugador).
             if (const TrainingItem* candy = data.trainingWith(TrainingItem::Effect::LEVEL)) if (const Item* item = data.itemOf(ItemCategory::TRAINING, candy->id)) {

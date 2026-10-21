@@ -122,6 +122,13 @@ class Underground {
         return y >= m_floor.sample(x, z) - 0.05f && y + height <= m_ceil.sample(x, z) + 0.05f;
     }
 
+    // Distancia (m, hasta 'limit') desde (x, z) a la pared más cercana de la galería, mirando en 8 direcciones.
+    float nearestWall(float x, float z, float limit) const {
+        float best = limit;
+        for (int k = 0; k < 8; ++k) best = (std::min)(best, wallDistance(x, z, std::cos(k * 0.785398f), std::sin(k * 0.785398f), best));
+        return best;
+    }
+
     // Une todo el subsuelo en un conjunto de mallas del tamaño del mundo (hay que llamarlo antes de carve).
     void init(const Physics::Heightfield& like) {
         m_systems.clear();

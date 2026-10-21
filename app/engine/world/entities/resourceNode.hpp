@@ -6,7 +6,7 @@
 
 // Aspecto de cada tipo de nodo (por id de la base de datos). Es el único sitio donde se define su forma y color.
 namespace ResourceStyle {
-    enum class Shape { TREE, CONIFER, PALM, ROCK, BUSH };
+    enum class Shape { TREE, CONIFER, PALM, JUNGLE, ACACIA, ROCK, BUSH, FLOWER };
 
     struct Look {
         Shape shape;
@@ -28,7 +28,10 @@ namespace ResourceStyle {
             case 9:  return { Shape::TREE, { 0.86f, 0.84f, 0.78f }, { 0.52f, 0.72f, 0.22f }, false, 0.3f, 3.4f };   // abedul
             case 10: return { Shape::PALM, { 0.55f, 0.40f, 0.22f }, { 0.28f, 0.62f, 0.22f }, false, 0.3f, 3.8f };   // palmera
             case 11: return { Shape::TREE, { 0.30f, 0.20f, 0.16f }, { 0.98f, 0.68f, 0.80f }, false, 0.3f, 3.6f };   // cerezo en flor
-            case 12: return { Shape::BUSH, { 0.28f, 0.58f, 0.24f }, { 0.96f, 0.45f, 0.72f }, true,  0.5f, 0.6f };   // flores silvestres
+            case 12: return { Shape::FLOWER, { 0.28f, 0.58f, 0.24f }, { 0.96f, 0.45f, 0.72f }, true, 0.5f, 0.6f };  // flores silvestres (varios colores)
+            case 13: return { Shape::JUNGLE, { 0.30f, 0.22f, 0.14f }, { 0.08f, 0.40f, 0.12f }, false, 0.45f, 5.0f };  // árbol de jungla
+            case 14: return { Shape::ACACIA, { 0.42f, 0.30f, 0.18f }, { 0.50f, 0.58f, 0.18f }, false, 0.3f, 4.2f };   // acacia
+            case 15: return { Shape::BUSH, { 0.14f, 0.50f, 0.20f }, { 0.98f, 0.58f, 0.14f }, true, 0.6f, 1.0f };     // planta tropical
             case 4:  return { Shape::ROCK, { 0.42f, 0.42f, 0.45f }, { 0.07f, 0.07f, 0.08f }, true,  0.85f, 1.1f }; // filón de carbón
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca
         }
@@ -40,7 +43,7 @@ namespace ResourceStyle {
     inline constexpr float STUMP_HEIGHT = 0.4f;
     inline constexpr float STUMP_HALF = 0.3f;
 
-    inline bool isTree(Shape shape) { return shape == Shape::TREE || shape == Shape::CONIFER || shape == Shape::PALM; }
+    inline bool isTree(Shape shape) { return shape == Shape::TREE || shape == Shape::CONIFER || shape == Shape::PALM || shape == Shape::JUNGLE || shape == Shape::ACACIA; }
     inline bool stump(const Look& look, float growth) { return isTree(look.shape) && growth < STUMP_UNTIL; }
     inline float treeScale(float growth) { return 0.25f + 0.75f * (growth - STUMP_UNTIL) / (1.0f - STUMP_UNTIL); }
     inline float rockScale(const Look& look, float growth) { return look.specks ? 1.0f : 0.3f + 0.7f * growth; }

@@ -186,6 +186,7 @@ struct Scene {
         updateCompanion(dt);
         updateStrikes(dt);
         updateWaterfall(dt);
+        updateWeakTimer(dt);
         updateInteraction();
         m_holdClock = (std::max)(0.0f, m_holdClock - dt);
         const bool hold = input.interactHeld && m_interaction.kind == Interaction::NODE && m_holdClock <= 0.0f; // mantener sigue trabajando el recurso
@@ -259,6 +260,7 @@ struct Scene {
             s.missingPos = m_missingPos;
         }
         s.interactPos = interactionAnchor();
+        s.interactOnScreen = m_interaction.kind == Interaction::WEAKENED; // el aviso de capturar al debilitado va fijo en la pantalla del jugador
         fillLocation(s);
         fillWorldState(s);
         s.habitatMap = &habitats;
@@ -378,7 +380,7 @@ struct Scene {
             case Phase::BITING:  add(PromptAction::INTERACT, "¡Pica! Recoger"); break;
             case Phase::HOOKED:
                 if (hookReady()) {
-                    add(PromptAction::INTERACT, inventory.canThrow() ? "Capturar con " + inventory.selectedBall().type.name : "Capturar (sin pokéballs)", inventory.canThrow());
+                    add(PromptAction::INTERACT, inventory.basicIndex() >= 0 ? "Capturar con " + inventory.ball(inventory.basicIndex()).type.name : "Capturar (sin pokéballs)", inventory.basicIndex() >= 0);
                     add(PromptAction::RELEASE, "Liberar");
                 }
                 break;
@@ -405,7 +407,7 @@ struct Scene {
         }
         if (companion.active() && !companion.changing() && storage.active()) {
             const OwnedPokemon& lead = *storage.active();
-            add(companion.speciesId(), lead.level, lead.shiny, { companion.body.position.x, companion.body.position.y + Companion::SIZE, companion.body.position.z });
+            add(companion.speciesId(), lead.level, companion.shiny(), { companion.body.position.x, companion.body.position.y + Companion::SIZE, companion.body.position.z });
         }
     }
 
@@ -437,7 +439,10 @@ struct Scene {
     // Daño por caída (física: la altura equivalente a la velocidad de impacto) y por ahogarse; si la vida llega a 0 vuelve al inicio.
     void updateHealth(float dt) {
         health.update(dt);
-        health.hurt(HealthRules::fallDamage(player.takeImpact()));
+        const float impact = player.takeImpact();
+        const DirectX::XMFLOAT3& at = player.body.position;
+        if (habitats.cloudFloor(at.x, at.z) && impact >= HealthRules::CLOUD_BOUNCE_MIN) player.body.velocity.y = impact * HealthRules::CLOUD_BOUNCE; // la nube rebota
+        if (!habitats.onSky(at.x, at.z)) health.hurt(HealthRules::fallDamage(impact));
         if (player.drowning()) health.hurt(HealthRules::DROWN_PER_SECOND * dt);
         if (!health.dead()) return;
         player.body.position = m_home;
@@ -544,8 +549,10 @@ struct Scene {
     void captureHooked() { captureDirect(wild.hooked()); }
 
     // Lanza la pokéball seleccionada directamente a un pokémon (el enganchado o el debilitado por el acompañante).
+    // Siempre con la pokéball básica, sea cual sea la elegida en la rueda.
     void captureDirect(const CaptureTarget& wildTarget) {
-        if (!inventory.canThrow()) {
+        const int basic = inventory.basicIndex();
+        if (basic < 0) {
             showNotice(Notice::OUT_OF_STOCK);
             return;
         }
@@ -555,7 +562,7 @@ struct Scene {
         const float length = (std::max)(std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z), 1.0e-3f);
         dir = { dir.x / length, dir.y / length, dir.z / length };
         player.act(PlayerAction::THROW);
-        launch(target, dir);
+        launch(target, dir, basic);
     }
 
     // Entrada y eventos de la pesca. true si la pulsación de interactuar se ha usado aquí.
@@ -623,11 +630,11 @@ struct Scene {
     void updateCompanion(float dt) {
         const OwnedPokemon* lead = storage.active();
         const PokemonSpecies* species = lead ? m_data->speciesById(lead->speciesId) : nullptr;
-        if (!lead && companion.active()) companion.set(-1, false, player.body.position, camera.yaw());
+        if (!lead && companion.active()) companion.set(-1, false, false, player.body.position, camera.yaw());
         else if (lead && species && (lead->uid != m_shownUid || lead->speciesId != m_shownSpecies)) {
             m_shownUid = lead->uid; // otro pokémon (o ha evolucionado): vuelve el que está fuera y sale su pokéball
             m_shownSpecies = lead->speciesId;
-            companion.swap(species->id, m_data->levitates(*species), lead->ballId, player.body.position, camera.yaw());
+            companion.swap(species->id, m_data->levitates(*species), lead->ballId, lead->shiny, player.body.position, camera.yaw());
         }
         if (companion.changing()) species = nullptr; // durante el cambio no trabaja
 
@@ -779,11 +786,18 @@ struct Scene {
         return (node.plant() && !node.growing()) || inventory.skillLevel(type.skillId) >= type.level;
     }
 
+    // El aviso de capturar al debilitado dura WEAK_PROMPT_TIME desde que aparece; con otro debilitado vuelve a empezar.
+    void updateWeakTimer(float dt) {
+        const CaptureTarget* now = weakenedTarget();
+        if (now != m_weakSeen) { m_weakSeen = now; m_weakAge = 0.0f; m_weakExpired = false; }
+        else if (now && (m_weakAge += dt) >= CompanionRules::WEAK_PROMPT_TIME) m_weakExpired = true;
+    }
+
     void updateInteraction() {
         float best = 1.0e9f;
         m_interaction = {};
         m_missingSkill = -1;
-        m_weak = weakenedTarget();
+        m_weak = m_weakExpired ? nullptr : weakenedTarget();
         if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
         if (const int i = nearestIn(groundItems.entities, [](const GroundItem& g) { return g.available(); }, best); i >= 0) m_interaction = { Interaction::GROUND, i };
         const float mx = machine.body.position.x - player.body.position.x, mz = machine.body.position.z - player.body.position.z;
@@ -1031,8 +1045,9 @@ struct Scene {
     }
 
     // Sale una pokéball de la mano del jugador hacia 'aim'.
-    void launch(const DirectX::XMFLOAT3& aim, const DirectX::XMFLOAT3& dir) {
-        const PokeballType& type = inventory.selectedBall().type;
+    void launch(const DirectX::XMFLOAT3& aim, const DirectX::XMFLOAT3& dir, int ballIndex = -1) {
+        if (ballIndex < 0) ballIndex = inventory.selectedIndex();
+        const PokeballType& type = inventory.ball(ballIndex).type;
         Pokeball ball;
         ball.typeId = type.id;
         ball.captureMultiplier = type.captureMultiplier;
@@ -1045,7 +1060,7 @@ struct Scene {
             balls.erase(balls.begin());
         }
         balls.push_back(ball);
-        inventory.consume();
+        inventory.consume(ballIndex);
     }
 
     // Velocidad inicial (módulo THROW_SPEED) para que la parábola pase por 'aim' (trayectoria baja).
@@ -1147,6 +1162,9 @@ struct Scene {
     Interaction m_interaction; // lo que el jugador puede usar ahora mismo (cofre o recurso cercano)
     DirectX::XMFLOAT3 m_home = {};         // dónde reaparece el jugador al quedarse sin vida
     bool m_concealed = false;              // el jugador está oculto entre matorrales: los pokémon no lo han detectado (sigilo)
+    const CaptureTarget* m_weakSeen = nullptr;
+    float m_weakAge = 0.0f;
+    bool m_weakExpired = false;
     const CaptureTarget* m_weak = nullptr; // salvaje debilitado por el acompañante que se puede capturar ahora (Interaction::WEAKENED)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
     float m_lockHidden = 0.0f; // segundos que lleva tapado el pokémon fijado

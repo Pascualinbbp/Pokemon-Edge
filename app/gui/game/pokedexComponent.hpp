@@ -30,7 +30,7 @@ namespace PokedexComponent {
         // Marca de la esquina: pokéball (capturado) o casilla vacía (visto).
         inline void marker(ImDrawList* dl, const ImVec2& c, float r, PokemonStorage::DexState state) {
             if (state == PokemonStorage::DEX_CAUGHT) {
-                ItemIcon::ball(dl, c, r, { 0.90f, 0.20f, 0.20f });
+                ItemIcon::ball(dl, c, r, PokeballStyle::look(1));
             } else if (state == PokemonStorage::DEX_SEEN) {
                 dl->AddCircle(c, r, IM_COL32(240, 240, 240, 220), 24, 2.0f);
                 dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), IM_COL32(240, 240, 240, 140), 1.5f);

@@ -127,12 +127,32 @@ class Inventory {
     float captureMultiplier(bool shiny = false) const { return hasBalls() ? selectedBall().type.multiplier(shiny) : 1.0f; }
 
     bool canThrow() const { return hasBalls() && selectedBall().count > 0; }
-    void consume() { if (canThrow()) --m_slots[m_balls[m_selected].slot].count; }
+    void consume() { consume(m_selected); }
+    void consume(int index) {
+        if (index < 0 || index >= ballCount() || !owned(index)) return;
+        --m_slots[m_balls[index].slot].count;
+        if (!owned(m_selected)) cycle(1); // se agotó la elegida: pasa a la siguiente que quede
+    }
 
-    // direction: +1 siguiente, -1 anterior (circular).
+    // Las que se tienen (las demás no se ofrecen en la rueda de captura).
+    bool owned(int index) const { return ball(index).count > 0; }
+    int ownedCount() const { int n = 0; for (int i = 0; i < ballCount(); ++i) n += owned(i) ? 1 : 0; return n; }
+
+    // La pokéball básica (la de menor id) que se tenga: la de la captura rápida (debilitado, pesca), sea cual sea la elegida. -1 si no hay.
+    int basicIndex() const {
+        int best = -1;
+        for (int i = 0; i < ballCount(); ++i) if (owned(i) && (best < 0 || m_balls[i].type->id < m_balls[best].type->id)) best = i;
+        return best;
+    }
+    void selectBasic() { if (const int i = basicIndex(); i >= 0) m_selected = i; }
+
+    // direction: +1 siguiente, -1 anterior (circular), saltando las que no se tienen.
     void cycle(int direction) {
         const int n = ballCount();
-        if (n > 1) m_selected = ((m_selected + direction) % n + n) % n;
+        for (int step = 1; step <= n; ++step) {
+            const int next = ((m_selected + direction * step) % n + n) % n;
+            if (owned(next)) { m_selected = next; return; }
+        }
     }
 
     // --- Guardado (por nombre de objeto) ---

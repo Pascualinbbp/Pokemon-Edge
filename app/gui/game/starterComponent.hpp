@@ -1,5 +1,9 @@
 #pragma once
+#include <algorithm>
 #include <cstdio>
+#include <random>
+#include <set>
+#include <vector>
 #include "imgui.h"
 #include "../gameState.hpp"
 #include "../style/guiCards.hpp"
@@ -8,10 +12,29 @@
 #include "../../models/gameData.hpp"
 
 // Elección del pokémon inicial al empezar una partida nueva: uno de los que marca la base de datos (starter).
+// Pasado un tiempo se van descartando al azar (uno cada DROP_INTERVAL s, sean 3 o 15); si se acaban, se ofrecen Pichu y Eevee sin límite de tiempo.
 // Devuelve el id de la especie elegida cuando el jugador la confirma, o -1 mientras tanto.
 namespace StarterComponent {
     namespace detail {
         inline int selected = -1; // id de la especie marcada
+        inline constexpr double DROP_INTERVAL = 8.0;          // segundos entre descartes
+        inline constexpr const char* FALLBACK[] = { "Pichu", "Eevee" };
+        inline std::set<int> discarded;                       // ids descartados por el tiempo
+        inline double startedAt = -1.0;
+
+        inline void reset() { selected = -1; discarded.clear(); startedAt = -1.0; }
+
+        // Las especies que se pueden elegir ahora; 'fallback' = se acabaron las iniciales y se ofrecen las de reserva.
+        inline std::vector<const PokemonSpecies*> offered(const GameData& data, bool& fallback) {
+            std::vector<const PokemonSpecies*> out;
+            for (const PokemonSpecies& species : data.species) if (species.starter && !discarded.count(species.id)) out.push_back(&species);
+            fallback = out.empty();
+            if (fallback) {
+                for (const char* name : FALLBACK) for (const PokemonSpecies& species : data.species) if (species.name == name) { out.push_back(&species); break; }
+                if (out.empty()) for (const PokemonSpecies& species : data.species) if (species.starter) { out.push_back(&species); break; }
+            }
+            return out;
+        }
     }
 
     inline int render(const GameData& data) {
@@ -21,9 +44,26 @@ namespace StarterComponent {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 70.0f), IM_COL32(255, 255, 255, 255), "ELIGE A TU POKÉMON INICIAL", 1.8f);
 
-        int count = 0;
-        for (const PokemonSpecies& species : data.species) if (species.starter) ++count;
+        const double now = ImGui::GetTime();
+        if (detail::startedAt < 0.0) detail::startedAt = now;
+        bool fallback = false;
+        std::vector<const PokemonSpecies*> offered = detail::offered(data, fallback);
+        if (!fallback && now - detail::startedAt >= detail::DROP_INTERVAL * static_cast<double>(detail::discarded.size() + 1)) { // se acaba el tiempo: uno al azar se va
+            static std::mt19937 random{ std::random_device{}() };
+            const int victim = static_cast<int>(random() % offered.size());
+            if (detail::selected == offered[victim]->id) detail::selected = -1;
+            detail::discarded.insert(offered[victim]->id);
+            offered = detail::offered(data, fallback);
+        }
+        const int count = static_cast<int>(offered.size());
         if (count == 0) return -1;
+        if (fallback) GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 110.0f), IM_COL32(255, 215, 90, 255), "Ninguno de los iniciales ha esperado: elige uno de reserva", 1.0f);
+        else {
+            const double left = detail::DROP_INTERVAL * static_cast<double>(detail::discarded.size() + 1) - (now - detail::startedAt);
+            char text[96];
+            std::snprintf(text, sizeof(text), "Se descartará uno al azar en %.0f s", (std::max)(left, 0.0));
+            GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 110.0f), IM_COL32(255, 255, 255, 200), text, 1.0f);
+        }
 
         constexpr float CARD_W = 250.0f, CARD_H = 300.0f, GAP = 30.0f;
         const float total = static_cast<float>(count) * CARD_W + static_cast<float>(count - 1) * GAP;
@@ -31,8 +71,8 @@ namespace StarterComponent {
         const float y = screen.y * 0.5f - CARD_H * 0.5f - 10.0f;
 
         int confirmed = -1;
-        for (const PokemonSpecies& species : data.species) {
-            if (!species.starter) continue;
+        for (const PokemonSpecies* choice : offered) {
+            const PokemonSpecies& species = *choice;
             const ImVec2 a(x, y), b(x + CARD_W, y + CARD_H);
             ImGui::SetCursorScreenPos(a);
             ImGui::PushID(species.id);
@@ -63,7 +103,7 @@ namespace StarterComponent {
         ImGui::SetCursorScreenPos(ImVec2(screen.x * 0.5f - 130.0f, y + CARD_H + 36.0f));
         if (GuiCards::button("##confirmStarter", "ELEGIR", ImVec2(260.0f, 46.0f), detail::selected >= 0, IM_COL32(40, 150, 120, 255))) {
             confirmed = detail::selected;
-            detail::selected = -1;
+            detail::reset();
         }
         return confirmed;
     }

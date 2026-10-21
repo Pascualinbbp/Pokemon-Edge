@@ -12,6 +12,8 @@ namespace HabitatStyle {
         if (name == "Bosque de pinos") return { 0.08f, 0.36f, 0.24f };
         if (name == "Bosque mixto") return { 0.14f, 0.45f, 0.20f };
         if (name == "Bosque de cerezos") return { 0.72f, 0.62f, 0.52f };   // hierba cubierta de pétalos rosados
+        if (name == "Jungla") return { 0.10f, 0.42f, 0.14f };
+        if (name == "Sabana") return { 0.76f, 0.66f, 0.30f };
         if (name == "Campo de flores") return { 0.50f, 0.80f, 0.36f };
         if (name == "Cueva de nube") return { 0.88f, 0.92f, 1.0f };
         if (name == "Montaña") return { 0.48f, 0.46f, 0.44f };

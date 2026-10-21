@@ -20,7 +20,9 @@ namespace ResourceSpawn {
     inline constexpr float PLANT_MIN_GROWTH = 0.3f; // una planta de partida nueva tiene al menos este crecimiento
     inline constexpr int PLACE_TRIES = 12;
     inline constexpr float MAX_SLOPE = 0.55f;       // en laderas más empinadas no crece nada
-    inline constexpr float DEEP_AREA_PER_NODE = 90.0f; // m² de caja envolvente de una galería por cada nodo
+    inline constexpr float DEEP_AREA_PER_NODE = 60.0f; // m² de caja envolvente de una galería por cada nodo
+    inline constexpr float WALL_MIN = 0.9f;        // distancia a la pared de un nodo de galería (pegado a ella, sin tapar el paso)
+    inline constexpr float WALL_MAX = 1.6f;
     inline constexpr float ENTRANCE_CLEAR = 7.0f;  // zona libre ante la bocana de cada cueva y mina
 
     // Altura a la que se asienta un nodo: la más baja del suelo bajo su base, para que no flote por el lado de cuesta abajo.
@@ -127,10 +129,12 @@ namespace ResourceSpawn {
         for (const Underground::System& system : habitats.under().systems()) {
             const float area = (system.maxX - system.minX) * (system.maxZ - system.minZ);
             const int wanted = static_cast<int>(area / DEEP_AREA_PER_NODE);
-            for (int i = 0, tries = 0; i < wanted && tries < wanted * 12; ++tries) {
+            for (int i = 0, tries = 0; i < wanted && tries < wanted * 40; ++tries) {
                 const float x = between(system.minX, system.maxX), z = between(system.minZ, system.maxZ);
                 if (!habitats.under().covered(x, z) || habitats.under().depthAt(x, z) > 0.05f || habitats.under().floorAt(x, z) < -50.0f) continue;
                 if (habitats.under().ceilAt(x, z) - habitats.under().floorAt(x, z) < 2.0f || habitats.under().floor().slope(x, z) > MAX_SLOPE) continue;
+                const float wall = habitats.under().nearestWall(x, z, WALL_MAX + 1.0f);
+                if (wall < WALL_MIN || wall > WALL_MAX) continue; // los minerales salen de las paredes, no del medio del paso
                 const float mx = x - system.mouthX, mz = z - system.mouthZ;
                 if (mx * mx + mz * mz < ENTRANCE_CLEAR * ENTRANCE_CLEAR) continue;
                 bool apart = true;

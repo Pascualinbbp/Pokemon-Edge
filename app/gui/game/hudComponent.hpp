@@ -59,7 +59,9 @@ namespace HudComponent {
         // Ayuda para interactuar, sobre lo que se interactúa (cofre, recurso...), y aviso de lo que falta.
         inline void drawWorldPrompts(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             ImVec2 at;
-            if (status.interactVerb && status.interactTarget && project(status, status.interactPos, at)) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            const bool placed = status.interactOnScreen ? (at = ImVec2(screen.x * 0.5f, screen.y * 0.62f), true) : project(status, status.interactPos, at);
+            if (status.interactVerb && status.interactTarget && placed) {
                 char text[96];
                 std::snprintf(text, sizeof(text), status.interactTarget->empty() ? "%s" : "%s %s", status.interactVerb, status.interactTarget->c_str());
                 GuiPopup::at(dl, at, GuiPrompts::Action::INTERACT, text, device);
@@ -169,7 +171,10 @@ namespace HudComponent {
         // y el multiplicador de captura. Q / E o la rueda en teclado; L1 / R1 en mando.
         inline void drawBallSelector(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             const Inventory& inventory = *status.inventory;
-            const int count = inventory.ballCount();
+            std::vector<int> shown; // solo las que se tienen (si no hay ninguna, la elegida en rojo)
+            for (int i = 0; i < inventory.ballCount(); ++i) if (inventory.owned(i)) shown.push_back(i);
+            if (shown.empty()) shown.push_back(inventory.selectedIndex());
+            const int count = static_cast<int>(shown.size());
             const float alpha = status.aimBlend;
             const int a = static_cast<int>(255.0f * alpha);
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
@@ -179,11 +184,12 @@ namespace HudComponent {
             const float startX = screen.x * 0.5f - SPACING * static_cast<float>(count - 1) * 0.5f;
             char buffer[96];
 
-            for (int i = 0; i < count; ++i) {
+            for (int k = 0; k < count; ++k) {
+                const int i = shown[k];
                 const bool selected = i == inventory.selectedIndex();
-                const ImVec2 c(startX + SPACING * static_cast<float>(i), centerY);
+                const ImVec2 c(startX + SPACING * static_cast<float>(k), centerY);
                 if (selected) dl->AddCircle(c, SELECTED_RADIUS + 6.0f, IM_COL32(255, 255, 255, a), 32, 2.5f);
-                ItemIcon::ball(dl, c, selected ? SELECTED_RADIUS : OTHER_RADIUS, PokeballStyle::color(inventory.ball(i).type.id), selected ? alpha : alpha * 0.55f);
+                ItemIcon::ball(dl, c, selected ? SELECTED_RADIUS : OTHER_RADIUS, PokeballStyle::look(inventory.ball(i).type.id), selected ? alpha : alpha * 0.55f);
                 if (!selected) {
                     std::snprintf(buffer, sizeof(buffer), "x%d", inventory.ball(i).count);
                     centered(dl, ImVec2(c.x, c.y + OTHER_RADIUS + 6.0f), buffer, 0.8f, IM_COL32(220, 220, 220, static_cast<int>(a * 0.7f)));
@@ -222,7 +228,7 @@ namespace HudComponent {
 
             if (status.aiming) {
                 add(Action::THROW, "Lanzar Pokéball");
-                if (status.inventory && status.inventory->ballCount() > 1) add(Action::BALL_SWITCH, "Cambiar de Pokéball");
+                if (status.inventory && status.inventory->ownedCount() > 1) add(Action::BALL_SWITCH, "Cambiar de Pokéball");
                 if (status.canLock) add(Action::LOCK, status.locked ? "Cambiar objetivo" : "Fijar objetivo");
                 add(Action::AIM, "Salir del modo captura");
             } else {

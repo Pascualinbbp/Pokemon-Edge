@@ -15,18 +15,18 @@ namespace ItemIcon {
         }
     }
 
-    // Pokéball: mitad de color, mitad blanca, con banda y botón central.
-    inline void ball(ImDrawList* dl, const ImVec2& c, float r, const DirectX::XMFLOAT3& tone, float alpha = 1.0f) {
+    // Pokéball: colores de su modelo (mitad superior e inferior, banda y botón central).
+    inline void ball(ImDrawList* dl, const ImVec2& c, float r, const PokeballStyle::Look& look, float alpha = 1.0f) {
         const int a = static_cast<int>(255.0f * alpha);
-        const ImU32 white = IM_COL32(240, 240, 240, a);
         const ImU32 dark = IM_COL32(20, 20, 25, a);
+        const ImU32 band = detail::color(look.band, alpha), button = detail::color(look.button, alpha);
 
-        dl->AddCircleFilled(c, r, white, 28);
+        dl->AddCircleFilled(c, r, detail::color(look.bottom, alpha), 28);
         dl->PathArcTo(c, r, 3.1415927f, 6.2831853f, 20);
-        dl->PathFillConvex(detail::color(tone, alpha));
+        dl->PathFillConvex(detail::color(look.color, alpha));
         dl->AddCircle(c, r, dark, 28, 2.0f);
-        dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), dark, 2.0f);
-        dl->AddCircleFilled(c, r * 0.32f, white, 16);
+        dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), band, (std::max)(2.0f, r * 0.14f));
+        dl->AddCircleFilled(c, r * 0.32f, button, 16);
         dl->AddCircle(c, r * 0.32f, dark, 16, 2.0f);
     }
 
@@ -94,7 +94,7 @@ namespace ItemIcon {
     // Icono de cualquier objeto del inventario, según su categoría.
     inline void item(ImDrawList* dl, const ImVec2& c, float r, const Item& item, const GameData& data, float alpha = 1.0f) {
         switch (item.category) {
-            case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::color(type->id), alpha); break;
+            case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::look(type->id), alpha); break;
             case ItemCategory::MATERIAL: material(dl, c, r, item.refId, alpha); break;
             case ItemCategory::TOOL:     tool(dl, c, r, item.refId, alpha); break;
             case ItemCategory::TRAINING: if (const TrainingItem* type = data.training(item.refId)) training(dl, c, r, type->effect, alpha); break;
@@ -116,7 +116,7 @@ namespace ItemIcon {
     // Icono representativo de una categoría (pestañas del inventario).
     inline void category(ImDrawList* dl, const ImVec2& c, float r, ItemCategory category) {
         switch (category) {
-            case ItemCategory::POKEBALL: ball(dl, c, r, { 0.90f, 0.20f, 0.20f }); break;
+            case ItemCategory::POKEBALL: ball(dl, c, r, PokeballStyle::look(1)); break;
             case ItemCategory::MATERIAL: material(dl, c, r, 2); break;
             case ItemCategory::TOOL:     tool(dl, c, r, 1); break;
             case ItemCategory::TRAINING: training(dl, c, r, TrainingItem::Effect::LEVEL); break;

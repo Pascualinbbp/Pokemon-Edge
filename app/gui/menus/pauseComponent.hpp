@@ -24,7 +24,7 @@ namespace PauseComponent {
                     dl->AddCircle(ImVec2(c.x, c.y - r * 0.4f), r * 0.4f, white, 20, 2.5f);
                     break;
                 case Icon::POKEBALL:
-                    ItemIcon::ball(dl, c, r * 0.9f, { 0.90f, 0.20f, 0.20f });
+                    ItemIcon::ball(dl, c, r * 0.9f, PokeballStyle::look(1));
                     break;
                 case Icon::DEX:
                     dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y - r * 0.85f), ImVec2(c.x + r * 0.7f, c.y + r * 0.85f), white, r * 0.2f);

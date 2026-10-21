@@ -40,7 +40,7 @@ class HabitatMap {
     static constexpr float STREAM_RADIUS = 6.0f;   // radio de la Corriente Ascendente
     static constexpr float STREAM_CLIMB = 26.0f;   // metros sobre el suelo de nube hasta los que sube la corriente
     static constexpr float DARK_DEPTH = 14.0f;     // roca (m) sobre los pies desde la que la oscuridad es total
-    static constexpr float MAX_WORLD_RADIUS = 322.0f; // radio máximo del archipiélago (el resto de la malla es mar y las islas del cielo)
+    static constexpr float MAX_WORLD_RADIUS = 440.0f; // radio máximo del archipiélago (el resto de la malla es mar y las islas del cielo)
     static constexpr float SKY_VOID = -100.0f;     // altura de lo que no existe alrededor de la isla del cielo (no se dibuja)
 
     struct Zone {
@@ -137,6 +137,15 @@ class HabitatMap {
         }
         return nullptr;
     }
+
+    // ¿Está el punto en una isla del cielo? (allí no se recibe daño por caída)
+    bool onSky(float x, float z) const { const Region* r = regionAt(x, z); return r && r->kind == HabitatPlacement::SKY; }
+    // ¿Es suelo de nube (blando, rebota) y no una parcela de tierra elevada?
+    bool cloudFloor(float x, float z) const {
+        const Region* r = regionAt(x, z);
+        return r && r->kind == HabitatPlacement::SKY && ground(x, z) < r->floorY + CLOUD_FLOOR_HEIGHT;
+    }
+    static constexpr float CLOUD_FLOOR_HEIGHT = 1.0f;
 
     // Capa del mapa en la que está el punto de la superficie: el cielo (islas de nube) o la superficie.
     Layer surfaceLayerAt(float x, float z) const { return regionAt(x, z) ? SKY : SURFACE; }
@@ -335,7 +344,7 @@ class HabitatMap {
             const float r = 0.5f * (habitat.minRadius + habitat.maxRadius);
             area += zones * 3.14159f * r * r * 0.5f * (habitat.minStretch + habitat.maxStretch);
         }
-        const float mainRadius = (std::clamp)(std::sqrt(area * 0.8f / 3.14159f) * 1.05f, 140.0f, 195.0f);
+        const float mainRadius = (std::clamp)(std::sqrt(area * 0.8f / 3.14159f) * 1.05f, 215.0f, 260.0f);
         m_worldRadius = (std::min)(mainRadius * 2.05f, MAX_WORLD_RADIUS);
         m_islands.push_back({ 0.0f, 0.0f, mainRadius, between(0, 100), between(0, 100), between(0, 6.28f), between(0, 6.28f) });
         const int satellites = (std::clamp)(static_cast<int>(mainRadius / 28.0f), 3, 8);
@@ -636,15 +645,52 @@ class HabitatMap {
     static constexpr float FALL_MIN_DROP = 2.2f;  // desnivel (m) en esa ventana desde el que hay cascada
     static constexpr int FALL_STEPS = 3;          // pasos del cauce que dura la caída del agua
 
-    // Excava un río que baja hasta el mar: el nivel del agua solo baja, el cauce abre un valle y donde el terreno cae en picado (o, con
-    // 'forceFall', en el tramo más empinado si no hay ninguno) el agua se despeña en cascada. Hasta 'maxFalls' cascadas. false si no llega al mar.
-    bool carveRiver(float startX, float startZ, float startLevel, int maxFalls, bool forceFall, const RiverStyle& style) {
+    // Lago quieto de montaña: la cuenca se hunde bajo 'level' y un reborde lo contiene (el cauce de un río lo atraviesa al excavarse después).
+    void carveHighLake(float cx, float cz, float radius, float level, float depth) {
+        const float reach = radius * 1.6f;
+        const int c0 = nearestCol(cx - reach), c1 = nearestCol(cx + reach), r0 = nearestCol(cz - reach), r1 = nearestCol(cz + reach);
+        const float seed = between(0.0f, 100.0f);
+        for (int row = r0; row <= r1; ++row) {
+            for (int col = c0; col <= c1; ++col) {
+                const float x = m_ground.nodeCoord(col), z = m_ground.nodeCoord(row);
+                const float wobble = 1.0f + 0.15f * m_noise.fbm((x - cx) * 0.08f + seed, (z - cz) * 0.08f - seed, 3);
+                const float d = std::sqrt((x - cx) * (x - cx) + (z - cz) * (z - cz)) / wobble;
+                float& g = m_ground.at(col, row);
+                const size_t index = static_cast<size_t>(row) * m_ground.count() + col;
+                if (d < radius) {
+                    const float u2 = (d / radius) * (d / radius);
+                    g = (std::min)(g, level - depth * (1.0f - u2) + 0.6f * u2 * u2 * u2);
+                    if (g < level) { m_level[index] = level; m_kind[index] = UPPER_LAKE; }
+                } else if (d < radius * 1.4f) { // reborde: el agua no se escapa por los lados
+                    g = (std::max)(g, level + 0.45f * (1.0f - smooth(radius, radius * 1.4f, d)));
+                }
+            }
+        }
+        m_basins.push_back({ cx, cz, radius, level, UPPER_LAKE });
+    }
+
+    static constexpr float SPRING_RADIUS = 4.5f;  // charca de la que nace un río de montaña
+    static constexpr int POOL_STEPS = 6;          // pasos de cauce que ocupa la poza al pie de una cascada
+    static constexpr int MOUTH_STEPS = 7;         // pasos con los que el río se abre al mar
+    static constexpr int MOUTH_EXTRA = 6;         // pasos que el cauce se adentra en el mar
+
+    // Excava un río que baja hasta el mar: nace en una charca (manantial), el nivel del agua solo baja, el cauce abre un valle y donde el terreno
+    // cae en picado (o, con 'forceFall', en el tramo más empinado si no hay ninguno) el agua se despeña en cascada. Antes de la primera cascada
+    // el río se ensancha en un lago quieto y al pie hay una poza. Hasta 'maxFalls' cascadas. false si no llega al mar.
+    bool carveRiver(float startX, float startZ, float startLevel, int maxFalls, bool forceFall, const RiverStyle& style, bool spring) {
         std::vector<PathPoint> path = tracePath(startX, startZ);
-        const int n = static_cast<int>(path.size());
+        int n = static_cast<int>(path.size());
         if (n < 24 || path.back().terrain > 2.5f) return false;
+        for (int k = 1; k <= MOUTH_EXTRA; ++k) { // la desembocadura se adentra en el mar
+            PathPoint p = path[n - 1];
+            p.x += p.tx * Physics::Heightfield::CELL * k; p.z += p.tz * Physics::Heightfield::CELL * k;
+            p.terrain = (std::min)(path[n - 1].terrain, 0.0f) - 0.5f * k;
+            path.push_back(p);
+        }
+        n = static_cast<int>(path.size());
         struct Fall { int lip; int end; float forced; };
         std::vector<Fall> falls;
-        for (int i = 3; i + FALL_WINDOW < n && static_cast<int>(falls.size()) < maxFalls; ++i) {
+        for (int i = 3; i + FALL_WINDOW < n - MOUTH_EXTRA && static_cast<int>(falls.size()) < maxFalls; ++i) {
             if (path[i].terrain < 2.5f || path[i].terrain - path[i + FALL_WINDOW].terrain < FALL_MIN_DROP) continue;
             int end = i + FALL_WINDOW;
             while (end + 1 < n && end - i < 9 && path[end].terrain - path[end + 1].terrain > 0.8f) ++end;
@@ -654,41 +700,74 @@ class HabitatMap {
         for (int wanted = forceFall ? 2 : 0; static_cast<int>(falls.size()) < wanted;) { // sin cortados naturales: se talla la caída en el tramo más empinado libre
             int best = -1;
             float bestDrop = 0.0f;
-            for (int i = static_cast<int>(0.12f * n); i < static_cast<int>(0.75f * n) && i + 8 < n; ++i) {
+            for (int i = static_cast<int>(0.15f * n); i < static_cast<int>(0.75f * n) && i + 8 < n; ++i) {
                 bool free = true;
                 for (const Fall& f : falls) if (i > f.lip - 16 && i < f.end + 16) free = false;
                 const float d = path[i].terrain - path[i + 8].terrain;
                 if (free && path[i].terrain >= 4.0f && d > bestDrop) { bestDrop = d; best = i; }
             }
             if (best < 0) break;
-            falls.push_back({ best, best + FALL_STEPS, (std::clamp)(between(4.0f, 8.0f), 3.0f, (std::max)(3.0f, 0.9f * bestDrop)) });
+            falls.push_back({ best, best + FALL_STEPS, (std::clamp)(between(6.0f, 11.0f), 4.0f, (std::max)(4.0f, 0.95f * bestDrop)) });
         }
         std::sort(falls.begin(), falls.end(), [](const Fall& a, const Fall& b) { return a.lip < b.lip; });
+
         float level = startLevel > -1.0e8f ? startLevel : path.front().terrain - 0.35f;
+        // Lago de montaña antes de la primera cascada: el nivel se mantiene plano a lo largo del lago.
+        const bool lake = !falls.empty() && falls.front().lip >= 14;
+        const float lakeRadius = between(10.0f, 15.0f);
+        const int lakeSteps = static_cast<int>(std::ceil(lakeRadius / Physics::Heightfield::CELL));
+        const int lakeFrom = lake ? (std::max)(2, falls.front().lip - 2 * lakeSteps) : -1;
+        float lakeLevel = 0.0f;
+        if (lake) {
+            lakeLevel = 1.0e9f;
+            for (int i = lakeFrom; i <= falls.front().lip; ++i) lakeLevel = (std::min)(lakeLevel, path[i].terrain - 0.35f);
+            lakeLevel = (std::max)(lakeLevel, 1.0f);
+        }
         size_t fall = 0;
         float lipLevel = level, fallTo = level;
+        int poolEnd = -1;
         for (int i = 0; i < n; ++i) {
             PathPoint& p = path[i];
             const float target = p.terrain - 0.35f;
-            if (fall < falls.size() && i == falls[fall].lip) { // borde de la cascada: el agua sigue a este nivel y cae a partir de aquí
+            if (lake && i >= lakeFrom && i <= falls.front().lip) {
+                level = (std::min)(level, lakeLevel); // plano a lo largo del lago
+            } else if (fall < falls.size() && i == falls[fall].lip) { // borde de la cascada: el agua sigue a este nivel y cae a partir de aquí
                 level = (std::min)(level, target);
                 lipLevel = level;
                 const Fall& f = falls[fall];
-                fallTo = f.forced > 0.0f ? level - f.forced : (std::min)(level - 2.5f, path[f.end].terrain - 0.35f);
-                fallTo = (std::max)(fallTo, 0.12f);
+                fallTo = f.forced > 0.0f ? level - f.forced : (std::min)(level - 3.5f, path[f.end].terrain - 0.35f);
+                fallTo = (std::max)(fallTo, 0.0f);
             } else if (fall < falls.size() && i > falls[fall].lip && i <= falls[fall].lip + FALL_STEPS) {
                 const float t = static_cast<float>(i - falls[fall].lip) / FALL_STEPS;
                 level = (std::min)(level, lipLevel + (fallTo - lipLevel) * t);
                 p.cascade = true;
-                if (i == falls[fall].lip + FALL_STEPS) ++fall;
+                if (i == falls[fall].lip + FALL_STEPS) { poolEnd = i + POOL_STEPS; ++fall; }
             } else {
                 level = (std::min)(level, target);
             }
-            level = (std::max)(level, 0.12f);
+            if (i >= n - MOUTH_EXTRA - MOUTH_STEPS) { // el nivel baja hasta el del mar
+                const float t = static_cast<float>(i - (n - MOUTH_EXTRA - MOUTH_STEPS)) / (MOUTH_EXTRA + MOUTH_STEPS - 1);
+                level = (std::min)(level, level * (1.0f - t));
+            }
+            level = (std::max)(level, 0.0f);
             const float t = static_cast<float>(i) / n;
             p.level = level;
             p.halfWidth = style.widthMin + (style.widthMax - style.widthMin) * (0.4f * t + 0.6f * t * t);
             p.bed = level - between(style.depthMin, style.depthMax);
+            if (i > 0 && poolEnd >= 0 && i <= poolEnd && !p.cascade) { // poza al pie de la cascada: más ancha y honda
+                p.halfWidth *= 1.9f;
+                p.bed = level - style.depthMax * 1.7f;
+            }
+            if (i >= n - MOUTH_EXTRA - MOUTH_STEPS) { // desembocadura abierta
+                const float m = static_cast<float>(i - (n - MOUTH_EXTRA - MOUTH_STEPS)) / (MOUTH_EXTRA + MOUTH_STEPS - 1);
+                p.halfWidth *= 1.0f + 1.4f * m;
+                p.bed = (std::min)(p.bed, -1.2f - 1.5f * m);
+            }
+        }
+        if (spring) carveHighLake(path.front().x, path.front().z, SPRING_RADIUS, path.front().level + 0.35f, 2.6f); // el manantial
+        if (lake) {
+            const PathPoint& c = path[falls.front().lip - lakeSteps];
+            carveHighLake(c.x, c.z, lakeRadius, lakeLevel, between(4.0f, 6.0f));
         }
         // reparte el cauce por los nodos cercanos: cada nodo toma el punto más próximo
         const int c = m_ground.count();
@@ -716,8 +795,10 @@ class HabitatMap {
             const int i = owner[index];
             const PathPoint& p = path[i];
             const float d = best[index], hw = p.halfWidth;
+            const bool inLake = m_kind[index] == UPPER_LAKE && !p.cascade; // dentro del lago quieto el cauce no marca corriente
             const float bank = d < hw ? p.bed + (p.level - p.bed) * (d / hw) * (d / hw) : p.level + (d - hw) * VALLEY_SLOPE; // paredes del valle
             float& g = m_ground.data()[index];
+            if (inLake) continue;
             if (bank >= g) continue;
             g = bank;
             if (d < hw + 0.1f && g < p.level) {
@@ -782,7 +863,7 @@ class HabitatMap {
         }
         int made = 0;
         for (size_t i = 0; i < sources.size() && made < mountain; ++i) {
-            if (carveRiver(sources[i].x, sources[i].z, sources[i].level, 3, true, style)) ++made;
+            if (carveRiver(sources[i].x, sources[i].z, sources[i].level, 3, true, style, sources[i].level < -1.0e8f)) ++made;
         }
         const int plain = river ? betweenInt((std::max)(1, river->minZones), (std::max)(1, river->maxZones)) : 0;
         made = 0;
@@ -790,7 +871,7 @@ class HabitatMap {
             if (made >= plain) break;
             float x = 0.0f, z = 0.0f;
             if (lake.kind != LAKE || !outlet(lake, x, z, 10.0f)) continue;
-            if (carveRiver(x, z, lake.level, 1, false, style)) ++made;
+            if (carveRiver(x, z, lake.level, 1, false, style, false)) ++made;
         }
     }
 

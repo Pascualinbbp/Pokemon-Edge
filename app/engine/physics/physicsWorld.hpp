@@ -10,7 +10,7 @@ namespace Physics {
     class World {
         public:
         static constexpr float GRAVITY = 20.0f;
-        static constexpr float HALF_SIZE = 448.0f; // las mallas del mundo cubren de -HALF_SIZE a +HALF_SIZE; el mundo jugable es el archipiélago y las regiones
+        static constexpr float HALF_SIZE = 768.0f; // las mallas del mundo cubren de -HALF_SIZE a +HALF_SIZE; el mundo jugable es el archipiélago y las regiones
         static constexpr float CLIMB_SLOPE = 5.0f;  // pendiente (m de subida por m, unos 79º) desde la que andar no tiene sentido: se escala
             static constexpr float SWIM_DEPTH = 0.6f;  // con más agua que esto no se camina: se nada
         static constexpr float START_HEIGHT = 1.0f; // altura del terreno plano de la zona de inicio (paredes, máquina...)
@@ -211,7 +211,7 @@ namespace Physics {
             body.position.x += body.velocity.x * dt;
             body.position.z += body.velocity.z * dt;
             body.position.y += body.velocity.y * dt;
-            if (wasUnder) keepInRock(body, startX, startZ, previousLow);
+            if (wasUnder || inCave(startX, startZ)) keepInRock(body, startX, startZ, previousLow); // también en la boca y la explanada: sus paredes son de roca
             const bool afloat = waterDepth(body.position.x, body.position.z, previousLow) > 0.05f;
             if (afloat) { // la corriente arrastra
                 float fx, fz;
@@ -278,7 +278,10 @@ namespace Physics {
         // Quien está bajo tierra no atraviesa la roca: si el paso lo lleva fuera de la galería hacia un terreno más alto que sus pies (la
         // boca da a la explanada, a ras), se queda donde estaba y desliza por la pared.
         void keepInRock(Body& body, float startX, float startZ, float low) const {
-            const auto fits = [&](float x, float z) { return caveCeil.covers(x, z, CAVE_DEFINED) || terrain.sample(x, z) <= low + STEP_HEIGHT * 2.0f; };
+            const float r = body.collisionRadius;
+            const auto fitsPoint = [&](float x, float z) { return caveCeil.covers(x, z, CAVE_DEFINED) || terrain.sample(x, z) <= low + STEP_HEIGHT * 2.0f; };
+            // cabe todo el cuerpo (no solo su centro): si no, el personaje se hundiría en la pared hasta su radio
+            const auto fits = [&](float x, float z) { return fitsPoint(x, z) && (r <= 0.0f || (fitsPoint(x + r, z) && fitsPoint(x - r, z) && fitsPoint(x, z + r) && fitsPoint(x, z - r))); };
             if (fits(body.position.x, body.position.z)) return;
             const float nx = body.position.x, nz = body.position.z;
             if (fits(nx, startZ)) { body.position.z = startZ; body.velocity.z = 0.0f; }

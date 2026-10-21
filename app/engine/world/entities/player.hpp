@@ -1,4 +1,5 @@
 #pragma once
+#include "../rules/healthRules.hpp"
 #include <algorithm>
 #include <cmath>
 #include <DirectXMath.h>
@@ -82,9 +83,12 @@ class Player {
             if (wasGrounded && input.jump) jump(world); // también trepando: sirve para saltar antes de un precipicio o un hueco
         }
 
-        trackFall(streaming || inWater);
+        trackFall(streaming);
         if (!streaming) world.step(body, dt);
         if (!streaming && !inWater && !wasGrounded && body.onGround) { m_impact = m_fallSpeed; land(input); }
+        if (inWater && m_fallSpeed > 0.0f) { // cae al agua: la profundidad amortigua la caída
+            m_impact = HealthRules::impactInWater(m_fallSpeed, world.waterDepth(body.position.x, body.position.z, body.feet()));
+        }
         if (body.onGround || streaming || inWater) m_fallSpeed = 0.0f;
 
         updateFacing(dt, cameraYaw);
@@ -162,8 +166,8 @@ class Player {
     }
 
     // La velocidad de caída máxima desde que se pierde el suelo (se descarta en el agua o en la corriente).
-    void trackFall(bool cushioned) {
-        if (cushioned) { m_fallSpeed = 0.0f; return; }
+    void trackFall(bool streaming) {
+        if (streaming) { m_fallSpeed = 0.0f; return; }
         if (!body.onGround) m_fallSpeed = (std::max)(m_fallSpeed, -body.velocity.y);
     }
 
@@ -273,13 +277,21 @@ class Player {
         m_climbing = false;
         m_climbSlope = 0.0f;
         if (!grounded || m_sliding) return;
+        // Dentro de una galería (o su boca) nunca se trepa: el terreno de encima es roca, no el suelo que se pisa.
+        if (body.underground || world.inCave(body.position.x, body.position.z)) return;
         const float ahead = amount > 0.0f ? CLIMB_PROBE : 0.0f;
+        const float px = body.position.x + dirX * ahead, pz = body.position.z + dirZ * ahead;
+        if (world.inCave(px, pz)) return;
         float gx, gz;
-        world.gradient(body.position.x + dirX * ahead, body.position.z + dirZ * ahead, body.feet(), gx, gz);
+        world.terrain.gradient(px, pz, gx, gz);
         const float along = gx * dirX + gz * dirZ; // subida por metro en la dirección de avance
         const float steepHere = std::sqrt(gx * gx + gz * gz);
+        // Hace falta una pared de verdad: empinada aquí y también un poco más allá (un escalón o un borde suelto no cuentan).
+        float fx, fz;
+        world.terrain.gradient(px + dirX * CLIMB_SUSTAIN, pz + dirZ * CLIMB_SUSTAIN, fx, fz);
+        const bool wall = steepHere > Physics::World::CLIMB_SLOPE && std::sqrt(fx * fx + fz * fz) > Physics::World::CLIMB_SLOPE * 0.7f;
         m_climbSlope = amount > 0.0f ? along : 0.0f;
-        m_climbing = steepHere > Physics::World::CLIMB_SLOPE && (amount <= 0.0f || along > Physics::World::CLIMB_SLOPE * 0.8f);
+        m_climbing = wall && (amount <= 0.0f || along > Physics::World::CLIMB_SLOPE * 0.8f);
         if (!m_climbing) return;
         m_sprinting = false;
         m_crouching = false;
@@ -423,6 +435,7 @@ class Player {
         else m_crouching = true;
     }
 
+    static constexpr float CLIMB_SUSTAIN = 1.2f;       // a qué distancia más allá debe seguir la pared
     static constexpr float CLIMB_PROBE = 0.45f;        // a qué distancia por delante se mira la pendiente
 
     PlayerAction m_action = PlayerAction::NONE;

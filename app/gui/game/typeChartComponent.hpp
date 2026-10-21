@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include <vector>
 #include "imgui.h"
 #include "../gameState.hpp"
 #include "../style/guiCards.hpp"
@@ -45,6 +46,31 @@ namespace TypeChartComponent {
 
         inline const char* cellLabel(float multiplier) { return multiplier <= 0.0f ? "0" : multiplier > 1.0f ? "2" : multiplier < 1.0f ? "1/2" : ""; }
 
+        // Orden de la tabla: columnas por id con Normal al final; filas: por cada columna, el atacante que no le hace nada (x0), y después los
+        // que sobran en orden de columna (Normal al final).
+        struct Order { std::vector<int> columns, rows; };
+        inline Order order(const GameData& data) {
+            const int count = static_cast<int>(data.types.size());
+            std::vector<int> columns(count);
+            for (int i = 0; i < count; ++i) columns[i] = i;
+            const auto isNormal = [&](int i) { return shortName(data.types[i].name, 64) == "Normal"; };
+            std::stable_sort(columns.begin(), columns.end(), [&](int a, int b) {
+                if (isNormal(a) != isNormal(b)) return isNormal(b);
+                return data.types[a].id < data.types[b].id;
+            });
+            std::vector<int> rows;
+            std::vector<bool> used(count, false);
+            const auto take = [&](int i) { used[i] = true; rows.push_back(i); };
+            for (const int column : columns) {
+                for (const int attacker : columns) {
+                    if (used[attacker] || isNormal(attacker)) continue;
+                    if (data.typeChart.multiplier(data.types[attacker].id, data.types[column].id) <= 0.0f) { take(attacker); break; }
+                }
+            }
+            for (const int attacker : columns) if (!used[attacker]) take(attacker);
+            return { columns, rows };
+        }
+
         inline void legend(ImDrawList* dl, ImVec2 at) {
             struct Entry { ImU32 color; const char* text; };
             const Entry entries[] = { { SUPER, "x2  muy eficaz" }, { WEAK, "x1/2  poco eficaz" }, { IMMUNE, "x0  sin efecto" }, { NORMAL, "x1  normal" } };
@@ -73,6 +99,7 @@ namespace TypeChartComponent {
             if (GuiInput::backPressed()) state = back;
             return;
         }
+        const Order sequence = order(data);
         const float top = MARGIN + 52.0f;
         const float available = (std::min)(screen.x - MARGIN * 2.0f, screen.y - top - MARGIN - 28.0f);
         const float cell = (std::min)(46.0f, available / (static_cast<float>(count) + 1.6f));
@@ -90,18 +117,18 @@ namespace TypeChartComponent {
         for (int c = 0; c < count; ++c) { // cabecera de columnas: defensores
             const ImVec2 a(origin.x + header + c * cell + 2.0f, origin.y + 2.0f);
             const ImVec2 b(a.x + cell - 4.0f, origin.y + header - 4.0f);
-            dl->AddRectFilled(a, b, GuiCards::typeColor(data.types[c].id), 6.0f);
+            dl->AddRectFilled(a, b, GuiCards::typeColor(data.types[sequence.columns[c]].id), 6.0f);
             if (hot && hotColumn == c) dl->AddRect(a, b, GuiCards::SELECT, 6.0f, 0, 2.0f);
-            GuiCards::centeredText(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), IM_COL32(255, 255, 255, 255), shortName(data.types[c].name, 3).c_str(), 0.8f);
+            GuiCards::centeredText(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), IM_COL32(255, 255, 255, 255), shortName(data.types[sequence.columns[c]].name, 3).c_str(), 0.8f);
         }
         for (int r = 0; r < count; ++r) { // cabecera de filas: atacantes
             const ImVec2 a(origin.x + 2.0f, origin.y + header + r * cell + 2.0f);
             const ImVec2 b(origin.x + header - 4.0f, a.y + cell - 4.0f);
-            dl->AddRectFilled(a, b, GuiCards::typeColor(data.types[r].id), 6.0f);
+            dl->AddRectFilled(a, b, GuiCards::typeColor(data.types[sequence.rows[r]].id), 6.0f);
             if (hot && hotRow == r) dl->AddRect(a, b, GuiCards::SELECT, 6.0f, 0, 2.0f);
-            GuiCards::centeredText(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), IM_COL32(255, 255, 255, 255), shortName(data.types[r].name, 5).c_str(), 0.8f);
+            GuiCards::centeredText(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), IM_COL32(255, 255, 255, 255), shortName(data.types[sequence.rows[r]].name, 5).c_str(), 0.8f);
             for (int c = 0; c < count; ++c) {
-                const float multiplier = data.typeChart.multiplier(data.types[r].id, data.types[c].id);
+                const float multiplier = data.typeChart.multiplier(data.types[sequence.rows[r]].id, data.types[sequence.columns[c]].id);
                 const ImVec2 ca(origin.x + header + c * cell + 2.0f, a.y);
                 const ImVec2 cb(ca.x + cell - 4.0f, ca.y + cell - 4.0f);
                 const bool line = hot && (hotRow == r || hotColumn == c);
@@ -113,9 +140,9 @@ namespace TypeChartComponent {
         }
 
         if (hot) { // explicación de la casilla señalada
-            const float multiplier = data.typeChart.multiplier(data.types[hotRow].id, data.types[hotColumn].id);
+            const float multiplier = data.typeChart.multiplier(data.types[sequence.rows[hotRow]].id, data.types[sequence.columns[hotColumn]].id);
             char text[160];
-            std::snprintf(text, sizeof(text), "%s  ataca a  %s:  %s", title(data.types[hotRow].name).c_str(), title(data.types[hotColumn].name).c_str(),
+            std::snprintf(text, sizeof(text), "%s  ataca a  %s:  %s", title(data.types[sequence.rows[hotRow]].name).c_str(), title(data.types[sequence.columns[hotColumn]].name).c_str(),
                           multiplier <= 0.0f ? "no le afecta" : multiplier > 1.0f ? "muy eficaz (x2)" : multiplier < 1.0f ? "poco eficaz (x1/2)" : "daño normal (x1)");
             GuiCards::text(dl, ImVec2(MARGIN, screen.y - MARGIN - 28.0f), IM_COL32(255, 215, 90, 255), text, 1.1f);
         }

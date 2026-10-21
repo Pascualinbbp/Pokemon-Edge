@@ -38,6 +38,7 @@ class Companion {
 
     bool active() const { return m_speciesId >= 0; }
     int speciesId() const { return m_speciesId; }
+    bool shiny() const { return m_shiny; } // el del pokémon que está fuera (no el del líder nuevo mientras el viejo vuelve a su bola)
     float yaw() const { return m_yaw; }
     bool working() const { return m_working; }
 
@@ -55,8 +56,8 @@ class Companion {
     bool changing() const { return m_phase != Phase::NONE; }
 
     // Cambia de pokémon con su animación: si hay uno fuera vuelve a su bola; después sale el nuevo de la suya.
-    void swap(int speciesId, bool floats, int ballType, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
-        m_next = { speciesId, floats, ballType };
+    void swap(int speciesId, bool floats, int ballType, bool shiny, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
+        m_next = { speciesId, floats, ballType, shiny };
         m_cameraYaw = cameraYaw;
         if (m_phase == Phase::RECALL) return; // ya se está guardando: saldrá el último elegido
         if (active()) {
@@ -66,10 +67,11 @@ class Companion {
     }
 
     // Cambia de pokémon (-1 = ninguno): aparece junto al jugador.
-    void set(int speciesId, bool floats, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
+    void set(int speciesId, bool floats, bool shiny, const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
         m_phase = Phase::NONE;
         m_transfer.stop();
         m_speciesId = speciesId;
+        m_shiny = shiny;
         m_floats = floats;
         body.gravityScale = floats ? 0.0f : 1.0f;
         m_workTimer = 0.0f;
@@ -129,12 +131,12 @@ class Companion {
 
     private:
     enum class Phase { NONE, RECALL, SEND };
-    struct Next { int speciesId; bool floats; int ballType; };
+    struct Next { int speciesId; bool floats; int ballType; bool shiny; };
 
     static DirectX::XMFLOAT3 hand(const DirectX::XMFLOAT3& player) { return { player.x, player.y + HAND_HEIGHT, player.z }; }
 
     void beginSend(const DirectX::XMFLOAT3& playerPosition, float cameraYaw) {
-        set(m_next.speciesId, m_next.floats, playerPosition, cameraYaw);
+        set(m_next.speciesId, m_next.floats, m_next.shiny, playerPosition, cameraYaw);
         m_ballType = m_next.ballType;
         m_phase = Phase::SEND;
         m_transfer.start(BallTransfer::Mode::RELEASE, cameraYaw, hand(playerPosition), m_ballType);
@@ -181,6 +183,7 @@ class Companion {
     }
 
     int m_speciesId = -1;
+    bool m_shiny = false;
     bool m_floats = false;
     float m_yaw = 0.0f;
     int m_avoidSide = 0;      // lado (±1) por el que rodea un obstáculo; 0 = camino libre
@@ -191,5 +194,5 @@ class Companion {
     float m_cameraYaw = 0.0f;
     BallTransfer m_transfer;
     int m_ballType = 1;                       // tipo de la pokéball del pokémon que está fuera
-    Next m_next = { -1, false, 1 };
+    Next m_next = { -1, false, 1, false };
 };

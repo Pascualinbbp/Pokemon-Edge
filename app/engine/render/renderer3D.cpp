@@ -1,3 +1,4 @@
+#include <chrono>
 #include "renderer3D.hpp"
 #include "../../utils/graphics/d3dUtil.hpp"
 #include "../world/style/habitatStyle.hpp"
@@ -531,13 +532,13 @@ std::vector<Renderer3D::Chunk> Renderer3D::createCaveWater(ID3D11Device* device,
 // recoge hacia abajo hasta una punta) en vez de la roca o el abismo; la isla parece apoyada en una nube. Colores y lóbulos fijos.
 std::vector<Renderer3D::Chunk> Renderer3D::createSkyBase(ID3D11Device* device, const HabitatMap& habitats) {
     constexpr int SEGMENTS = 40, RINGS = 6;              // anillos desde el borde (0) hasta la punta
-    constexpr float LIP = 2.2f;                          // cuánto sobresale la nube del borde del mar
+    constexpr float LIP = 4.0f;                          // cuánto sobresale la nube del borde del mar
     constexpr XMFLOAT3 TOP = { 0.98f, 0.98f, 1.0f }, BOTTOM = { 0.70f, 0.76f, 0.88f };
     std::vector<Chunk> chunks;
     for (const HabitatMap::Region& region : habitats.regions()) {
         if (region.kind != HabitatPlacement::SKY) continue;
         const float level = region.floorY - 0.35f;      // nivel del mar de nubes
-        const float depth = (std::clamp)(region.seaRadius * 0.5f, 14.0f, 40.0f);
+        const float depth = (std::clamp)(region.seaRadius * 0.9f, 26.0f, 80.0f);
         const XMFLOAT3 core = { region.x, level - depth * 0.5f, region.z };
         std::vector<Vertex> vertices;
         vertices.reserve(SEGMENTS * (RINGS + 1) + 1);
@@ -942,6 +943,8 @@ void Renderer3D::addModel(const RenderModel& model, CXMMATRIX world, const XMFLO
 }
 
 // Lista única de lo que hay en el mundo: la usan el mapa de sombras y la pantalla.
+static const auto kStart = std::chrono::steady_clock::now(); // origen del reloj de adornos
+
 void Renderer3D::collect(const Scene& scene) {
     m_draws.clear();
 
@@ -952,6 +955,7 @@ void Renderer3D::collect(const Scene& scene) {
     const XMFLOAT3& p = scene.player.body.position;
     addPlayer(scene);
     const float time = scene.dayCycle.lighting().time;
+    m_clock = std::fmod(std::chrono::duration<float>(std::chrono::steady_clock::now() - kStart).count(), 3600.0f);
     addSky(scene, time);
     addUnderground(scene);
 
@@ -968,7 +972,7 @@ void Renderer3D::collect(const Scene& scene) {
         const float size = Companion::SIZE * pet.scale();
         if (size > 0.001f) {
             const XMFLOAT3 at = pet.drawCenter();
-            addCreature({ at.x, at.y + pet.bob(), at.z }, size, pet.yaw(), pet.speciesId(), scene.storage.active() && scene.storage.active()->shiny);
+            addCreature({ at.x, at.y + pet.bob(), at.z }, size, pet.yaw(), pet.speciesId(), pet.shiny());
         }
         if (const BallTransfer* transfer = pet.transfer()) addTransfer(*transfer, pet.drawCenter(), Companion::SIZE * pet.scale());
     }
@@ -1196,6 +1200,19 @@ void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, int speci
     const float nose = size * 0.4f;
     add(m_cube, XMMatrixScaling(nose, nose, nose) *
         XMMatrixTranslation(c.x + std::sin(yaw) * size * 0.5f, c.y + size * 0.15f, c.z + std::cos(yaw) * size * 0.5f), kNoseTint);
+
+    if (!shiny) return;
+    // Los shiny centellean: estrellas doradas que orbitan y laten a su alrededor.
+    constexpr int SPARKLES = 5;
+    constexpr XMFLOAT4 GOLD = { 1.0f, 0.92f, 0.45f, 1.0f };
+    for (int i = 0; i < SPARKLES; ++i) {
+        const float phase = m_clock * 1.4f + i * (XM_2PI / SPARKLES);
+        const float pulse = 0.5f + 0.5f * std::sin(m_clock * 5.0f + i * 2.1f);
+        const float star = size * (0.10f + 0.16f * pulse);
+        const float radius = size * (0.85f + 0.2f * std::sin(m_clock * 0.9f + i));
+        add(m_star, XMMatrixScaling(star, star, star) * XMMatrixRotationY(m_clock * 2.0f + i) *
+            XMMatrixTranslation(c.x + std::cos(phase) * radius, c.y + size * (0.1f + 0.9f * std::fmod(m_clock * 0.35f + i * 0.2f, 1.0f)) - size * 0.3f, c.z + std::sin(phase) * radius), GOLD, false);
+    }
 }
 
 // Nodo de recolección: árbol (tronco y copa), roca (bloques irregulares, con vetas si es mena) o arbusto. Se sacude al golpearlo.
@@ -1215,7 +1232,7 @@ void Renderer3D::addNode(const ResourceNode& node) {
     const auto part = [&](const XMFLOAT3& size, float yaw, const XMFLOAT3& at, const XMFLOAT3& color, float glow) { draw(base, size, yaw, at, color, glow); };
 
     using Shape = ResourceStyle::Shape;
-    if (look.shape == Shape::TREE || look.shape == Shape::CONIFER || look.shape == Shape::PALM) {
+    if (ResourceStyle::isTree(look.shape)) {
         using ResourceStyle::STUMP_HEIGHT;
         if (ResourceStyle::stump(look, g)) {
             part({ 0.55f, STUMP_HEIGHT, 0.55f }, 0.0f, { 0.0f, STUMP_HEIGHT * 0.5f, 0.0f }, look.body, 0.0f);
@@ -1229,6 +1246,17 @@ void Renderer3D::addNode(const ResourceNode& node) {
             draw(tree, { 2.4f, 1.0f, 2.4f }, 0.0f, { 0.0f, 1.7f, 0.0f }, look.accent, 0.0f);
             draw(tree, { 1.7f, 1.0f, 1.7f }, 0.4f, { 0.0f, 2.55f, 0.0f }, look.accent, 0.0f);
             draw(tree, { 1.0f, 1.0f, 1.0f }, 0.8f, { 0.0f, 3.4f, 0.0f }, look.accent, 0.0f);
+        } else if (look.shape == Shape::JUNGLE) {
+            draw(tree, { 0.7f, 3.4f, 0.7f }, 0.0f, { 0.0f, 1.7f, 0.0f }, look.body, 0.0f);
+            draw(tree, { 3.6f, 1.3f, 3.6f }, 0.0f, { 0.0f, 3.9f, 0.0f }, look.accent, 0.0f);
+            draw(tree, { 2.6f, 1.2f, 2.6f }, 0.6f, { 0.3f, 4.9f, -0.2f }, { look.accent.x * 1.15f, look.accent.y * 1.15f, look.accent.z * 1.15f }, 0.0f);
+            draw(tree, { 0.12f, 1.6f, 0.12f }, 0.0f, { 1.3f, 3.1f, 0.9f }, { 0.14f, 0.45f, 0.14f }, 0.0f); // lianas
+            draw(tree, { 0.12f, 1.2f, 0.12f }, 0.0f, { -1.2f, 3.3f, -0.7f }, { 0.14f, 0.45f, 0.14f }, 0.0f);
+        } else if (look.shape == Shape::ACACIA) {
+            draw(tree, { 0.32f, 2.6f, 0.32f }, 0.1f, { 0.0f, 1.3f, 0.0f }, look.body, 0.0f);
+            draw(tree, { 0.22f, 1.0f, 0.22f }, 0.0f, { 0.5f, 2.9f, 0.0f }, look.body, 0.0f);
+            draw(tree, { 3.8f, 0.35f, 3.2f }, 0.3f, { 0.4f, 3.5f, 0.0f }, look.accent, 0.0f); // copa plana en sombrilla
+            draw(tree, { 2.4f, 0.35f, 2.2f }, 0.9f, { 0.4f, 3.75f, 0.0f }, { look.accent.x * 1.1f, look.accent.y * 1.1f, look.accent.z * 1.1f }, 0.0f);
         } else if (look.shape == Shape::PALM) {
             draw(tree, { 0.35f, 2.9f, 0.35f }, 0.0f, { 0.0f, 1.45f, 0.0f }, look.body, 0.0f);
             draw(tree, { 2.6f, 0.2f, 0.6f }, 0.0f, { 0.0f, 3.0f, 0.0f }, look.accent, 0.0f);
@@ -1239,6 +1267,25 @@ void Renderer3D::addNode(const ResourceNode& node) {
             draw(tree, { 0.5f, 1.9f, 0.5f }, 0.0f, { 0.0f, 0.95f, 0.0f }, look.body, 0.0f);
             draw(tree, { 2.3f, 1.5f, 2.3f }, 0.0f, { 0.0f, 2.65f, 0.0f }, look.accent, 0.0f);
             draw(tree, { 1.5f, 1.2f, 1.5f }, 0.785f, { 0.0f, 3.65f, 0.0f }, look.accent, 0.0f);
+        }
+        return;
+    }
+
+    if (look.shape == Shape::FLOWER) { // un manojo de flores de varios colores: tallos, hojas y pétalos que se abren al crecer
+        static const XMFLOAT3 PALETTE[] = { { 0.95f, 0.30f, 0.50f }, { 0.99f, 0.85f, 0.22f }, { 0.58f, 0.45f, 0.96f }, { 0.97f, 0.97f, 0.97f }, { 0.99f, 0.55f, 0.18f }, { 0.35f, 0.62f, 0.98f } };
+        static const float AT[][2] = { { 0.0f, 0.0f }, { 0.45f, 0.2f }, { -0.4f, 0.3f }, { 0.2f, -0.45f }, { -0.3f, -0.35f }, { 0.55f, -0.3f }, { -0.55f, -0.05f }, { 0.05f, 0.5f } };
+        part({ 1.1f, 0.08f, 1.1f }, 0.4f, { 0.0f, 0.04f, 0.0f }, look.body, 0.0f);
+        const float bloom = std::clamp((g - 0.25f) / 0.75f, 0.0f, 1.0f);
+        const int seed = static_cast<int>(node.yaw() * 37.0f);
+        for (int i = 0; i < 8; ++i) {
+            const float h = (0.3f + 0.09f * ((i * 5 + seed) % 4)) * (0.4f + 0.6f * std::clamp(g * 1.3f, 0.0f, 1.0f));
+            const XMFLOAT3& c = PALETTE[(seed + i * 3 + (i >> 1)) % 6];
+            part({ 0.04f, h, 0.04f }, 0.0f, { AT[i][0], h * 0.5f, AT[i][1] }, look.body, 0.0f);
+            if (bloom <= 0.0f) continue;
+            const float s = 0.17f * bloom;
+            part({ s, 0.03f, s * 0.45f }, 0.0f, { AT[i][0], h + 0.02f, AT[i][1] }, c, 0.15f);
+            part({ s * 0.45f, 0.03f, s }, 0.0f, { AT[i][0], h + 0.025f, AT[i][1] }, c, 0.15f);
+            part({ s * 0.38f, 0.05f, s * 0.38f }, 0.0f, { AT[i][0], h + 0.04f, AT[i][1] }, { 0.99f, 0.88f, 0.25f }, 0.2f);
         }
         return;
     }

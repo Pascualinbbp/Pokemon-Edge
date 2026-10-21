@@ -40,7 +40,7 @@ namespace TeamCircle {
         }
         if (data.ball(ballId)) {
             dl->AddCircleFilled(ImVec2(c.x + radius * 0.75f, c.y + radius * 0.7f), mini + 2.0f, fade(IM_COL32(20, 20, 30, 220)), 20);
-            ItemIcon::ball(dl, ImVec2(c.x + radius * 0.75f, c.y + radius * 0.7f), mini, PokeballStyle::color(ballId));
+            ItemIcon::ball(dl, ImVec2(c.x + radius * 0.75f, c.y + radius * 0.7f), mini, PokeballStyle::look(ballId));
         }
 
         if (number <= 0) return;

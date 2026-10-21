@@ -269,6 +269,7 @@ void MainWindow::run() {
         bool justPaused = false;
         if (g_state == GameState::PLAYING && engine.needsStarter()) {
             g_state = GameState::STARTER; // partida nueva: primero se elige el pokémon inicial
+            StarterComponent::detail::reset();
             redrawFrames = 2;
         }
         if (g_state == GameState::PLAYING) {

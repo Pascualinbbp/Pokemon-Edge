@@ -163,6 +163,7 @@ class Renderer3D {
     std::vector<Chunk> m_water;   // superficie del agua (mar, ríos, lagos, charcas, cascadas)
     std::vector<Chunk> m_cave;    // galerías de cuevas y minas
     std::vector<Chunk> m_caveWater; // agua subterránea
+    float m_clock = 0.0f;           // tiempo de la escena que se está dibujando (animaciones de adorno)
     std::vector<Chunk> m_skyBase;   // base de nube bajo cada isla del cielo
     struct Lamp { DirectX::XMFLOAT3 position; float reach; DirectX::XMFLOAT3 color; float distance; };
     std::vector<Lamp> m_lamps;    // luces del subsuelo cercanas a la cámara (las kLamps más próximas se envían al shader)

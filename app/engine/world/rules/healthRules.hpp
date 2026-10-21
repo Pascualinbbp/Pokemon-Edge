@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <cmath>
 
 // Salud del jugador: cuánto daño causa cada cosa. Es el único sitio donde se definen estas cifras.
 namespace HealthRules {
@@ -14,6 +15,16 @@ namespace HealthRules {
 
     // Altura de caída libre equivalente a una velocidad de impacto (v² = 2·g·h).
     inline float fallHeight(float impactSpeed) { return impactSpeed * impactSpeed / (2.0f * GRAVITY); }
+
+    inline constexpr float WATER_CUSHION = 5.0f;       // m de caída que amortigua cada metro de agua profunda
+    inline constexpr float CLOUD_BOUNCE = 0.55f;       // fracción de la velocidad de impacto que devuelve el suelo de nube
+    inline constexpr float CLOUD_BOUNCE_MIN = 6.0f;    // m/s de impacto a partir de los cuales rebota
+
+    // Velocidad de impacto que queda tras caer en agua de la profundidad dada (0 si la profundidad absorbe toda la caída).
+    inline float impactInWater(float impactSpeed, float depth) {
+        const float height = fallHeight(impactSpeed) - WATER_CUSHION * depth;
+        return height <= 0.0f ? 0.0f : std::sqrt(2.0f * GRAVITY * height);
+    }
 
     inline float fallDamage(float impactSpeed) {
         return (std::max)(0.0f, fallHeight(impactSpeed) - SAFE_FALL) * FALL_DAMAGE_PER_M;

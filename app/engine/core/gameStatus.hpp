@@ -40,6 +40,7 @@ struct GameStatus {
     const std::string* interactTarget = nullptr; // sobre qué ("Cofre común", "Árbol"...)
     const std::string* missingSkill = nullptr;   // habilidad que falta para trabajar el recurso cercano ("Talar"...)
     int missingLevel = 0;                        // nivel que exige ese recurso
+    bool interactOnScreen = false;               // la ayuda de interacción va fija en la pantalla, no sobre el objeto
     DirectX::XMFLOAT3 interactPos = {};          // dónde se dibuja la ayuda de interacción (sobre lo que se usa)
     DirectX::XMFLOAT3 missingPos = {};           // y el aviso de lo que falta (sobre el recurso)
     const HabitatMap* habitatMap = nullptr;      // mapa de hábitats (para el minimapa)
