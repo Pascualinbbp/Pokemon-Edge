@@ -118,6 +118,7 @@ struct Scene {
             else pause = true;
         }
         m_clock += dt;
+        world.time = m_clock;
         world.tide = TIDE_AMPLITUDE * std::sin(m_clock * 6.2831853f / TIDE_PERIOD);
         if (input.aimToggle) aimMode = !aimMode;
         m_aiming = aimMode || input.aimHold;
@@ -220,7 +221,7 @@ struct Scene {
     void chooseStarter(int speciesId) {
         const PokemonSpecies* species = m_data->speciesById(speciesId);
         const PokeballType* ball = m_data->starterBall();
-        if (!species || !species->starter || !needsStarter()) return;
+        if (!species || !needsStarter()) return; // la interfaz decide qué se ofrece (iniciales o reserva Pichu/Eevee)
 
         OwnedPokemon owned;
         owned.speciesId = species->id;
@@ -260,6 +261,7 @@ struct Scene {
             s.missingPos = m_missingPos;
         }
         s.interactPos = interactionAnchor();
+        s.interactTime = m_interaction.kind == Interaction::WEAKENED ? (std::max)(1.0f - m_weakAge / CompanionRules::WEAK_PROMPT_TIME, 0.0f) : -1.0f;
         s.interactOnScreen = m_interaction.kind == Interaction::WEAKENED; // el aviso de capturar al debilitado va fijo en la pantalla del jugador
         fillLocation(s);
         fillWorldState(s);
@@ -332,6 +334,9 @@ struct Scene {
         const DirectX::XMFLOAT3& p = player.body.position;
         const HabitatMap::Region* region = habitats.regionAt(p.x, p.z);
         s.temperature = temperatureAt(p.x, p.z);
+        s.burning = health.burning();
+        s.spring = m_pool < 0 ? 0 : m_poolTime < HealthRules::SPRING_SAFE_TIME ? 1 : 2;
+        s.springLeft = (std::max)(0.0f, HealthRules::SPRING_SAFE_TIME - m_poolTime);
         s.altitude = (std::max)(0.0f, p.y);
         s.health = health.fraction();
         s.hurt = health.hurtFlash();
@@ -367,7 +372,7 @@ struct Scene {
                 default: return SKY_TEMPERATURE;
             }
         }
-        return HabitatMap::temperature(world.groundHeight(x, z));
+        return HabitatMap::temperature(world.groundHeight(x, z)) + HealthRules::LAVA_HEAT * world.lavaHeat(x, z);
     }
 
     // Ayudas inferiores: la pesca (lanzar, recoger, Capturar / Liberar) y el buceo.
@@ -442,13 +447,37 @@ struct Scene {
         const float impact = player.takeImpact();
         const DirectX::XMFLOAT3& at = player.body.position;
         if (habitats.cloudFloor(at.x, at.z) && impact >= HealthRules::CLOUD_BOUNCE_MIN) player.body.velocity.y = impact * HealthRules::CLOUD_BOUNCE; // la nube rebota
-        if (!habitats.onSky(at.x, at.z)) health.hurt(HealthRules::fallDamage(impact));
+        if (!habitats.cloudFloor(at.x, at.z)) health.hurt(HealthRules::fallDamage(impact)); // el suelo de nube no hace daño
         if (player.drowning()) health.hurt(HealthRules::DROWN_PER_SECOND * dt);
+        updateBurn(dt);
+        updateSpring(dt);
         if (!health.dead()) return;
         player.body.position = m_home;
         player.body.velocity = { 0.0f, 0.0f, 0.0f };
         health.restore();
         showNotice(Notice::FAINTED);
+    }
+
+    // Lava: daño y quemadura. La quemadura se apaga con agua o deslizándose por el suelo.
+    void updateBurn(float dt) {
+        const DirectX::XMFLOAT3& at = player.body.position;
+        if (world.inLava(at.x, at.z, player.body.feet())) {
+            health.hurt(HealthRules::LAVA_PER_SECOND * dt);
+            health.ignite();
+        } else if (health.burning() && (player.sliding() || world.waterDepth(at.x, at.z, player.body.feet()) > 0.2f)) {
+            health.extinguish();
+        }
+    }
+
+    // Aguas termales: cada charca tiene su temporizador, que empieza de 0 al entrar en ella. Mientras no vence cura poco a poco; después daña.
+    void updateSpring(float dt) {
+        const DirectX::XMFLOAT3& at = player.body.position;
+        const int pool = world.springAt(at.x, at.z, player.body.feet());
+        if (pool != m_pool) { m_pool = pool; m_poolTime = 0.0f; }
+        if (pool < 0) return;
+        m_poolTime += dt;
+        if (m_poolTime < HealthRules::SPRING_SAFE_TIME) health.heal(HealthRules::SPRING_HEAL_PER_SECOND * dt);
+        else health.hurt(HealthRules::SPRING_HURT_PER_SECOND * dt);
     }
 
     bool concealsPlayer(const ResourceNode& node) const {
@@ -681,7 +710,9 @@ struct Scene {
                 }
             }
         }
-        CaptureTarget* fightTarget = species && mode != CompanionRules::Mode::COLLECT ? fightTargetFor(mode) : nullptr;
+        m_captureRest = (std::max)(0.0f, m_captureRest - dt);
+        const bool resting = mode == CompanionRules::Mode::CAPTURE && m_captureRest > 0.0f; // entre ataques sigue al jugador
+        CaptureTarget* fightTarget = species && mode != CompanionRules::Mode::COLLECT && !resting ? fightTargetFor(mode) : nullptr;
         if (fightTarget) best = distance2(fightTarget->body.position);
         const DirectX::XMFLOAT3* goal = nodeTarget ? &nodeTarget->body.position : groundTarget ? &groundTarget->body.position :
                                         fightTarget ? &fightTarget->body.position : nullptr;
@@ -699,7 +730,10 @@ struct Scene {
         if (!companion.update(dt, world, player.body.position, camera.yaw(), power, goal, approach)) return;
         if (nodeTarget) workNode(*nodeTarget, false);
         else if (groundTarget) collect(*groundTarget);
-        else if (fightTarget) strike(*fightTarget);
+        else if (fightTarget) {
+            strike(*fightTarget);
+            if (mode == CompanionRules::Mode::CAPTURE) m_captureRest = RandomUtil::range(CompanionRules::CAPTURE_REST_MIN, CompanionRules::CAPTURE_REST_MAX);
+        }
     }
 
     // En modo recolección el acompañante solo recoge un rato cada cierto tiempo; el resto sigue al jugador.
@@ -1152,6 +1186,7 @@ struct Scene {
     static constexpr float COLLECT_WAIT_MAX = 60.0f;
     static constexpr float HOLD_REPEAT = 0.45f;        // segundos entre golpes al mantener pulsado interactuar
     float m_collectClock = 12.0f;
+    float m_captureRest = 0.0f; // descanso del acompañante entre ataques en modo captura
     bool m_collecting = false;
     float m_holdClock = 0.0f;
     int m_shownUid = 0;        // pokémon (uid y especie) que está fuera o saliendo
@@ -1161,6 +1196,8 @@ struct Scene {
     int m_missingLevel = 0;    // nivel que exige ese recurso
     Interaction m_interaction; // lo que el jugador puede usar ahora mismo (cofre o recurso cercano)
     DirectX::XMFLOAT3 m_home = {};         // dónde reaparece el jugador al quedarse sin vida
+    int m_pool = -1;         // charca termal en la que está (-1 = ninguna)
+    float m_poolTime = 0.0f;   // segundos en esa charca
     bool m_concealed = false;              // el jugador está oculto entre matorrales: los pokémon no lo han detectado (sigilo)
     const CaptureTarget* m_weakSeen = nullptr;
     float m_weakAge = 0.0f;

@@ -40,6 +40,7 @@ struct GameStatus {
     const std::string* interactTarget = nullptr; // sobre qué ("Cofre común", "Árbol"...)
     const std::string* missingSkill = nullptr;   // habilidad que falta para trabajar el recurso cercano ("Talar"...)
     int missingLevel = 0;                        // nivel que exige ese recurso
+    float interactTime = -1.0f;                  // tiempo restante del aviso (1 = recién aparecido, 0 = se acaba); <0 = sin límite
     bool interactOnScreen = false;               // la ayuda de interacción va fija en la pantalla, no sobre el objeto
     DirectX::XMFLOAT3 interactPos = {};          // dónde se dibuja la ayuda de interacción (sobre lo que se usa)
     DirectX::XMFLOAT3 missingPos = {};           // y el aviso de lo que falta (sobre el recurso)
@@ -61,6 +62,9 @@ struct GameStatus {
 
     // Mundo vertical: temperatura, altura, aire, región y capa.
     float temperature = 20.0f;                   // °C donde está el jugador (baja con la altura)
+    bool burning = false;                        // ardiendo por la lava
+    int spring = 0;                              // aguas termales: 0 fuera, 1 curando, 2 pasado de tiempo (hace daño)
+    float springLeft = 0.0f;                     // segundos de curación que quedan en la charca
     float altitude = 0.0f;                       // m sobre el mar
     float health = 1.0f;                         // vida (0..1)
     float hurt = 0.0f;                           // 0..1: destello de dolor

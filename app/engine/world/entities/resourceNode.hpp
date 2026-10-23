@@ -6,7 +6,7 @@
 
 // Aspecto de cada tipo de nodo (por id de la base de datos). Es el único sitio donde se define su forma y color.
 namespace ResourceStyle {
-    enum class Shape { TREE, CONIFER, PALM, JUNGLE, ACACIA, ROCK, BUSH, FLOWER };
+    enum class Shape { TREE, CONIFER, PALM, JUNGLE, ACACIA, ROCK, BUSH, FLOWER, TULIP, SUNFLOWER, CORAL, KELP };
 
     struct Look {
         Shape shape;
@@ -28,10 +28,17 @@ namespace ResourceStyle {
             case 9:  return { Shape::TREE, { 0.86f, 0.84f, 0.78f }, { 0.52f, 0.72f, 0.22f }, false, 0.3f, 3.4f };   // abedul
             case 10: return { Shape::PALM, { 0.55f, 0.40f, 0.22f }, { 0.28f, 0.62f, 0.22f }, false, 0.3f, 3.8f };   // palmera
             case 11: return { Shape::TREE, { 0.30f, 0.20f, 0.16f }, { 0.98f, 0.68f, 0.80f }, false, 0.3f, 3.6f };   // cerezo en flor
-            case 12: return { Shape::FLOWER, { 0.28f, 0.58f, 0.24f }, { 0.96f, 0.45f, 0.72f }, true, 0.5f, 0.6f };  // flores silvestres (varios colores)
+            case 12: return { Shape::FLOWER, { 0.28f, 0.58f, 0.24f }, { 0.98f, 0.98f, 0.96f }, true, 0.25f, 0.55f };  // margarita (pétalos blancos)
             case 13: return { Shape::JUNGLE, { 0.30f, 0.22f, 0.14f }, { 0.08f, 0.40f, 0.12f }, false, 0.45f, 5.0f };  // árbol de jungla
             case 14: return { Shape::ACACIA, { 0.42f, 0.30f, 0.18f }, { 0.50f, 0.58f, 0.18f }, false, 0.3f, 4.2f };   // acacia
             case 15: return { Shape::BUSH, { 0.14f, 0.50f, 0.20f }, { 0.98f, 0.58f, 0.14f }, true, 0.6f, 1.0f };     // planta tropical
+            case 16: return { Shape::TULIP, { 0.28f, 0.58f, 0.24f }, { 0.92f, 0.24f, 0.36f }, true, 0.25f, 0.6f };  // tulipán
+            case 17: return { Shape::SUNFLOWER, { 0.30f, 0.56f, 0.22f }, { 0.99f, 0.82f, 0.14f }, true, 0.3f, 1.5f }; // girasol
+            case 18: return { Shape::FLOWER, { 0.28f, 0.58f, 0.24f }, { 0.90f, 0.16f, 0.12f }, true, 0.25f, 0.5f };  // amapola
+            case 19: return { Shape::ROCK, { 0.10f, 0.09f, 0.13f }, { 0.85f, 0.25f, 0.10f }, true, 0.85f, 1.1f };    // obsidiana (vetas de brasa)
+            case 20: return { Shape::CORAL, { 0.95f, 0.45f, 0.50f }, { 0.98f, 0.70f, 0.30f }, false, 0.55f, 1.0f };  // coral
+            case 21: return { Shape::KELP, { 0.15f, 0.45f, 0.22f }, { 0.30f, 0.65f, 0.28f }, false, 0.3f, 2.4f };    // alga
+            case 22: return { Shape::ROCK, { 0.62f, 0.82f, 0.92f }, { 0.85f, 0.97f, 1.00f }, true, 0.85f, 1.1f };    // cristal de hielo
             case 4:  return { Shape::ROCK, { 0.42f, 0.42f, 0.45f }, { 0.07f, 0.07f, 0.08f }, true,  0.85f, 1.1f }; // filón de carbón
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca
         }

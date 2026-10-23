@@ -33,6 +33,17 @@ namespace HabitatStyle {
         if (name == "Isla del cielo") return { 0.96f, 0.97f, 1.0f };      // suelo de nube
         if (name == "Tierra del cielo") return { 0.52f, 0.78f, 0.38f };   // islotes de tierra
         if (name == "Mar de nubes") return { 0.78f, 0.86f, 1.0f };
+        if (name == "Volcán") return { 0.20f, 0.17f, 0.17f };              // roca negra
+        if (name == "Lava") return { 1.00f, 0.45f, 0.08f };
+        if (name == "Aguas termales") return { 0.72f, 0.70f, 0.60f };
+        if (name == "Géiser") return { 0.78f, 0.74f, 0.62f };               // costra de minerales
+        if (name == "Arrecife de coral") return { 0.88f, 0.60f, 0.58f };
+        if (name == "Campo de algas") return { 0.22f, 0.50f, 0.34f };
+        if (name == "Volcán submarino") return { 0.18f, 0.20f, 0.26f };
+        if (name == "Fumarolas") return { 0.55f, 0.42f, 0.28f };
+        if (name == "Glaciar") return { 0.66f, 0.84f, 0.96f };
+        if (name == "Gruta volcánica") return { 0.20f, 0.14f, 0.14f };
+        if (name == "Gruta de hielo") return { 0.62f, 0.82f, 0.95f };
         uint32_t hash = 2166136261u;
         for (const char c : name) hash = (hash ^ static_cast<unsigned char>(c)) * 16777619u;
         return { 0.3f + 0.5f * static_cast<float>(hash & 0xFF) / 255.0f, 0.3f + 0.5f * static_cast<float>((hash >> 8) & 0xFF) / 255.0f,

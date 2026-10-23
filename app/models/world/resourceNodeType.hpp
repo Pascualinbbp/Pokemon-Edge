@@ -16,4 +16,5 @@ struct ResourceNodeType {
     bool plant() const { return growSeconds > 0; }
     int minYield = 1;
     int maxYield = 1;
+    bool aquatic = false; // crece bajo el agua (coral, algas): solo se coloca en el fondo del agua
 };

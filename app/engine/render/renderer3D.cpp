@@ -241,11 +241,11 @@ namespace {
 
         // --- Agua: olas, marea, corriente, transparencia según la profundidad, espuma y reflejo del cielo ---
         // Por vértice: pos = superficie base, nrm = (profundidad, corriente x, corriente z), col.a = tipo
-        // (0 mar, 1 río, 2 lago, 3 charca de pantano, 4 cascada, 5 mar abierto hasta el horizonte, 6 agua de nube).
+        // (0 mar, 1 río, 2 lago, 3 charca de pantano, 4 cascada, 5 mar abierto hasta el horizonte, 6 agua de nube, 7 lava, 8 agua termal).
         struct WATER_IN { float4 pos : SV_POSITION; float3 wpos : TEXCOORD0; float3 info : TEXCOORD1; float kind : TEXCOORD2; };
 
         float WaveHeight(float2 p, float kind, float t) {
-            float amp = kind < 0.5f ? 0.22f : kind < 1.5f ? 0.05f : kind < 2.5f ? 0.09f : kind < 3.5f ? 0.02f : 0.10f;
+            float amp = kind > 7.5f ? 0.02f : kind < 0.5f ? 0.22f : kind < 1.5f ? 0.05f : kind < 2.5f ? 0.09f : kind < 3.5f ? 0.02f : 0.10f;
             float h = sin(dot(p, float2(0.55f, 0.35f)) + t * 1.3f) * 0.6f
                     + sin(dot(p, float2(-0.31f, 0.72f)) + t * 1.7f) * 0.3f
                     + sin(dot(p, float2(1.10f, -0.40f)) + t * 2.3f) * 0.1f;
@@ -268,10 +268,10 @@ namespace {
         float4 PS_WATER(WATER_IN input) : SV_Target {
             float k = floor(input.kind + 0.5f);
             float2 pxz = input.wpos.xz;
-            bool open = k > 4.5f && k < 5.5f, cloud = k > 5.5f;
+            bool open = k > 4.5f && k < 5.5f, cloud = k > 5.5f && k < 6.5f, lava = k > 6.5f && k < 7.5f, hot = k > 7.5f;
             if (open) clip(length(pxz) - (Env.w - 8.0f)); // el mar abierto solo fuera del archipiélago
             float t = SkyParams.w;
-            float kk = cloud ? 3.0f : open ? 0.0f : k;
+            float kk = (cloud || lava) ? 3.0f : open ? 0.0f : k;
 
             float e = 0.35f;
             float h0 = WaveHeight(pxz, kk, t);
@@ -282,9 +282,18 @@ namespace {
             float depth = input.info.x;
             float2 flow = input.info.yz;
 
+            if (lava) { // roca fundida: costra oscura que se agrieta sobre brasa viva, siempre brillante
+                float2 q = pxz * 0.35f + flow * t * 0.25f;
+                float crack = 0.5f + 0.5f * sin(q.x * 2.3f + sin(q.y * 1.7f + t * 0.6f) * 2.0f) * sin(q.y * 2.1f + sin(q.x * 1.3f - t * 0.5f) * 2.0f);
+                float3 ember = lerp(float3(0.45f, 0.06f, 0.02f), float3(1.0f, 0.62f, 0.12f), crack);
+                float3 crust = float3(0.10f, 0.05f, 0.04f);
+                float3 lc = lerp(ember, crust, smoothstep(0.65f, 0.95f, 1.0f - crack));
+                return float4(ApplyEnv(lc * 0.35f, input.wpos) + lc * 0.9f, 1.0f);
+            }
             float3 shallow, deep;
             float full;
-            if (cloud)                { shallow = float3(0.93f, 0.96f, 1.0f); deep = float3(0.60f, 0.73f, 0.95f); full = 2.0f; }
+            if (hot)                  { shallow = float3(0.58f, 0.90f, 0.86f); deep = float3(0.16f, 0.60f, 0.64f); full = 2.0f; }
+            else if (cloud)           { shallow = float3(0.93f, 0.96f, 1.0f); deep = float3(0.60f, 0.73f, 0.95f); full = 2.0f; }
             else if (k < 0.5f || open) { shallow = float3(0.30f, 0.80f, 0.84f); deep = float3(0.03f, 0.18f, 0.42f); full = 7.0f; }
             else if (k < 1.5f)        { shallow = float3(0.38f, 0.74f, 0.74f); deep = float3(0.10f, 0.36f, 0.52f); full = 4.5f; }
             else if (k < 2.5f)        { shallow = float3(0.30f, 0.68f, 0.74f); deep = float3(0.06f, 0.28f, 0.46f); full = 8.0f; }
@@ -415,6 +424,15 @@ std::vector<Renderer3D::Chunk> Renderer3D::createTerrain(ID3D11Device* device, c
         XMFLOAT3 color;
         if (height < 0.0f) { // fondo: arena en lo somero, fango en lo hondo
             color = mix(SAND, MUD, -height / 10.0f);
+            habitats.weights(x, z, weights);
+            float seabed = 0.0f; // arrecife, algas y volcán submarino tiñen el fondo
+            XMFLOAT3 tint = { 0.0f, 0.0f, 0.0f };
+            for (size_t i = 0; i < weights.size() && i < habitatColors.size(); ++i) {
+                if (!data.habitats[i].seabed() && data.habitats[i].placement != HabitatPlacement::VENT) continue;
+                seabed += weights[i];
+                tint = { tint.x + weights[i] * habitatColors[i].x, tint.y + weights[i] * habitatColors[i].y, tint.z + weights[i] * habitatColors[i].z };
+            }
+            if (seabed > 0.01f) color = mix(color, { tint.x / seabed, tint.y / seabed, tint.z / seabed }, seabed * 0.85f);
         } else {
             color = habitatColors.empty() ? DEFAULT_GROUND : XMFLOAT3{ 0.0f, 0.0f, 0.0f };
             habitats.weights(x, z, weights);
@@ -425,10 +443,11 @@ std::vector<Renderer3D::Chunk> Renderer3D::createTerrain(ID3D11Device* device, c
             }
             if (!habitats.regionAt(x, z)) {
                 color = mix(color, SAND, smooth(0.5f, 0.0f, height) * 0.6f);           // la tierra pegada al mar es arenosa
-                const float rock = smooth(0.55f, 1.0f, slope);                          // lo empinado es roca
+                const float feature = habitats.featureWeight(x, z);                     // volcanes y glaciares conservan su color
+                const float rock = smooth(0.55f, 1.0f, slope) * (1.0f - feature);      // lo empinado es roca
                 color = mix(color, ROCK, rock);
                 const float line = HabitatMap::SNOW_LINE + 2.5f * std::sin(x * 0.11f) * std::cos(z * 0.09f); // línea de nieve irregular
-                const float snow = smooth(line - 2.0f, line + 2.5f, height) * (1.0f - 0.65f * rock);
+                const float snow = smooth(line - 2.0f, line + 2.5f, height) * (1.0f - 0.65f * rock) * (1.0f - feature);
                 color = mix(color, SNOW, snow);
                 color = mix(color, ICE, smooth(line + 10.0f, line + 22.0f, height) * (0.35f + 0.65f * rock)); // y hielo más arriba
             }
@@ -465,6 +484,8 @@ std::vector<Renderer3D::Chunk> Renderer3D::createWater(ID3D11Device* device, con
             case HabitatMap::POND:                                return 3.0f;
             case HabitatMap::CASCADE:                             return 4.0f;
             case HabitatMap::CLOUD:                               return 6.0f;
+            case HabitatMap::LAVA:                                return 7.0f;
+            case HabitatMap::HOT:                                 return 8.0f;
             default:                                              return 0.0f;
         }
     };
@@ -531,14 +552,14 @@ std::vector<Renderer3D::Chunk> Renderer3D::createCaveWater(ID3D11Device* device,
 // Base de nube de cada isla del cielo: una sola malla ligera por isla (un anillo abultado que sobresale del borde del mar de nubes y se
 // recoge hacia abajo hasta una punta) en vez de la roca o el abismo; la isla parece apoyada en una nube. Colores y lóbulos fijos.
 std::vector<Renderer3D::Chunk> Renderer3D::createSkyBase(ID3D11Device* device, const HabitatMap& habitats) {
-    constexpr int SEGMENTS = 40, RINGS = 6;              // anillos desde el borde (0) hasta la punta
+    constexpr int SEGMENTS = 72, RINGS = 8;              // anillos desde el borde (0) hasta la punta
     constexpr float LIP = 4.0f;                          // cuánto sobresale la nube del borde del mar
     constexpr XMFLOAT3 TOP = { 0.98f, 0.98f, 1.0f }, BOTTOM = { 0.70f, 0.76f, 0.88f };
     std::vector<Chunk> chunks;
     for (const HabitatMap::Region& region : habitats.regions()) {
         if (region.kind != HabitatPlacement::SKY) continue;
         const float level = region.floorY - 0.35f;      // nivel del mar de nubes
-        const float depth = (std::clamp)(region.seaRadius * 0.9f, 26.0f, 80.0f);
+        const float depth = region.thickness; // grosor del lente de nube: pequeño frente a su anchura
         const XMFLOAT3 core = { region.x, level - depth * 0.5f, region.z };
         std::vector<Vertex> vertices;
         vertices.reserve(SEGMENTS * (RINGS + 1) + 1);
@@ -549,11 +570,11 @@ std::vector<Renderer3D::Chunk> Renderer3D::createSkyBase(ID3D11Device* device, c
                 const float a = static_cast<float>(i) / SEGMENTS * XM_2PI;
                 const float ca = std::cos(a), sa = std::sin(a);
                 const float edge = region.seaRadius * HabitatMap::skyShape(region, ca, sa);
-                const float lump = 1.0f + 0.10f * std::sin(3.0f * a + region.lobe[0] + 2.0f * k) + 0.06f * std::sin(7.0f * a + region.lobe[1] + 1.3f * k);
+                const float lump = 1.0f + 0.08f * std::sin(3.0f * a + region.lobe[0] + 2.0f * k) + 0.05f * std::sin(7.0f * a + region.lobe[1] + 1.3f * k) + 0.04f * std::sin(13.0f * a + region.lobe[2] + 0.7f * k);
                 float radius, y;
                 if (k == 0) { radius = edge - 0.5f; y = level - 0.4f; }                       // bajo la superficie del mar
                 else if (k == 1) { radius = edge + LIP * lump; y = level - 1.6f; }            // el borde abultado
-                else { radius = (edge + LIP) * (1.0f - 0.88f * std::pow(t, 1.15f)) * lump; y = level - 1.6f - (depth - 1.6f) * std::pow(t, 0.8f); }
+                else { const float s = t * 1.5707963f; radius = (edge + LIP) * std::cos(s) * lump; y = level - 1.6f - (depth - 1.6f) * std::sin(s); } // el vientre del lente: elipse
                 const float shade = 0.94f + 0.06f * std::sin(5.0f * a + 1.7f * k);
                 vertices.push_back({ { region.x + ca * radius, y, region.z + sa * radius }, { ca, 0.0f, sa }, { tone.x * shade, tone.y * shade, tone.z * shade, 1.0f } });
             }
@@ -957,6 +978,7 @@ void Renderer3D::collect(const Scene& scene) {
     const float time = scene.dayCycle.lighting().time;
     m_clock = std::fmod(std::chrono::duration<float>(std::chrono::steady_clock::now() - kStart).count(), 3600.0f);
     addSky(scene, time);
+    addGeysers(scene, time);
     addUnderground(scene);
 
     for (const CaptureTarget* wild : scene.wild.loaded()) {
@@ -1191,6 +1213,31 @@ void Renderer3D::addSky(const Scene& scene, float time) {
     }
 }
 
+// Géiseres: el vapor sube siempre de la charca; al erupcionar, un chorro de bloques de agua blanca sube hasta su altura y cae.
+void Renderer3D::addGeysers(const Scene& scene, float time) {
+    const XMFLOAT3& p = scene.player.body.position;
+    for (const Physics::World::Geyser& geyser : scene.world.geysers) {
+        const float dx = geyser.x - p.x, dz = geyser.z - p.z;
+        if (dx * dx + dz * dz > 220.0f * 220.0f) continue;
+        const float base = (std::max)(scene.world.waterLevel(geyser.x, geyser.z), scene.world.groundHeight(geyser.x, geyser.z));
+        for (int i = 0; i < 5; ++i) { // vapor
+            const float rise = std::fmod(time * 0.8f + i * 0.2f, 1.0f), size = 0.5f + 1.2f * rise;
+            add(m_cube, XMMatrixScaling(size, size, size) * XMMatrixRotationY(time + i) * XMMatrixTranslation(geyser.x + std::sin(i * 2.4f) * 0.5f, base + 0.4f + rise * 4.0f, geyser.z + std::cos(i * 2.4f) * 0.5f),
+                { 0.92f, 0.94f, 0.96f, 1.0f }, false);
+        }
+        const float level = scene.world.eruption(geyser);
+        if (level <= 0.0f) continue;
+        const float top = geyser.height * level;
+        const int count = static_cast<int>(top / 0.9f);
+        for (int i = 0; i < count; ++i) {
+            const float t = static_cast<float>(i) / (std::max)(count, 1), a = time * 9.0f + i * 1.9f, r = geyser.radius * 0.35f * (1.0f - 0.4f * t) * std::fabs(std::sin(i * 2.7f));
+            const float s = 1.1f - 0.5f * t;
+            add(m_cube, XMMatrixScaling(s, 0.9f, s) * XMMatrixRotationY(a) * XMMatrixTranslation(geyser.x + std::cos(a) * r, base + t * top, geyser.z + std::sin(a) * r),
+                { 0.85f, 0.95f, 1.0f, 0.25f }, false);
+        }
+    }
+}
+
 // Pokémon (salvaje o compañero): cubo del color de su especie con un morro amarillo que marca hacia dónde mira.
 void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, int speciesId, bool shiny) {
     const XMFLOAT3 base = PokemonStyle::color(speciesId);
@@ -1271,21 +1318,60 @@ void Renderer3D::addNode(const ResourceNode& node) {
         return;
     }
 
-    if (look.shape == Shape::FLOWER) { // un manojo de flores de varios colores: tallos, hojas y pétalos que se abren al crecer
-        static const XMFLOAT3 PALETTE[] = { { 0.95f, 0.30f, 0.50f }, { 0.99f, 0.85f, 0.22f }, { 0.58f, 0.45f, 0.96f }, { 0.97f, 0.97f, 0.97f }, { 0.99f, 0.55f, 0.18f }, { 0.35f, 0.62f, 0.98f } };
-        static const float AT[][2] = { { 0.0f, 0.0f }, { 0.45f, 0.2f }, { -0.4f, 0.3f }, { 0.2f, -0.45f }, { -0.3f, -0.35f }, { 0.55f, -0.3f }, { -0.55f, -0.05f }, { 0.05f, 0.5f } };
-        part({ 1.1f, 0.08f, 1.1f }, 0.4f, { 0.0f, 0.04f, 0.0f }, look.body, 0.0f);
+    if (look.shape == Shape::FLOWER || look.shape == Shape::TULIP || look.shape == Shape::SUNFLOWER) { // una sola flor: tallo, hojas y cabeza que se abre al crecer
+        const float k = std::clamp(0.35f + 0.65f * g, 0.0f, 1.0f);
+        const float h = look.height * k * (look.shape == Shape::SUNFLOWER ? 0.9f : 0.75f);
         const float bloom = std::clamp((g - 0.25f) / 0.75f, 0.0f, 1.0f);
-        const int seed = static_cast<int>(node.yaw() * 37.0f);
-        for (int i = 0; i < 8; ++i) {
-            const float h = (0.3f + 0.09f * ((i * 5 + seed) % 4)) * (0.4f + 0.6f * std::clamp(g * 1.3f, 0.0f, 1.0f));
-            const XMFLOAT3& c = PALETTE[(seed + i * 3 + (i >> 1)) % 6];
-            part({ 0.04f, h, 0.04f }, 0.0f, { AT[i][0], h * 0.5f, AT[i][1] }, look.body, 0.0f);
-            if (bloom <= 0.0f) continue;
-            const float s = 0.17f * bloom;
-            part({ s, 0.03f, s * 0.45f }, 0.0f, { AT[i][0], h + 0.02f, AT[i][1] }, c, 0.15f);
-            part({ s * 0.45f, 0.03f, s }, 0.0f, { AT[i][0], h + 0.025f, AT[i][1] }, c, 0.15f);
-            part({ s * 0.38f, 0.05f, s * 0.38f }, 0.0f, { AT[i][0], h + 0.04f, AT[i][1] }, { 0.99f, 0.88f, 0.25f }, 0.2f);
+        const float stem = look.shape == Shape::SUNFLOWER ? 0.09f : 0.045f;
+        part({ stem, h, stem }, 0.0f, { 0.0f, h * 0.5f, 0.0f }, look.body, 0.0f);
+        part({ stem * 4.0f, 0.03f, stem * 1.6f }, 0.5f, { 0.07f, h * 0.35f, 0.0f }, look.body, 0.0f);   // hojas
+        part({ stem * 1.6f, 0.03f, stem * 4.0f }, 0.2f, { -0.06f, h * 0.5f, 0.05f }, look.body, 0.0f);
+        if (bloom <= 0.0f) return;
+        if (look.shape == Shape::TULIP) { // cáliz cerrado de tres piezas
+            part({ 0.13f * bloom, 0.12f * bloom, 0.13f * bloom }, 0.0f, { 0.0f, h + 0.04f, 0.0f }, look.accent, 0.15f);
+            part({ 0.17f * bloom, 0.10f * bloom, 0.17f * bloom }, 0.785f, { 0.0f, h + 0.12f, 0.0f }, look.accent, 0.15f);
+            part({ 0.08f * bloom, 0.06f * bloom, 0.08f * bloom }, 0.0f, { 0.0f, h + 0.2f, 0.0f }, { look.accent.x * 0.8f, look.accent.y * 0.8f, look.accent.z * 0.8f }, 0.1f);
+        } else if (look.shape == Shape::SUNFLOWER) { // plato oscuro rodeado de pétalos amarillos, mirando de lado
+            const float r = 0.5f * bloom;
+            part({ r * 0.55f, r * 0.55f, 0.07f }, 0.0f, { 0.0f, h, 0.0f }, { 0.28f, 0.17f, 0.07f }, 0.0f);
+            part({ r * 1.3f, r * 0.22f, 0.04f }, 0.0f, { 0.0f, h, -0.03f }, look.accent, 0.2f);
+            part({ r * 0.22f, r * 1.3f, 0.04f }, 0.0f, { 0.0f, h, -0.03f }, look.accent, 0.2f);
+            part({ r * 1.0f, r * 0.2f, 0.04f }, 0.0f, { 0.0f, h, -0.035f }, look.accent, 0.2f);
+            part({ r * 0.2f, r * 1.0f, 0.04f }, 0.785f, { 0.0f, h, -0.035f }, look.accent, 0.2f);
+        } else { // margarita / amapola: pétalos en cruz y centro amarillo
+            const float s = 0.30f * bloom;
+            part({ s, 0.03f, s * 0.4f }, 0.0f, { 0.0f, h + 0.02f, 0.0f }, look.accent, 0.15f);
+            part({ s * 0.4f, 0.03f, s }, 0.0f, { 0.0f, h + 0.025f, 0.0f }, look.accent, 0.15f);
+            part({ s * 0.8f, 0.03f, s * 0.35f }, 0.785f, { 0.0f, h + 0.022f, 0.0f }, look.accent, 0.15f);
+            part({ s * 0.35f, 0.03f, s * 0.8f }, 0.785f, { 0.0f, h + 0.028f, 0.0f }, look.accent, 0.15f);
+            part({ s * 0.38f, 0.05f, s * 0.38f }, 0.0f, { 0.0f, h + 0.045f, 0.0f }, look.shape == Shape::FLOWER && look.accent.x > 0.9f && look.accent.y > 0.9f ? XMFLOAT3{ 0.99f, 0.85f, 0.22f } : XMFLOAT3{ 0.12f, 0.08f, 0.06f }, 0.2f);
+        }
+        return;
+    }
+
+    if (look.shape == Shape::CORAL) { // ramas de coral de colores sobre una base
+        const float k = std::clamp(0.3f + 0.7f * g, 0.0f, 1.0f);
+        part({ 0.9f * k, 0.25f * k, 0.9f * k }, 0.3f, { 0.0f, 0.12f * k, 0.0f }, look.body, 0.0f);
+        static const float AT[][3] = { { 0.0f, 0.0f, 1.0f }, { 0.3f, 0.2f, 0.7f }, { -0.3f, 0.15f, 0.8f }, { 0.1f, -0.3f, 0.6f }, { -0.25f, -0.2f, 0.5f } };
+        for (int i = 0; i < 5; ++i) {
+            const float h = 0.75f * AT[i][2] * k;
+            const XMFLOAT3& c = (i % 2) ? look.accent : look.body;
+            part({ 0.16f, h, 0.16f }, 0.0f, { AT[i][0], 0.2f + h * 0.5f, AT[i][1] }, c, 0.1f);
+            part({ 0.11f, h * 0.45f, 0.11f }, 0.7f, { AT[i][0] + 0.1f, 0.2f + h * 0.85f, AT[i][1] }, c, 0.1f);
+        }
+        return;
+    }
+
+    if (look.shape == Shape::KELP) { // frondas largas que ondulan con la corriente
+        const float k = std::clamp(0.3f + 0.7f * g, 0.0f, 1.0f);
+        static const float AT[][2] = { { 0.0f, 0.0f }, { 0.3f, 0.15f }, { -0.25f, 0.2f }, { 0.1f, -0.3f } };
+        for (int i = 0; i < 4; ++i) {
+            const float h = look.height * k * (0.7f + 0.1f * i);
+            constexpr int SEGMENTS = 4;
+            for (int j = 0; j < SEGMENTS; ++j) {
+                const float t = static_cast<float>(j) / SEGMENTS, sway = 0.18f * t * std::sin(m_clock * 1.3f + i * 1.7f + t * 2.0f);
+                part({ 0.09f, h / SEGMENTS, 0.05f }, 0.0f, { AT[i][0] + sway, h * (t + 0.5f / SEGMENTS), AT[i][1] }, (j % 2) ? look.accent : look.body, 0.0f);
+            }
         }
         return;
     }

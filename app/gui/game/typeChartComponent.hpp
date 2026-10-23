@@ -18,7 +18,7 @@ namespace TypeChartComponent {
         inline constexpr ImU32 SUPER = IM_COL32(70, 180, 95, 255);
         inline constexpr ImU32 WEAK = IM_COL32(225, 140, 50, 255);
         inline constexpr ImU32 IMMUNE = IM_COL32(35, 35, 45, 255);
-        inline constexpr ImU32 NORMAL = IM_COL32(255, 255, 255, 14);
+        inline constexpr ImU32 NORMAL = IM_COL32(255, 255, 255, 255);
 
         // Primeras letras del nombre (en UTF-8: por caracteres, no por bytes), con la inicial en mayúscula.
         inline std::string shortName(const std::string& name, int letters) {

@@ -64,7 +64,7 @@ namespace HudComponent {
             if (status.interactVerb && status.interactTarget && placed) {
                 char text[96];
                 std::snprintf(text, sizeof(text), status.interactTarget->empty() ? "%s" : "%s %s", status.interactVerb, status.interactTarget->c_str());
-                GuiPopup::at(dl, at, GuiPrompts::Action::INTERACT, text, device);
+                GuiPopup::at(dl, at, GuiPrompts::Action::INTERACT, text, device, true, status.interactTime);
             }
             if (status.missingSkill && project(status, status.missingPos, at)) {
                 char text[112];
@@ -91,6 +91,18 @@ namespace HudComponent {
             const ImU32 tone = status.temperature <= 0.0f ? IM_COL32(170, 220, 255, 255) : status.temperature < 10.0f ? IM_COL32(200, 230, 255, 235) : IM_COL32(255, 255, 255, 220);
             dl->AddText(ImVec2(at.x, y), tone, text);
             y += ImGui::GetFontSize() + 4.0f;
+            if (status.burning) {
+                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 120, 40, 255), "¡Quemado!");
+                y += ImGui::GetFontSize() + 4.0f;
+            }
+            if (status.spring == 1) {
+                std::snprintf(text, sizeof(text), "Aguas termales: %.0f s", status.springLeft);
+                dl->AddText(ImVec2(at.x, y), IM_COL32(120, 235, 215, 255), text);
+                y += ImGui::GetFontSize() + 4.0f;
+            } else if (status.spring == 2) {
+                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 110, 90, 255), "¡Demasiado tiempo en el agua!");
+                y += ImGui::GetFontSize() + 4.0f;
+            }
             if (status.regionName) {
                 dl->AddText(ImVec2(at.x, y), IM_COL32(255, 215, 90, 235), status.regionName->c_str());
                 y += ImGui::GetFontSize() + 4.0f;

@@ -9,6 +9,13 @@ namespace HealthRules {
     inline constexpr float SAFE_FALL = 4.0f;           // m de caída libre que no hacen daño
     inline constexpr float FALL_DAMAGE_PER_M = 5.0f;   // puntos de vida por cada metro de caída por encima del seguro (muerte a unos 24 m)
     inline constexpr float DROWN_PER_SECOND = 14.0f;   // sin aire bajo el agua
+    inline constexpr float LAVA_PER_SECOND = 45.0f;    // dentro de lava
+    inline constexpr float BURN_PER_SECOND = 7.0f;     // quemado: daño mientras dura la quemadura
+    inline constexpr float BURN_DURATION = 9.0f;       // segundos que arde tras salir de la lava (el agua o deslizarse en el suelo la apagan)
+    inline constexpr float LAVA_HEAT = 70.0f;          // °C que suma estar pegado a la lava
+    inline constexpr float SPRING_HEAL_PER_SECOND = 6.0f;   // aguas termales: curación mientras el temporizador no ha vencido
+    inline constexpr float SPRING_SAFE_TIME = 30.0f;        // segundos en una misma charca antes de que el agua haga daño
+    inline constexpr float SPRING_HURT_PER_SECOND = 5.0f;   // daño por pasarse de tiempo en la charca
     inline constexpr float REGEN_DELAY = 6.0f;         // segundos sin daño hasta empezar a curarse
     inline constexpr float REGEN_PER_SECOND = 2.5f;
     inline constexpr float HURT_FLASH = 0.6f;          // segundos que dura el destello rojo de la pantalla

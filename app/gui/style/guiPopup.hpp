@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <vector>
 #include "imgui.h"
 #include "guiPrompts.hpp"
@@ -22,9 +23,16 @@ namespace GuiPopup {
     inline float width(const char* label) { return PAD_X * 2.0f + 24.0f + 8.0f + ImGui::CalcTextSize(label).x + 4.0f; }
 
     // Una pastilla con su botón y su texto, con la esquina superior izquierda en 'pos'. Devuelve su ancho.
-    inline float pill(ImDrawList* dl, ImVec2 pos, GuiPrompts::Action action, const char* label, InputDevice device, bool enabled = true) {
+    inline float pill(ImDrawList* dl, ImVec2 pos, GuiPrompts::Action action, const char* label, InputDevice device, bool enabled = true, float remaining = -1.0f) {
         const float w = width(label), h = 24.0f + PAD_Y * 2.0f;
         dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), IM_COL32(12, 12, 18, enabled ? 190 : 150), ROUNDING);
+        if (remaining >= 0.0f) { // fondo de color que se vacía con el tiempo (verde → rojo): al agotarse ya no se puede
+            const float f = (std::min)(remaining, 1.0f);
+            const ImU32 tone = IM_COL32(static_cast<int>(60 + 195 * (1.0f - f)), static_cast<int>(200 * f + 40), 60, 210);
+            dl->PushClipRect(pos, ImVec2(pos.x + w * f, pos.y + h), true);
+            dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), tone, ROUNDING);
+            dl->PopClipRect();
+        }
         dl->AddRect(pos, ImVec2(pos.x + w, pos.y + h), IM_COL32(255, 255, 255, enabled ? 70 : 35), ROUNDING, 0, 1.5f);
         GuiPrompts::draw(dl, ImVec2(pos.x + PAD_X, pos.y + PAD_Y), action, label, device);
         if (!enabled) dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), IM_COL32(0, 0, 0, 110), ROUNDING);
@@ -32,8 +40,8 @@ namespace GuiPopup {
     }
 
     // Una pastilla centrada en 'center' (por ejemplo sobre un objeto del mundo).
-    inline void at(ImDrawList* dl, ImVec2 center, GuiPrompts::Action action, const char* label, InputDevice device, bool enabled = true) {
-        pill(dl, ImVec2(center.x - width(label) * 0.5f, center.y - (24.0f + PAD_Y * 2.0f) * 0.5f), action, label, device, enabled);
+    inline void at(ImDrawList* dl, ImVec2 center, GuiPrompts::Action action, const char* label, InputDevice device, bool enabled = true, float remaining = -1.0f) {
+        pill(dl, ImVec2(center.x - width(label) * 0.5f, center.y - (24.0f + PAD_Y * 2.0f) * 0.5f), action, label, device, enabled, remaining);
     }
 
     // Varias pastillas lado a lado, centradas en x y con su borde superior en y (Capturar | Liberar).

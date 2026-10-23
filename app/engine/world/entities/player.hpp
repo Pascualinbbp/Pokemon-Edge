@@ -33,7 +33,7 @@ class Player {
     static constexpr float STREAM_LAUNCH  = 5.0f;  // impulso horizontal máximo al salir de la corriente
     static constexpr float SURFACE_RISE   = 2.5f;  // sin aire, el cuerpo sube solo a esa velocidad
     static constexpr float DIVE_MIN_DEPTH = 1.3f;  // hace falta al menos esta profundidad para sumergirse
-    static constexpr float CLIMB_SPEED    = 2.0f;  // trepar una ladera muy empinada
+    static constexpr float CLIMB_SPEED    = 3.0f;  // trepar una ladera muy empinada
     static constexpr float OXYGEN_REFILL  = 6.0f;  // el aire se recupera esta vez más rápido de lo que se gasta
 
     Physics::Body body;
@@ -64,11 +64,12 @@ class Player {
         tickAction(dt);
 
         updateMoveBasis(input, cameraYaw);
-        float dirX = 0.0f, dirZ = 0.0f;
-        const float amount = direction(input.moveX, input.moveY, m_moveYaw, dirX, dirZ);
-
         const bool streaming = updateStream(dt, world);
+        m_grip = world.gripAt(body.position.x, body.position.z, body.feet());
+        if (!streaming) liftByGeyser(dt, world);
         const bool inWater = !streaming && world.waterDepth(body.position.x, body.position.z, body.feet()) > Physics::World::SWIM_DEPTH;
+        float dirX = 0.0f, dirZ = 0.0f;
+        const float amount = direction(input.moveX, input.moveY, inWater ? cameraYaw : m_moveYaw, dirX, dirZ); // nadando se va hacia donde mira la cámara, y gira con ella
         if (streaming) {
             // la corriente lo lleva: no hay entrada que valga
         } else if (inWater) {
@@ -85,7 +86,10 @@ class Player {
 
         trackFall(streaming);
         if (!streaming) world.step(body, dt);
-        if (!streaming && !inWater && !wasGrounded && body.onGround) { m_impact = m_fallSpeed; land(input); }
+        if (!streaming && !inWater && !wasGrounded && body.onGround) { // al tocar el suelo: el agua poco profunda también amortigua
+            m_impact = HealthRules::impactInWater(m_fallSpeed, world.waterDepth(body.position.x, body.position.z, body.feet()));
+            land(input);
+        }
         if (inWater && m_fallSpeed > 0.0f) { // cae al agua: la profundidad amortigua la caída
             m_impact = HealthRules::impactInWater(m_fallSpeed, world.waterDepth(body.position.x, body.position.z, body.feet()));
         }
@@ -103,6 +107,7 @@ class Player {
     float takeImpact() { const float v = m_impact; m_impact = 0.0f; return v; }
     // Sin aire con la cabeza bajo el agua (se ahoga).
     bool drowning() const { return m_drowning; }
+    bool sliding() const { return m_sliding; }
     // Hacia dónde mira el personaje: hacia donde se mueve; al apuntar, trabajar o pescar, hacia donde mira la cámara.
     float facing() const { return m_facing; }
 
@@ -274,6 +279,7 @@ class Player {
     // Trepa las paredes casi verticales (desde CLIMB_SLOPE) en vez de andarlas: más lento y sin correr. Se puede saltar en cualquier momento.
     // Solo se sube trepando: bajar una ladera, aunque sea empinada, se anda (y bajo tierra se mira el suelo de la galería, no el terreno).
     void updateClimb(const Physics::World& world, bool grounded, float dirX, float dirZ, float amount) {
+        const bool was = m_climbing;
         m_climbing = false;
         m_climbSlope = 0.0f;
         if (!grounded || m_sliding) return;
@@ -284,15 +290,16 @@ class Player {
         if (world.inCave(px, pz)) return;
         float gx, gz;
         world.terrain.gradient(px, pz, gx, gz);
-        const float along = gx * dirX + gz * dirZ; // subida por metro en la dirección de avance
-        const float steepHere = std::sqrt(gx * gx + gz * gz);
-        // Hace falta una pared de verdad: empinada aquí y también un poco más allá (un escalón o un borde suelto no cuentan).
+        const float steep = std::sqrt(gx * gx + gz * gz);
+        const float along = gx * dirX + gz * dirZ;
         float fx, fz;
         world.terrain.gradient(px + dirX * CLIMB_SUSTAIN, pz + dirZ * CLIMB_SUSTAIN, fx, fz);
-        const bool wall = steepHere > Physics::World::CLIMB_SLOPE && std::sqrt(fx * fx + fz * fz) > Physics::World::CLIMB_SLOPE * 0.7f;
+        const float limit = Physics::World::CLIMB_SLOPE * (was ? CLIMB_KEEP : 1.0f); // histéresis: no parpadea en el borde
+        const bool wall = steep > limit && std::sqrt(fx * fx + fz * fz) > limit * 0.7f;
         m_climbSlope = amount > 0.0f ? along : 0.0f;
-        m_climbing = wall && (amount <= 0.0f || along > Physics::World::CLIMB_SLOPE * 0.8f);
+        m_climbing = wall && (amount <= 0.0f || std::fabs(along) > steep * 0.35f); // de frente a la pared (subiendo o bajando)
         if (!m_climbing) return;
+        m_climbSteep = steep;
         m_sprinting = false;
         m_crouching = false;
     }
@@ -394,7 +401,7 @@ class Player {
             dirZ = m_slideDirZ;
             speed = slideSpeed();
         } else if (grounded) {
-            if (m_climbing) speed = CLIMB_SPEED * amount;
+            if (m_climbing) speed = CLIMB_SPEED * amount / std::sqrt(1.0f + m_climbSteep * m_climbSteep); // velocidad constante sobre la pared
             else if (amount > 0.0f) speed = groundSpeed() * amount;
         } else {
             // En el aire se conserva el impulso (por ejemplo, el de un salto desde un deslizamiento).
@@ -410,8 +417,25 @@ class Player {
             dirZ = m_airDirZ;
         }
 
+        if (grounded && !m_sliding && m_grip < 0.99f) { // hielo: la velocidad cambia despacio y se patina
+            const float k = (std::min)(1.0f, dt * m_grip * ICE_RESPONSE);
+            body.velocity.x += (dirX * speed - body.velocity.x) * k;
+            body.velocity.z += (dirZ * speed - body.velocity.z) * k;
+            return;
+        }
         body.velocity.x = dirX * speed;
         body.velocity.z = dirZ * speed;
+    }
+
+    // El chorro de un géiser en erupción lanza hacia arriba a quien está encima (sin superar la altura del chorro).
+    void liftByGeyser(float dt, const Physics::World& world) {
+        float level = 0.0f;
+        const Physics::World::Geyser* geyser = world.geyserAt(body.position.x, body.position.z, level);
+        if (!geyser) return;
+        const float top = world.groundHeight(geyser->x, geyser->z) + geyser->height * level;
+        if (body.position.y >= top) return;
+        body.onGround = false;
+        body.velocity.y = (std::min)(body.velocity.y + GEYSER_LIFT * dt, std::sqrt(2.0f * Physics::World::GRAVITY * (std::max)(top - body.position.y, 0.5f)));
     }
 
     void jump(const Physics::World& world) {
@@ -435,7 +459,10 @@ class Player {
         else m_crouching = true;
     }
 
+    static constexpr float ICE_RESPONSE = 9.0f;        // rapidez con la que la velocidad sigue a la entrada en hielo (se multiplica por el agarre)
+    static constexpr float GEYSER_LIFT = 70.0f;        // aceleración (m/s²) del chorro de un géiser
     static constexpr float CLIMB_SUSTAIN = 1.2f;       // a qué distancia más allá debe seguir la pared
+    static constexpr float CLIMB_KEEP = 0.75f;         // fracción del umbral con la que se sigue trepando una vez empezado
     static constexpr float CLIMB_PROBE = 0.45f;        // a qué distancia por delante se mira la pendiente
 
     PlayerAction m_action = PlayerAction::NONE;
@@ -443,9 +470,9 @@ class Player {
     PlayerAction m_holding = PlayerAction::NONE;
     float m_actionTime = 0.0f, m_actionDuration = 0.0f;
     float m_oxygen = 30.0f;
-    float m_fallSpeed = 0.0f, m_impact = 0.0f;
+    float m_fallSpeed = 0.0f, m_impact = 0.0f, m_grip = 1.0f;
     bool m_drowning = false;
-    float m_phase = 0.0f, m_speed = 0.0f, m_climbSlope = 0.0f;
+    float m_phase = 0.0f, m_speed = 0.0f, m_climbSlope = 0.0f, m_climbSteep = 0.0f;
     bool m_streaming = false;
     Physics::World::Updraft m_stream;
     DirectX::XMFLOAT3 m_streamFrom = { 0.0f, 0.0f, 0.0f };

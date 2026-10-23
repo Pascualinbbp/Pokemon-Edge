@@ -119,6 +119,7 @@ class Renderer3D {
     void addTool(PlayerAction tool, DirectX::CXMMATRIX hand);
     void addFishingLine(const Scene& scene, const DirectX::XMFLOAT3& rodTip);
     void addSky(const Scene& scene, float time);
+    void addGeysers(const Scene& scene, float time);
     void addUnderground(const Scene& scene); // decorado de las galerías cercanas (estalactitas, raíles, lámparas...) y sus luces
     void addChest(const Chest& chest);
     void addNode(const ResourceNode& node);

@@ -9,8 +9,8 @@
 // Solo lleva la cuenta de las fases; qué pica y la captura las decide la escena.
 class Fishing {
     public:
-    static constexpr float CAST_MIN = 3.5f;       // alcance del lanzamiento (m)
-    static constexpr float CAST_MAX = 9.0f;
+    static constexpr float CAST_MIN = 1.0f;       // alcance del lanzamiento (m): hay que estar junto al agua
+    static constexpr float CAST_MAX = 5.5f;
     static constexpr float MIN_DEPTH = 1.0f;      // el corcho solo cae donde el agua tiene al menos esta profundidad
     static constexpr float CAST_TIME = 0.8f;      // lo que tarda el corcho en caer (la animación de lanzar)
     static constexpr float WAIT_MIN = 3.0f;       // espera hasta la picada (se divide por la velocidad de la caña)

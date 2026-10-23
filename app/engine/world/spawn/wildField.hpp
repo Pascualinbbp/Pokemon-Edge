@@ -18,12 +18,13 @@ class WildField {
     static constexpr float CHUNK = 16.0f;
     static constexpr int CHUNKS = static_cast<int>(2.0f * Physics::World::HALF_SIZE / CHUNK);
     static constexpr int MAX_SURFACE = 12;          // pokémon de la superficie por chunk
-    static constexpr int MAX_DEEP = 6;              // pokémon de las galerías por chunk
+    static constexpr int MAX_DEEP = 9;              // pokémon de las galerías por chunk
     static constexpr int MAX_PER_CHUNK = MAX_SURFACE + MAX_DEEP; // capacidad fija de cada chunk (las direcciones de sus pokémon no cambian)
     static constexpr int DEEP_GRID = 5;             // puntos por lado con los que se mide cuánta galería hay en un chunk
     static constexpr float SPAWN_RADIUS = 100.0f;   // zona de aparición, centrada en el jugador (invisible)
     static constexpr float DEEP_EXCLUSION_RADIUS = 14.0f; // ídem en las galerías, que son más pequeñas
     static constexpr float EXCLUSION_RADIUS = 30.0f; // zona pegada al jugador donde nunca nace nada
+    static constexpr float DEEP_SPACING = 5.0f;     // ídem en las galerías (más estrechas)
     static constexpr float SPACING = 10.0f;         // distancia mínima entre dos pokémon al nacer (menor que CHUNK)
     static constexpr int MAX_IN_ZONE = 70;          // máximo de pokémon vivos dentro de la zona de aparición
     static constexpr float LOAD_RADIUS = 85.0f;     // dentro de este radio un pokémon aparece
@@ -153,13 +154,14 @@ class WildField {
     }
 
     // ¿Hay otro pokémon (vivo y no 'ignore') a menos de SPACING de ese punto? Basta mirar los chunks vecinos.
-    bool crowded(int col, int row, const DirectX::XMFLOAT2& at, const CaptureTarget* ignore) const {
+    bool crowded(int col, int row, const DirectX::XMFLOAT2& at, const CaptureTarget* ignore, bool deep) const { // solo cuentan los de su misma capa: los de la superficie no estorban a los de la cueva de debajo
         for (int r = (std::max)(row - 1, 0); r <= (std::min)(row + 1, CHUNKS - 1); ++r) {
             for (int c = (std::max)(col - 1, 0); c <= (std::min)(col + 1, CHUNKS - 1); ++c) {
                 for (const CaptureTarget& other : m_chunks[r * CHUNKS + c].wilds) {
-                    if (&other == ignore || other.gone()) continue;
+                    if (&other == ignore || other.gone() || other.deepSlot() != deep) continue;
                     const float dx = other.body.position.x - at.x, dz = other.body.position.z - at.y;
-                    if (dx * dx + dz * dz < SPACING * SPACING) return true;
+                    const float spacing = deep ? DEEP_SPACING : SPACING;
+                    if (dx * dx + dz * dz < spacing * spacing) return true;
                 }
             }
         }
@@ -175,7 +177,7 @@ class WildField {
             const float dx = out.x - px, dz = out.y - pz;
             const float d2 = dx * dx + dz * dz;
             const bool inFront = dx * m_view.x + dz * m_view.y >= 0.0f; // semicírculo delantero
-            if ((!inFront && !deep) || d2 <= (deep ? DEEP_EXCLUSION_RADIUS * DEEP_EXCLUSION_RADIUS : EXCLUSION_RADIUS * EXCLUSION_RADIUS) || d2 > SPAWN_RADIUS * SPAWN_RADIUS || crowded(col, row, out, ignore)) continue;
+            if ((!inFront && !deep) || d2 <= (deep ? DEEP_EXCLUSION_RADIUS * DEEP_EXCLUSION_RADIUS : EXCLUSION_RADIUS * EXCLUSION_RADIUS) || d2 > SPAWN_RADIUS * SPAWN_RADIUS || crowded(col, row, out, ignore, deep)) continue;
             if (deep) {
                 if (!habitats.under().covered(out.x, out.y) || habitats.under().depthAt(out.x, out.y) > 0.4f) continue; // galería cubierta y seca
                 y = habitats.under().floorAt(out.x, out.y);

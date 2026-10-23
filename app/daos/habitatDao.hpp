@@ -14,14 +14,17 @@ class HabitatDao {
             { "RIVER", HabitatPlacement::RIVER }, { "UPPER_RIVER", HabitatPlacement::UPPER_RIVER }, { "LAKE", HabitatPlacement::LAKE },
             { "UPPER_LAKE", HabitatPlacement::UPPER_LAKE }, { "POND", HabitatPlacement::POND }, { "PEAK", HabitatPlacement::PEAK },
             { "CAVE", HabitatPlacement::CAVE }, { "MINE", HabitatPlacement::MINE }, { "HALL", HabitatPlacement::HALL }, { "UNDERGROUND_WATER", HabitatPlacement::UNDERGROUND_WATER }, { "SKY", HabitatPlacement::SKY },
-            { "SKY_LAND", HabitatPlacement::SKY_LAND }, { "SKY_SEA", HabitatPlacement::SKY_SEA }, { "SKY_CAVE", HabitatPlacement::SKY_CAVE } };
+            { "SKY_LAND", HabitatPlacement::SKY_LAND }, { "SKY_SEA", HabitatPlacement::SKY_SEA }, { "SKY_CAVE", HabitatPlacement::SKY_CAVE },
+            { "VOLCANO", HabitatPlacement::VOLCANO }, { "LAVA", HabitatPlacement::LAVA }, { "GEYSER", HabitatPlacement::GEYSER }, { "HOT_SPRING", HabitatPlacement::HOT_SPRING },
+            { "SEA_VOLCANO", HabitatPlacement::SEA_VOLCANO }, { "VENT", HabitatPlacement::VENT }, { "REEF", HabitatPlacement::REEF }, { "KELP", HabitatPlacement::KELP },
+            { "GLACIER", HabitatPlacement::GLACIER } };
         for (const auto& entry : NAMES) if (name == entry.first) return entry.second;
         return HabitatPlacement::ANY;
     }
 
     std::vector<Habitat> findHabitats() const {
         std::vector<Habitat> habitats;
-        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, min_zones, max_zones, min_radius, max_radius, min_stretch, max_stretch, min_altitude, max_altitude, roughness, placement, beside_id, min_chests, max_chests, daily_chests, min_wild, max_wild, min_nodes, max_nodes, "
+        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, min_zones, max_zones, min_radius, max_radius, min_stretch, max_stretch, min_altitude, max_altitude, roughness, placement, beside_id, friction, min_chests, max_chests, daily_chests, min_wild, max_wild, min_nodes, max_nodes, "
                                                          "min_weather_wait, max_weather_wait FROM habitat ORDER BY id;")) {
             Habitat habitat;
             habitat.id = DaoRow::integer(row, "id");
@@ -38,6 +41,7 @@ class HabitatDao {
             habitat.roughness = DaoRow::real(row, "roughness");
             habitat.placement = parsePlacement(DaoRow::text(row, "placement"));
             habitat.besideId = DaoRow::integer(row, "beside_id") > 0 ? DaoRow::integer(row, "beside_id") : -1;
+            habitat.friction = DaoRow::real(row, "friction");
             habitat.minChests = DaoRow::integer(row, "min_chests");
             habitat.maxChests = DaoRow::integer(row, "max_chests");
             habitat.dailyChests = DaoRow::integer(row, "daily_chests");

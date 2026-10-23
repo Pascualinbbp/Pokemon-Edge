@@ -5,6 +5,7 @@
 #include "../../../engine/world/style/itemStyle.hpp"
 #include "../../../engine/world/style/pokemonStyle.hpp"
 #include "../../../models/gameData.hpp"
+#include "hudIcons.hpp"
 
 // Iconos de objetos y pokémon dibujados con ImDrawList. Es el único sitio donde se define su aspecto en la interfaz.
 namespace ItemIcon {
@@ -15,8 +16,12 @@ namespace ItemIcon {
         }
     }
 
-    // Pokéball: colores de su modelo (mitad superior e inferior, banda y botón central).
+    // Pokéball: su sprite (assets/hud/item/<modelo>.png) o, si falta, un dibujo con los colores de su modelo (mitad superior e inferior, banda y botón central).
     inline void ball(ImDrawList* dl, const ImVec2& c, float r, const PokeballStyle::Look& look, float alpha = 1.0f) {
+        if (const ImTextureID sprite = HudIcons::sprite(look.model)) { // el sprite de su modelo 3D
+            dl->AddImage(sprite, ImVec2(c.x - r * 1.1f, c.y - r * 1.1f), ImVec2(c.x + r * 1.1f, c.y + r * 1.1f), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, static_cast<int>(255.0f * alpha)));
+            return;
+        }
         const int a = static_cast<int>(255.0f * alpha);
         const ImU32 dark = IM_COL32(20, 20, 25, a);
         const ImU32 band = detail::color(look.band, alpha), button = detail::color(look.button, alpha);

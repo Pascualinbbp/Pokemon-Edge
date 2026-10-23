@@ -10,8 +10,8 @@ namespace Physics {
     class World {
         public:
         static constexpr float GRAVITY = 20.0f;
-        static constexpr float HALF_SIZE = 768.0f; // las mallas del mundo cubren de -HALF_SIZE a +HALF_SIZE; el mundo jugable es el archipiélago y las regiones
-        static constexpr float CLIMB_SLOPE = 5.0f;  // pendiente (m de subida por m, unos 79º) desde la que andar no tiene sentido: se escala
+        static constexpr float HALF_SIZE = 1152.0f; // las mallas del mundo cubren de -HALF_SIZE a +HALF_SIZE; el mundo jugable es el archipiélago y las regiones
+        static constexpr float CLIMB_SLOPE = 2.2f;  // pendiente (m de subida por m, unos 65º) desde la que andar no tiene sentido: se escala
             static constexpr float SWIM_DEPTH = 0.6f;  // con más agua que esto no se camina: se nada
         static constexpr float START_HEIGHT = 1.0f; // altura del terreno plano de la zona de inicio (paredes, máquina...)
         static constexpr float SUBMERGED = 0.4f;   // fracción de la altura de un cuerpo que se hunde al flotar
@@ -40,11 +40,21 @@ namespace Physics {
         // Corriente ascendente: una columna que sube hasta topY y deja caer en (toX, toZ).
         struct Updraft { float x = 0.0f, z = 0.0f, radius = 6.0f, topY = 0.0f, toX = 0.0f, toZ = 0.0f; };
 
+        // Géiser: chorro de agua hirviendo que sale a intervalos (period s; erupciona durante 'burst' s desde 'phase') y lanza hacia arriba hasta 'height' m.
+        struct Geyser { float x = 0.0f, z = 0.0f, radius = 2.0f, height = 18.0f, period = 24.0f, phase = 0.0f, burst = 5.0f; };
+
         Heightfield terrain;  // relieve del mundo (lo rellena la escena al generarlo)
         Heightfield water;    // altura de la superficie del agua (= el terreno donde no hay agua)
         Heightfield seaMask;  // 1 donde el agua es mar (sube y baja con la marea)
+        Heightfield lavaMask; // 1 donde el líquido es lava (quema)
+        Heightfield hotMask;  // 1 donde el agua es termal
+        Heightfield grip;     // agarre del suelo (1 = normal; el hielo resbala); vacío = 1 en todas partes
         Heightfield flowX, flowZ; // corriente de los ríos (m/s)
         float tide = 0.0f;    // desviación de la marea (m), la fija la escena cada frame
+        float time = 0.0f;    // reloj del mundo (s), lo fija la escena cada frame: los géiseres erupcionan con él
+        struct Spring { float x = 0.0f, z = 0.0f, radius = 4.0f; };
+        std::vector<Geyser> geysers;
+        std::vector<Spring> springs; // charcas termales (cada una con su propio temporizador)
         Disc archipelago{ 0.0f, 0.0f, HALF_SIZE };
         std::vector<Disc> regions;
         std::vector<Updraft> updrafts;
@@ -122,6 +132,50 @@ namespace Physics {
         void current(float x, float z, float& fx, float& fz) const {
             fx = flowX.empty() ? 0.0f : flowX.sample(x, z);
             fz = flowZ.empty() ? 0.0f : flowZ.sample(x, z);
+        }
+
+        // Agarre del suelo en un punto (1 = normal, cerca de 0 = hielo). Bajo tierra, el de la galería.
+        float gripAt(float x, float z, float y = ABOVE) const {
+            if (under(x, z, y)) return caveGrip.empty() ? 1.0f : caveGrip.sample(x, z);
+            return grip.empty() ? 1.0f : grip.sample(x, z);
+        }
+        Heightfield caveGrip;
+        // ¿Está el punto en lava?
+        bool inLava(float x, float z, float y = ABOVE) const { return !lavaMask.empty() && !under(x, z, y) && lavaMask.sample(x, z) > 0.5f && waterDepth(x, z, y) > 0.05f; }
+        // Charca termal en la que está el punto (índice en 'springs'), o -1.
+        int springAt(float x, float z, float y = ABOVE) const {
+            if (hotMask.empty() || under(x, z, y) || hotMask.sample(x, z) < 0.5f || waterDepth(x, z, y) < 0.15f) return -1;
+            int best = -1; float bestD = 1.0e18f;
+            for (size_t i = 0; i < springs.size(); ++i) {
+                const float dx = x - springs[i].x, dz = z - springs[i].z, d = (dx * dx + dz * dz) / (springs[i].radius * springs[i].radius);
+                if (d < bestD) { bestD = d; best = static_cast<int>(i); }
+            }
+            return best;
+        }
+        // Calor de la lava cercana (0..1): fracción de lava en los alrededores.
+        float lavaHeat(float x, float z) const {
+            if (lavaMask.empty()) return 0.0f;
+            float sum = lavaMask.sample(x, z);
+            static const float OFFSET[8][2] = { {1,0},{-1,0},{0,1},{0,-1},{0.7f,0.7f},{-0.7f,0.7f},{0.7f,-0.7f},{-0.7f,-0.7f} };
+            for (const auto& o : OFFSET) sum += lavaMask.sample(x + o[0] * 7.0f, z + o[1] * 7.0f);
+            return (std::min)(1.0f, sum / 4.0f);
+        }
+        // Fracción (0..1) de la erupción de un géiser en este instante (0 = dormido).
+        float eruption(const Geyser& g) const {
+            const float t = std::fmod(time + g.phase, g.period);
+            if (t >= g.burst) return 0.0f;
+            const float u = t / g.burst;
+            return std::sin(u * 3.14159265f); // sube, se sostiene y baja
+        }
+        // Géiser (con su erupción en 'level') cuyo chorro abarca el punto, o nullptr.
+        const Geyser* geyserAt(float x, float z, float& level) const {
+            for (const Geyser& g : geysers) {
+                const float dx = x - g.x, dz = z - g.z;
+                if (dx * dx + dz * dz > g.radius * g.radius) continue;
+                level = eruption(g);
+                if (level > 0.0f) return &g;
+            }
+            return nullptr;
         }
 
         // Corriente ascendente que abarca el punto (nullptr = ninguna).

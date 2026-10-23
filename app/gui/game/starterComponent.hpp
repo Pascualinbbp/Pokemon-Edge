@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <random>
+#include <map>
 #include <set>
 #include <vector>
 #include "imgui.h"
@@ -20,9 +21,10 @@ namespace StarterComponent {
         inline constexpr double DROP_INTERVAL = 8.0;          // segundos entre descartes
         inline constexpr const char* FALLBACK[] = { "Pichu", "Eevee" };
         inline std::set<int> discarded;                       // ids descartados por el tiempo
+        inline std::map<int, double> deadline;                // límite propio de cada inicial (instante en que se descarta)
         inline double startedAt = -1.0;
 
-        inline void reset() { selected = -1; discarded.clear(); startedAt = -1.0; }
+        inline void reset() { selected = -1; discarded.clear(); deadline.clear(); startedAt = -1.0; }
 
         // Las especies que se pueden elegir ahora; 'fallback' = se acabaron las iniciales y se ofrecen las de reserva.
         inline std::vector<const PokemonSpecies*> offered(const GameData& data, bool& fallback) {
@@ -48,22 +50,24 @@ namespace StarterComponent {
         if (detail::startedAt < 0.0) detail::startedAt = now;
         bool fallback = false;
         std::vector<const PokemonSpecies*> offered = detail::offered(data, fallback);
-        if (!fallback && now - detail::startedAt >= detail::DROP_INTERVAL * static_cast<double>(detail::discarded.size() + 1)) { // se acaba el tiempo: uno al azar se va
-            static std::mt19937 random{ std::random_device{}() };
-            const int victim = static_cast<int>(random() % offered.size());
-            if (detail::selected == offered[victim]->id) detail::selected = -1;
-            detail::discarded.insert(offered[victim]->id);
+        if (!fallback) {
+            if (detail::deadline.empty()) { // cada inicial recibe su propio límite, en orden aleatorio, uno cada DROP_INTERVAL
+                static std::mt19937 random{ std::random_device{}() };
+                std::vector<const PokemonSpecies*> order = offered;
+                std::shuffle(order.begin(), order.end(), random);
+                for (size_t i = 0; i < order.size(); ++i) detail::deadline[order[i]->id] = detail::startedAt + detail::DROP_INTERVAL * static_cast<double>(i + 1);
+            }
+            for (const PokemonSpecies* species : offered) { // el que agota su tiempo se va, los demás siguen
+                if (now < detail::deadline[species->id]) continue;
+                if (detail::selected == species->id) detail::selected = -1;
+                detail::discarded.insert(species->id);
+            }
             offered = detail::offered(data, fallback);
         }
         const int count = static_cast<int>(offered.size());
         if (count == 0) return -1;
         if (fallback) GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 110.0f), IM_COL32(255, 215, 90, 255), "Ninguno de los iniciales ha esperado: elige uno de reserva", 1.0f);
-        else {
-            const double left = detail::DROP_INTERVAL * static_cast<double>(detail::discarded.size() + 1) - (now - detail::startedAt);
-            char text[96];
-            std::snprintf(text, sizeof(text), "Se descartará uno al azar en %.0f s", (std::max)(left, 0.0));
-            GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 110.0f), IM_COL32(255, 255, 255, 200), text, 1.0f);
-        }
+        else GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 110.0f), IM_COL32(255, 255, 255, 200), "Cada inicial se marcha cuando se acaba su tiempo", 1.0f);
 
         constexpr float CARD_W = 250.0f, CARD_H = 300.0f, GAP = 30.0f;
         const float total = static_cast<float>(count) * CARD_W + static_cast<float>(count - 1) * GAP;
@@ -93,6 +97,11 @@ namespace StarterComponent {
             ImVec2 chipAt(a.x + (CARD_W - chipsWidth) * 0.5f, a.y + 176.0f);
             for (const int id : species.types) if (const PokemonType* type = data.type(id)) chipAt.x += GuiCards::typeChip(dl, chipAt, *type) + 6.0f;
 
+            if (!fallback) { // barra de tiempo propia del inicial
+                const double left = (std::max)(detail::deadline[species.id] - now, 0.0);
+                const float fraction = static_cast<float>((std::min)(left / (detail::deadline[species.id] - detail::startedAt), 1.0));
+                dl->AddRectFilled(ImVec2(a.x, b.y - 8.0f), ImVec2(a.x + CARD_W * (std::min)(fraction, 1.0f), b.y), IM_COL32(255, 255, 255, 200), GuiCards::ROUNDING);
+            }
             ImGui::SetCursorScreenPos(ImVec2(a.x + 16.0f, a.y + 212.0f));
             ImGui::PushTextWrapPos(a.x + CARD_W - 16.0f);
             ImGui::TextUnformatted(species.description.c_str());

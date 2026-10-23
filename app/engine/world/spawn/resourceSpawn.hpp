@@ -21,8 +21,10 @@ namespace ResourceSpawn {
     inline constexpr int PLACE_TRIES = 12;
     inline constexpr float MAX_SLOPE = 0.55f;       // en laderas más empinadas no crece nada
     inline constexpr float DEEP_AREA_PER_NODE = 60.0f; // m² de caja envolvente de una galería por cada nodo
-    inline constexpr float WALL_MIN = 0.9f;        // distancia a la pared de un nodo de galería (pegado a ella, sin tapar el paso)
-    inline constexpr float WALL_MAX = 1.6f;
+    inline constexpr float WALL_MIN = 0.35f;       // distancia a la pared de un nodo de galería: incrustado en ella, sin tapar el paso
+    inline constexpr float WALL_MAX = 0.95f;
+    inline constexpr float AQUATIC_MIN_DEPTH = 0.8f; // coral y algas: profundidad del agua en la que crecen
+    inline constexpr float AQUATIC_MAX_DEPTH = 16.0f;
     inline constexpr float ENTRANCE_CLEAR = 7.0f;  // zona libre ante la bocana de cada cueva y mina
 
     // Altura a la que se asienta un nodo: la más baja del suelo bajo su base, para que no flote por el lado de cuesta abajo.
@@ -52,8 +54,10 @@ namespace ResourceSpawn {
             return -1;
         };
 
-        const auto fits = [&](float x, float z) {
-            if (world.waterDepth(x, z) > 0.05f || world.groundHeight(x, z) < -50.0f || world.slope(x, z) > MAX_SLOPE) return false; // nunca en el agua ni en una ladera empinada
+        const auto fits = [&](float x, float z, bool aquatic) {
+            const float depth = world.waterDepth(x, z);
+            if (aquatic ? (depth < AQUATIC_MIN_DEPTH || depth > AQUATIC_MAX_DEPTH) : depth > 0.05f) return false; // solo coral y algas crecen en el agua
+            if (world.groundHeight(x, z) < -50.0f || world.slope(x, z) > MAX_SLOPE) return false; // ni en una ladera empinada
             for (const Underground::System& system : habitats.under().systems()) {
                 const float px = x - system.mouthX, pz = z - system.mouthZ;
                 if (px * px + pz * pz < ENTRANCE_CLEAR * ENTRANCE_CLEAR) return false;
@@ -111,16 +115,13 @@ namespace ResourceSpawn {
                 }
 
                 for (int i = 0; i < static_cast<int>(count); ++i) {
-                    float x = 0.0f, z = 0.0f;
-                    bool placed = false;
-                    for (int attempt = 0; attempt < PLACE_TRIES && !placed; ++attempt) {
-                        x = between(x0 + 1.0f, x0 + CHUNK - 1.0f);
-                        z = between(z0 + 1.0f, z0 + CHUNK - 1.0f);
-                        placed = fits(x, z);
+                    for (int attempt = 0; attempt < PLACE_TRIES; ++attempt) {
+                        const float x = between(x0 + 1.0f, x0 + CHUNK - 1.0f), z = between(z0 + 1.0f, z0 + CHUNK - 1.0f);
+                        const auto type = pickType(x, z, false);
+                        if (!type || !fits(x, z, data.nodes[*type].aquatic)) continue;
+                        place(*type, x, z, false);
+                        break;
                     }
-                    if (!placed) continue;
-
-                    if (const auto type = pickType(x, z, false)) place(*type, x, z, false);
                 }
             }
         }

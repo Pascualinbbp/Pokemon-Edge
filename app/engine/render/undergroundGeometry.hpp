@@ -27,7 +27,10 @@ namespace UndergroundGeometry {
     class Builder {
         public:
         Builder(const HabitatMap& habitats, const GameData& data) : m_under(habitats.under()), m_terrain(habitats.ground()) {
-            for (const Habitat& habitat : data.habitats) m_colors.push_back(HabitatStyle::color(habitat.name));
+            for (const Habitat& habitat : data.habitats) {
+                m_colors.push_back(HabitatStyle::color(habitat.name));
+                m_vivid.push_back(habitat.placement == HabitatPlacement::SKY_CAVE || habitat.friction < 0.5f); // nube y hielo conservan su color
+            }
         }
 
         std::vector<Batch> build() {
@@ -41,6 +44,17 @@ namespace UndergroundGeometry {
 
         static float mixf(float a, float b, float t) { return a + (b - a) * t; }
         static Float3 mix(const Float3& a, const Float3& b, float t) { return { mixf(a.x, b.x, t), mixf(a.y, b.y, t), mixf(a.z, b.z, t) }; }
+
+        // Material de la pared según dónde está: nube (blanca) y hielo conservan su color; cerca de la superficie es tierra parda; en lo hondo, piedra.
+        Float3 wallTone(int col, int row, float y) const {
+            const int h = m_under.habitatAtNode(col, row);
+            const Float3 base = habitatColor(col, row);
+            if (h >= 0 && h < static_cast<int>(m_vivid.size()) && m_vivid[h]) return mix(base, { 0.97f, 0.98f, 1.0f }, 0.15f);
+            const float cover = m_terrain.at(col, row) - y;                    // roca (m) que queda sobre la pared
+            const float earth = 1.0f - (std::clamp)((cover - 2.0f) / 9.0f, 0.0f, 1.0f); // cerca de la superficie: tierra
+            const Float3 stone = mix(base, { 0.42f, 0.40f, 0.38f }, 0.55f);
+            return mix(stone, { 0.40f, 0.29f, 0.19f }, earth * 0.8f);
+        }
 
         Float3 habitatColor(int col, int row) const {
             const int h = m_under.habitatAtNode(col, row);
@@ -137,9 +151,10 @@ namespace UndergroundGeometry {
         // cambia por dónde se puede andar. 'rough' = 0 la deja plana (dinteles).
         void wall(int c0, int r0, int c1, int r1, const float bottom[2], const float top[2], const Float3& normal, float rough = 1.0f) {
             if (top[0] - bottom[0] < 0.02f && top[1] - bottom[1] < 0.02f) return;
-            constexpr int NU = 4, NV = 4;
+            constexpr int NU = 6, NV = 5;
             const float x0 = m_terrain.nodeCoord(c0), z0 = m_terrain.nodeCoord(r0), x1 = m_terrain.nodeCoord(c1), z1 = m_terrain.nodeCoord(r1);
-            const Float3 rockA = mix(habitatColor(c0, r0), { 0.40f, 0.37f, 0.34f }, 0.55f), rockB = mix(habitatColor(c1, r1), { 0.40f, 0.37f, 0.34f }, 0.55f);
+            const float mid = 0.25f * (bottom[0] + bottom[1] + top[0] + top[1]);
+            const Float3 rockA = wallTone(c0, r0, mid), rockB = wallTone(c1, r1, mid);
             Float3 pos[NU + 1][NV + 1];
             float bulge[NU + 1][NV + 1];
             for (int i = 0; i <= NU; ++i) {
@@ -150,9 +165,10 @@ namespace UndergroundGeometry {
                     const float v = static_cast<float>(j) / NV, y = mixf(lo, hi, v);
                     const float edge = std::pow((std::max)(0.0f, std::sin(3.14159265f * u)), 0.7f) * std::pow((std::max)(0.0f, std::sin(3.14159265f * v)), 0.55f);
                     const float n = 0.55f * rockNoise(x * 0.9f, y * 0.9f, z * 0.9f) + 0.45f * rockNoise(x * 2.3f + 7.0f, y * 2.3f, z * 2.3f + 3.0f);
-                    const float amount = rough * edge * (0.15f + 1.35f * n) * (std::min)(1.0f, 0.5f + 0.25f * (hi - lo));
+                    const float amount = rough * edge * (0.25f + 2.0f * n) * (std::min)(1.0f, 0.5f + 0.25f * (hi - lo));
                     bulge[i][j] = amount;
-                    pos[i][j] = { x - normal.x * amount, y, z - normal.z * amount };
+                    const float slide = rough * edge * 0.7f * (rockNoise(x * 1.4f + 11.0f, y * 1.4f, z * 1.4f - 5.0f) - 0.5f); // desplazamiento a lo largo de la pared: rompe los ángulos rectos
+                    pos[i][j] = { x - normal.x * amount - normal.z * slide, y, z - normal.z * amount + normal.x * slide };
                 }
             }
             int index[NU + 1][NV + 1];
@@ -222,6 +238,7 @@ namespace UndergroundGeometry {
         const Underground& m_under;
         const Physics::Heightfield& m_terrain;
         std::vector<Float3> m_colors;
+        std::vector<bool> m_vivid; // hábitats cuya roca conserva su color (nube, hielo)
         Batch m_batch;
         std::vector<Batch> m_batches;
     };

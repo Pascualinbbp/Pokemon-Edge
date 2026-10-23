@@ -33,6 +33,10 @@ class Underground {
     static constexpr float TRENCH_HALF = 4.5f;
     static constexpr float MIN_RADIUS = 6.0f;    // alcance mínimo de un sistema
     static constexpr float MIN_FILL = 0.3f;      // fracción del tamaño pedido que debe alcanzar como mínimo
+    static constexpr float GROW_START = 8.0f;    // a partir de esta distancia a la boca las galerías empiezan a ensancharse
+    static constexpr float GROW_END = 48.0f;     // y desde esta alcanzan su tamaño máximo
+    static constexpr float GROW_WIDTH = 0.9f;    // cuánto más anchas (fracción) son las galerías del fondo
+    static constexpr float GROW_HEIGHT = 0.85f;  // y cuánto más altas
     static constexpr float MIN_SURFACE = 2.5f;   // el terreno de encima debe estar al menos a esta altura sobre el mar
 
     enum class Kind : uint8_t { CAVE, MINE };
@@ -181,6 +185,8 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
     const bool cave = plan.kind == Kind::CAVE;
     const auto uni = [&](float low, float high) { return low + (high - low) * std::uniform_real_distribution<float>(0.0f, 1.0f)(random); };
     const auto chance = [&](float p) { return uni(0.0f, 1.0f) < p; };
+    // La cueva crece hacia dentro: la boca es estrecha y las galerías se ensanchan y suben poco a poco con la distancia a ella.
+    const auto progress = [&](float x, float z) { return smooth(GROW_START, GROW_END, std::hypot(x - mouth.x, z - mouth.z)); };
     const auto wrap = [](float a) { return std::remainder(a, 6.2831853f); };
     const auto nodeOf = [&](float v) { return (std::clamp)(static_cast<int>(std::lround((v + height.half()) / Physics::Heightfield::CELL)), 0, n - 1); };
 
@@ -212,7 +218,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
                 heading += turn;
                 if (std::hypot(x - centerX, z - centerZ) > R * 0.8f) heading += wrap(std::atan2(centerZ - z, centerX - x) - heading) * 0.3f;
                 const float nx = x + std::cos(heading) * STEP, nz = z + std::sin(heading) * STEP;
-                caps.push_back({ x, z, nx, nz, r * (1.0f + 0.18f * noise.value(seed + s * 0.11f, 3.0f)) });
+                caps.push_back({ x, z, nx, nz, r * (1.0f + 0.18f * noise.value(seed + s * 0.11f, 3.0f)) * (1.0f + GROW_WIDTH * progress(x, z)) });
                 x = nx; z = nz; s += STEP;
                 if (depth < 2 && s > 8.0f && s < length - 8.0f && chance(0.16f)) {
                     walk(x, z, heading + (chance(0.5f) ? -1.0f : 1.0f) * uni(0.6f, 1.4f), length * uni(0.35f, 0.65f), r * 0.85f, depth + 1);
@@ -232,7 +238,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
         while (s < length) {
             constexpr float STEP = 4.0f;
             const float nx = x + std::cos(heading) * STEP, nz = z + std::sin(heading) * STEP;
-            caps.push_back({ x, z, nx, nz, 4.3f });
+            caps.push_back({ x, z, nx, nz, 4.3f * (1.0f + 0.6f * GROW_WIDTH * progress(x, z)) });
             x = nx; z = nz; s += STEP;
             main.push_back({ x, z });
             if (s >= nextCross && s < length - 10.0f) {
@@ -244,7 +250,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
                 Lane lane{ { cx, cz } };
                 for (float t = 0.0f; t < len; t += STEP) {
                     const float mx = cx + std::cos(a) * STEP, mz = cz + std::sin(a) * STEP;
-                    caps.push_back({ cx, cz, mx, mz, 3.9f });
+                    caps.push_back({ cx, cz, mx, mz, 3.9f * (1.0f + 0.6f * GROW_WIDTH * progress(cx, cz)) });
                     cx = mx; cz = mz;
                     lane.push_back({ cx, cz });
                 }
@@ -397,6 +403,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
                 }
                 const float flat = floor; // el techo no sigue la cubeta del lago
                 floor -= bowlDrop;
+                tall *= 1.0f + GROW_HEIGHT * progress(x, z);
                 tall = (away < DOOR + 6.0f) ? DOOR_HEIGHT + (tall - DOOR_HEIGHT) * open : tall;
                 if (away > MOUND) { // bajo la ladera: techo limitado por la roca que hay encima
                     const float cap = original[i] - COVER - flat;
