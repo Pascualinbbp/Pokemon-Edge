@@ -13,7 +13,7 @@
 #include "../../models/gameData.hpp"
 
 // Elección del pokémon inicial al empezar una partida nueva: uno de los que marca la base de datos (starter).
-// Pasado un tiempo se van descartando al azar (uno cada DROP_INTERVAL s, sean 3 o 15); si se acaban, se ofrecen Pichu y Eevee sin límite de tiempo.
+// Pasado un tiempo se va retirando uno al azar (uno cada DROP_INTERVAL s, sean 3 o 15; sin barras ni avisos); si se acaban, se ofrecen Pichu y Eevee.
 // Devuelve el id de la especie elegida cuando el jugador la confirma, o -1 mientras tanto.
 namespace StarterComponent {
     namespace detail {
@@ -21,10 +21,9 @@ namespace StarterComponent {
         inline constexpr double DROP_INTERVAL = 8.0;          // segundos entre descartes
         inline constexpr const char* FALLBACK[] = { "Pichu", "Eevee" };
         inline std::set<int> discarded;                       // ids descartados por el tiempo
-        inline std::map<int, double> deadline;                // límite propio de cada inicial (instante en que se descarta)
-        inline double startedAt = -1.0;
+        inline double nextDrop = -1.0;                        // instante del próximo descarte (-1 = aún sin iniciar)
 
-        inline void reset() { selected = -1; discarded.clear(); deadline.clear(); startedAt = -1.0; }
+        inline void reset() { selected = -1; discarded.clear(); nextDrop = -1.0; }
 
         // Las especies que se pueden elegir ahora; 'fallback' = se acabaron las iniciales y se ofrecen las de reserva.
         inline std::vector<const PokemonSpecies*> offered(const GameData& data, bool& fallback) {
@@ -47,27 +46,21 @@ namespace StarterComponent {
         GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 70.0f), IM_COL32(255, 255, 255, 255), "ELIGE A TU POKÉMON INICIAL", 1.8f);
 
         const double now = ImGui::GetTime();
-        if (detail::startedAt < 0.0) detail::startedAt = now;
+        if (detail::nextDrop < 0.0) detail::nextDrop = now + detail::DROP_INTERVAL;
         bool fallback = false;
         std::vector<const PokemonSpecies*> offered = detail::offered(data, fallback);
-        if (!fallback) {
-            if (detail::deadline.empty()) { // cada inicial recibe su propio límite, en orden aleatorio, uno cada DROP_INTERVAL
-                static std::mt19937 random{ std::random_device{}() };
-                std::vector<const PokemonSpecies*> order = offered;
-                std::shuffle(order.begin(), order.end(), random);
-                for (size_t i = 0; i < order.size(); ++i) detail::deadline[order[i]->id] = detail::startedAt + detail::DROP_INTERVAL * static_cast<double>(i + 1);
-            }
-            for (const PokemonSpecies* species : offered) { // el que agota su tiempo se va, los demás siguen
-                if (now < detail::deadline[species->id]) continue;
-                if (detail::selected == species->id) detail::selected = -1;
-                detail::discarded.insert(species->id);
-            }
+        while (!fallback && now >= detail::nextDrop) { // cada DROP_INTERVAL se retira uno al azar, aunque la ventana se haya quedado sin dibujar
+            static std::mt19937 random{ std::random_device{}() };
+            const PokemonSpecies* gone = offered[std::uniform_int_distribution<size_t>(0, offered.size() - 1)(random)];
+            if (detail::selected == gone->id) detail::selected = -1;
+            detail::discarded.insert(gone->id);
+            detail::nextDrop += detail::DROP_INTERVAL;
             offered = detail::offered(data, fallback);
         }
         const int count = static_cast<int>(offered.size());
         if (count == 0) return -1;
+        if (detail::selected >= 0 && std::none_of(offered.begin(), offered.end(), [](const PokemonSpecies* sp) { return sp->id == detail::selected; })) detail::selected = -1;
         if (fallback) GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 110.0f), IM_COL32(255, 215, 90, 255), "Ninguno de los iniciales ha esperado: elige uno de reserva", 1.0f);
-        else GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 110.0f), IM_COL32(255, 255, 255, 200), "Cada inicial se marcha cuando se acaba su tiempo", 1.0f);
 
         constexpr float CARD_W = 250.0f, CARD_H = 300.0f, GAP = 30.0f;
         const float total = static_cast<float>(count) * CARD_W + static_cast<float>(count - 1) * GAP;
@@ -97,11 +90,6 @@ namespace StarterComponent {
             ImVec2 chipAt(a.x + (CARD_W - chipsWidth) * 0.5f, a.y + 176.0f);
             for (const int id : species.types) if (const PokemonType* type = data.type(id)) chipAt.x += GuiCards::typeChip(dl, chipAt, *type) + 6.0f;
 
-            if (!fallback) { // barra de tiempo propia del inicial
-                const double left = (std::max)(detail::deadline[species.id] - now, 0.0);
-                const float fraction = static_cast<float>((std::min)(left / (detail::deadline[species.id] - detail::startedAt), 1.0));
-                dl->AddRectFilled(ImVec2(a.x, b.y - 8.0f), ImVec2(a.x + CARD_W * (std::min)(fraction, 1.0f), b.y), IM_COL32(255, 255, 255, 200), GuiCards::ROUNDING);
-            }
             ImGui::SetCursorScreenPos(ImVec2(a.x + 16.0f, a.y + 212.0f));
             ImGui::PushTextWrapPos(a.x + CARD_W - 16.0f);
             ImGui::TextUnformatted(species.description.c_str());

@@ -9,6 +9,7 @@
 #include "../entities/resourceNode.hpp"
 #include "../state/researchMachine.hpp"
 #include "../../../models/gameData.hpp"
+#include "../../../utils/core/randomUtil.hpp"
 
 // Materiales de recolección del mundo: se colocan una sola vez al generar el mundo (la misma semilla da el mismo mundo).
 // Cada chunk de 16 m recibe tantos como pida su hábitat (min_nodes..max_nodes de la tabla habitat) y el tipo de cada uno
@@ -25,6 +26,10 @@ namespace ResourceSpawn {
     inline constexpr float WALL_MAX = 0.95f;
     inline constexpr float AQUATIC_MIN_DEPTH = 0.8f; // coral y algas: profundidad del agua en la que crecen
     inline constexpr float AQUATIC_MAX_DEPTH = 16.0f;
+    inline constexpr float EMBED_REACH = 2.2f;      // distancia máxima a la pared de un mineral incrustado
+    inline constexpr float EMBED_DEPTH = 0.18f;     // cuánto se hunde en la roca
+    inline constexpr float EMBED_MAX_HEIGHT = 3.2f; // altura máxima sobre el suelo a la que se incrusta
+    inline constexpr float EMBED_SEPARATION = 1.9f; // distancia mínima entre dos minerales incrustados
     inline constexpr float ENTRANCE_CLEAR = 7.0f;  // zona libre ante la bocana de cada cueva y mina
 
     // Altura a la que se asienta un nodo: la más baja del suelo bajo su base, para que no flote por el lado de cuesta abajo.
@@ -100,7 +105,7 @@ namespace ResourceSpawn {
             const float growth = node.plant() ? between(PLANT_MIN_GROWTH, 1.0f) : 1.0f;
             const float y = deep ? habitats.under().floorAt(x, z) - 0.04f : seat(world, x, z, ResourceStyle::look(node.id).half);
             nodes.emplace_back(type, node.id, node.hits, node.plant(), static_cast<float>(node.plant() ? node.growSeconds : node.regrowSeconds),
-                               growth, DirectX::XMFLOAT3{ x, y, z }, between(0.0f, 6.2831853f));
+                               growth, DirectX::XMFLOAT3{ x, y, z }, between(0.0f, 6.2831853f), node.waterable, node.ephemeral);
             nodes.back().body.underground = deep;
         };
 
@@ -127,26 +132,97 @@ namespace ResourceSpawn {
         }
 
         // Galerías: cada sistema recibe nodos según el hábitat de cada punto (mena en la mina, setas y cristales en la cueva...).
+        // Los minerales salen incrustados en las paredes, a distintas alturas; el resto, sueltos por el suelo lejos de ellas.
         for (const Underground::System& system : habitats.under().systems()) {
             const float area = (system.maxX - system.minX) * (system.maxZ - system.minZ);
             const int wanted = static_cast<int>(area / DEEP_AREA_PER_NODE);
             for (int i = 0, tries = 0; i < wanted && tries < wanted * 40; ++tries) {
                 const float x = between(system.minX, system.maxX), z = between(system.minZ, system.maxZ);
                 if (!habitats.under().covered(x, z) || habitats.under().depthAt(x, z) > 0.05f || habitats.under().floorAt(x, z) < -50.0f) continue;
-                if (habitats.under().ceilAt(x, z) - habitats.under().floorAt(x, z) < 2.0f || habitats.under().floor().slope(x, z) > MAX_SLOPE) continue;
-                const float wall = habitats.under().nearestWall(x, z, WALL_MAX + 1.0f);
-                if (wall < WALL_MIN || wall > WALL_MAX) continue; // los minerales salen de las paredes, no del medio del paso
+                const float height = habitats.under().ceilAt(x, z) - habitats.under().floorAt(x, z);
+                if (height < 2.0f || habitats.under().floor().slope(x, z) > MAX_SLOPE) continue;
                 const float mx = x - system.mouthX, mz = z - system.mouthZ;
                 if (mx * mx + mz * mz < ENTRANCE_CLEAR * ENTRANCE_CLEAR) continue;
-                bool apart = true;
-                for (const ResourceNode& other : nodes) {
-                    const float dx = x - other.body.position.x, dz = z - other.body.position.z;
-                    if (dx * dx + dz * dz < MIN_SEPARATION * MIN_SEPARATION && other.body.underground) { apart = false; break; }
+                const auto type = pickType(x, z, true);
+                if (!type) continue;
+                const ResourceNodeType& node = data.nodes[*type];
+                float px = x, pz = z, py = habitats.under().floorAt(x, z) - 0.04f;
+                if (node.embedded) {
+                    float dirX, dirZ;
+                    const float wall = habitats.under().wallDirection(x, z, EMBED_REACH, dirX, dirZ);
+                    if (wall >= EMBED_REACH || wall < WALL_MIN) continue;
+                    px = x + dirX * (wall + EMBED_DEPTH);
+                    pz = z + dirZ * (wall + EMBED_DEPTH);
+                    py += between(0.35f, (std::min)(EMBED_MAX_HEIGHT, height - 0.9f)); // a distintas alturas de la pared
+                    bool apart = true;
+                    for (const ResourceNode& other : nodes) {
+                        if (!other.body.underground) continue;
+                        const float dx = px - other.body.position.x, dy = py - other.body.position.y, dz = pz - other.body.position.z;
+                        if (dx * dx + dy * dy + dz * dz < EMBED_SEPARATION * EMBED_SEPARATION) { apart = false; break; }
+                    }
+                    if (!apart) continue;
+                } else {
+                    if (habitats.under().nearestWall(x, z, WALL_MAX + 1.0f) <= WALL_MAX) continue; // los sueltos, en el medio del paso
+                    bool apart = true;
+                    for (const ResourceNode& other : nodes) {
+                        const float dx = x - other.body.position.x, dz = z - other.body.position.z;
+                        if (dx * dx + dz * dz < MIN_SEPARATION * MIN_SEPARATION && other.body.underground) { apart = false; break; }
+                    }
+                    if (!apart) continue;
                 }
-                if (!apart) continue;
-                if (const auto type = pickType(x, z, true)) { place(*type, x, z, true); ++i; }
+                place(*type, px, pz, true);
+                nodes.back().body.position.y = py;
+                ++i;
             }
         }
         return nodes;
+    }
+
+    // ---- Brote de flores ----
+    // Las flores recogidas desaparecen. Con el tiempo cada hábitat hace brotar otras (en el hueco de una recogida) cerca del jugador:
+    // solo donde su hábitat las pide, separadas entre sí y sin pasar de la densidad que le corresponde a esa zona (el campo de flores es el
+    // que más aguanta, porque sus pesos de flor son los más altos).
+    inline constexpr float FLOWER_DELAY = 90.0f;        // segundos que tarda en brotar otra tras recogerse una
+    inline constexpr float FLOWER_MIN_RANGE = 14.0f;    // dónde brotan respecto al jugador: ni a su lado ni lejos
+    inline constexpr float FLOWER_MAX_RANGE = 70.0f;
+    inline constexpr float FLOWER_SEPARATION = 3.6f;    // distancia mínima entre dos flores
+    inline constexpr float FLOWER_DENSITY_RADIUS = 10.0f;
+    inline constexpr float FLOWER_WEIGHT_PER_FLOWER = 10.0f; // peso de flor del hábitat por cada flor que cabe en el círculo de densidad
+
+    inline bool regrowFlower(std::vector<ResourceNode>& nodes, const GameData& data, const HabitatMap& habitats, const Physics::World& world,
+                             float px, float pz, std::vector<float>& weights) {
+        ResourceNode* slot = nullptr;
+        for (ResourceNode& node : nodes) if (node.gone() && node.goneTime() >= FLOWER_DELAY && !node.body.underground) { slot = &node; break; }
+        if (!slot) return false;
+        for (int attempt = 0; attempt < 12; ++attempt) {
+            const float a = RandomUtil::range(0.0f, 6.2831853f), r = RandomUtil::range(FLOWER_MIN_RANGE, FLOWER_MAX_RANGE);
+            const float x = px + std::cos(a) * r, z = pz + std::sin(a) * r;
+            if (!habitats.playable(x, z) || world.waterDepth(x, z) > 0.05f || world.slope(x, z) > MAX_SLOPE || world.groundHeight(x, z) < 0.0f) continue;
+            habitats.weights(x, z, weights);
+            std::vector<float> chance(data.nodes.size(), 0.0f);
+            float total = 0.0f;
+            for (size_t h = 0; h < weights.size() && h < data.habitats.size(); ++h) {
+                for (const ResourceChance& c : data.habitats[h].resources) {
+                    for (size_t t = 0; t < data.nodes.size(); ++t) if (data.nodes[t].id == c.nodeId && data.nodes[t].ephemeral) { chance[t] += weights[h] * c.weight; total += weights[h] * c.weight; }
+                }
+            }
+            if (total <= 0.0f) continue;
+            int live = 0;
+            bool apart = true;
+            for (const ResourceNode& other : nodes) {
+                if (other.gone()) continue;
+                const float dx = x - other.body.position.x, dz = z - other.body.position.z, d2 = dx * dx + dz * dz;
+                if (d2 < FLOWER_SEPARATION * FLOWER_SEPARATION) { apart = false; break; }
+                if (d2 < FLOWER_DENSITY_RADIUS * FLOWER_DENSITY_RADIUS && data.nodes[other.typeIndex()].ephemeral) ++live;
+            }
+            if (!apart || live >= (std::max)(1, static_cast<int>(total / FLOWER_WEIGHT_PER_FLOWER))) continue;
+            float pick = RandomUtil::range(0.0f, total);
+            int type = 0;
+            for (size_t t = 0; t < chance.size(); ++t) { pick -= chance[t]; if (pick < 0.0f) { type = static_cast<int>(t); break; } }
+            const ResourceNodeType& node = data.nodes[type];
+            slot->respawn(type, node.id, node.hits, static_cast<float>(node.growSeconds), { x, seat(world, x, z, ResourceStyle::look(node.id).half), z }, RandomUtil::range(0.0f, 6.2831853f), false);
+            return true;
+        }
+        return false;
     }
 }

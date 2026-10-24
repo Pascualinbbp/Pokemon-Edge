@@ -23,6 +23,7 @@
 #include "state/playerProgress.hpp"
 #include "rules/pokemonRules.hpp"
 #include "state/researchMachine.hpp"
+#include "state/professor.hpp"
 #include "spawn/groundSpawn.hpp"
 #include "dayCycle.hpp"
 #include "habitat/habitatMap.hpp"
@@ -82,6 +83,8 @@ struct Scene {
     PlayerProgress progress;  // nivel, experiencia y medallas del jugador
     PlayerHealth health;      // vida del jugador (caídas, ahogamiento)
     ResearchMachine machine;  // máquina de investigación (fija)
+    Professor oak;            // Profesor Oak (fijo junto al inicio)
+    bool starterRequested = false; // el jugador ha hablado con Oak sin tener pokémon: la interfaz abre la elección del inicial
     bool researchRequested = false; // el jugador ha usado la máquina: la interfaz abre su pantalla
     Companion companion;      // el líder del equipo, que acompaña al jugador y trabaja recursos
     std::string noticeText;   // segunda línea del aviso: recompensa obtenida, pokémon capturado...
@@ -149,15 +152,27 @@ struct Scene {
 
         // Los pokémon son sólidos para quien los pisa: el jugador los rodea igual que a las paredes.
         world.creatures.clear();
-        for (const CaptureTarget* target : wild.loaded()) if (target->hittable()) world.creatures.push_back(target->solid());
+        for (const CaptureTarget* target : wild.loaded()) {
+            if (target->hittable()) world.creatures.push_back(target->solid());
+            else if (const CaptureSequence* seq = target->sequence()) { // la pokéball que captura también es sólida
+                const CaptureSequence::BallPose pose = seq->ballPose();
+                if (pose.scale > 0.2f) world.creatures.push_back({ pose.position, { BALL_SOLID, BALL_SOLID, BALL_SOLID }, false });
+            }
+        }
         world.props.clear();
         for (const Chest& chest : chests.entities) if (chest.closed()) world.props.push_back(chest.solid());
-        for (const ResourceNode& node : nodes) if (nearPlayer(node.body.position, PROP_RANGE)) world.props.push_back(node.solid());
+        for (const ResourceNode& node : nodes) if (!node.gone() && nearPlayer(node.body.position, PROP_RANGE)) world.props.push_back(node.solid());
         world.props.push_back(machine.solid());
+        world.props.push_back(oak.solid());
 
         player.aiming = m_aiming;
         InputState moveInput = input;
         if (fishing.hooked()) moveInput.crouch = moveInput.crouchHeld = false; // los botones de decidir (Liberar) no agachan
+        {   // el compañero con branquias da aire al jugador bajo el agua
+            const OwnedPokemon* lead = storage.active();
+            const PokemonSpecies* gills = lead ? m_data->speciesById(lead->speciesId) : nullptr;
+            player.breathesUnderwater = gills && companion.active() && !companion.changing() && m_data->breathesUnderwater(*gills);
+        }
         player.update(dt, moveInput, camera.yaw(), camera.lookAngle(), world);
         updateHealth(dt);
 
@@ -176,6 +191,11 @@ struct Scene {
         updateBalls(dt);
         chests.update(dt, dayCycle.day(), player.body.position.x, player.body.position.z, *m_data, habitats, world);
         m_concealed = false;
+        m_flowerTimer += dt;
+        if (m_flowerTimer >= FLOWER_CHECK_SECONDS) {
+            m_flowerTimer = 0.0f;
+            if (!player.body.underground) ResourceSpawn::regrowFlower(nodes, *m_data, habitats, world, player.body.position.x, player.body.position.z, m_flowerWeights);
+        }
         for (ResourceNode& node : nodes) {
             node.update(dt);
             if (!m_concealed && concealsPlayer(node)) m_concealed = true;
@@ -304,6 +324,9 @@ struct Scene {
             if (const GroundItemType* reward = item.reward() >= 0 ? &m_data->groundItems[item.reward()] : nullptr) {
                 if (const Item* found = m_data->item(reward->itemId)) s.interactTarget = &m_data->itemName(*found);
             }
+        } else if (m_interaction.kind == Interaction::PROFESSOR) {
+            s.interactVerb = TALK_VERB;
+            s.interactTarget = &PROFESSOR_NAME;
         } else if (m_interaction.kind == Interaction::MACHINE) {
             s.interactVerb = USE_VERB;
             s.interactTarget = &MACHINE_NAME;
@@ -340,6 +363,7 @@ struct Scene {
         s.altitude = (std::max)(0.0f, p.y);
         s.health = health.fraction();
         s.hurt = health.hurtFlash();
+        s.heal = health.healFlash();
         s.oxygen = player.oxygen();
         s.exhausted = player.exhausted();
         s.showOxygen = player.diving() || player.exhausted() || !player.oxygenFull();
@@ -361,18 +385,37 @@ struct Scene {
         fillPrompts(s);
     }
 
-    // °C donde está el jugador: las regiones tienen su clima y fuera baja con la altura.
+    // °C donde está el jugador: las regiones tienen su clima; en tierra baja con la altura (menos en zonas volcánicas) y cada hábitat suma el
+    // suyo (la lava, las aguas termales y los volcanes calientan; el hielo enfría).
     float temperatureAt(float x, float z) const {
-        if (player.body.underground) {
+        const bool deep = player.body.underground;
+        float base;
+        if (deep) {
             const Underground::System* system = habitats.systemAt(x, z);
-            return system && system->kind == Underground::Kind::MINE ? MINE_TEMPERATURE : CAVE_TEMPERATURE;
-        }
-        if (const HabitatMap::Region* region = habitats.regionAt(x, z)) {
+            base = system && system->kind == Underground::Kind::MINE ? MINE_TEMPERATURE : CAVE_TEMPERATURE;
+        } else if (const HabitatMap::Region* region = habitats.regionAt(x, z)) {
             switch (region->kind) {
                 default: return SKY_TEMPERATURE;
             }
+        } else {
+            base = 0.0f;
         }
-        return HabitatMap::temperature(world.groundHeight(x, z)) + HealthRules::LAVA_HEAT * world.lavaHeat(x, z);
+        const float altitude = (std::max)(world.groundHeight(x, z), 0.0f);
+        std::vector<float> weights;
+        habitats.weights(x, z, weights, deep);
+        float sum = 0.0f, temperature = 0.0f;
+        for (size_t h = 0; h < weights.size() && h < m_data->habitats.size(); ++h) {
+            const Habitat& habitat = m_data->habitats[h];
+            const float local = deep ? base : HabitatMap::temperature(altitude, habitat.altitudeCooling);
+            temperature += weights[h] * (local + habitat.warmth);
+            sum += weights[h];
+        }
+        temperature = sum > 0.0f ? temperature / sum : (deep ? base : HabitatMap::temperature(altitude));
+        if (!deep) {
+            temperature += HealthRules::LAVA_HEAT * world.lavaHeat(x, z);
+            if (world.springAt(x, z, player.body.feet()) >= 0) temperature += HealthRules::SPRING_HEAT;
+        }
+        return (std::max)(temperature, HealthRules::MIN_TEMPERATURE);
     }
 
     // Ayudas inferiores: la pesca (lanzar, recoger, Capturar / Liberar) y el buceo.
@@ -429,6 +472,7 @@ struct Scene {
             case Interaction::NODE:    return nodeAnchor(nodes[m_interaction.index]);
             case Interaction::GROUND:  return above(groundItems.entities[m_interaction.index].body, 0.9f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
+            case Interaction::PROFESSOR: return above(oak.body, Professor::HEIGHT + 0.5f);
             case Interaction::WEAKENED: return m_weak ? DirectX::XMFLOAT3{ m_weak->body.position.x, m_weak->body.position.y + CaptureTarget::SIZE + 0.9f, m_weak->body.position.z } : DirectX::XMFLOAT3{};
             default:                   return {};
         }
@@ -685,7 +729,7 @@ struct Scene {
         tickCollectWindow(dt);
         if (species && mode == CompanionRules::Mode::COLLECT && m_collecting) {
             for (ResourceNode& node : nodes) {
-                if (node.depleted() || !inRange(node.body.position)) continue;
+                if (!node.workable() || !inRange(node.body.position)) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
                 const int skillLevel = species->levelIn(type.skillId);
                 if (node.growing() || !node.plant()) {
@@ -711,8 +755,18 @@ struct Scene {
             }
         }
         m_captureRest = (std::max)(0.0f, m_captureRest - dt);
-        const bool resting = mode == CompanionRules::Mode::CAPTURE && m_captureRest > 0.0f; // entre ataques sigue al jugador
-        CaptureTarget* fightTarget = species && mode != CompanionRules::Mode::COLLECT && !resting ? fightTargetFor(mode) : nullptr;
+        // Ataca al mismo salvaje hasta terminar con él (en captura, hasta dejarlo en el punto de captura rápida); el descanso
+        // antes de ir a por otro empieza entonces, no tras cada golpe.
+        if (m_engaged && (mode == CompanionRules::Mode::COLLECT || !engagedValid(mode))) {
+            m_engaged = nullptr;
+            if (mode != CompanionRules::Mode::COLLECT) m_captureRest = RandomUtil::range(CompanionRules::CAPTURE_REST_MIN, CompanionRules::CAPTURE_REST_MAX);
+        }
+        const bool resting = !m_engaged && m_captureRest > 0.0f; // entre combates sigue al jugador
+        CaptureTarget* fightTarget = nullptr;
+        if (species && mode != CompanionRules::Mode::COLLECT && !resting) {
+            fightTarget = m_engaged ? m_engaged : fightTargetFor(mode);
+            m_engaged = fightTarget;
+        }
         if (fightTarget) best = distance2(fightTarget->body.position);
         const DirectX::XMFLOAT3* goal = nodeTarget ? &nodeTarget->body.position : groundTarget ? &groundTarget->body.position :
                                         fightTarget ? &fightTarget->body.position : nullptr;
@@ -732,7 +786,6 @@ struct Scene {
         else if (groundTarget) collect(*groundTarget);
         else if (fightTarget) {
             strike(*fightTarget);
-            if (mode == CompanionRules::Mode::CAPTURE) m_captureRest = RandomUtil::range(CompanionRules::CAPTURE_REST_MIN, CompanionRules::CAPTURE_REST_MAX);
         }
     }
 
@@ -760,6 +813,16 @@ struct Scene {
             }
         }
         return best;
+    }
+
+    // ¿Sigue siendo válido el salvaje con el que está peleando el acompañante?
+    bool engagedValid(CompanionRules::Mode mode) const {
+        for (CaptureTarget* target : wild.loaded()) {
+            if (target != m_engaged) continue;
+            if (!target->hittable() || wild.isHooked(target) || target->body.underground != player.body.underground) return false;
+            return !(mode == CompanionRules::Mode::CAPTURE && target->hpFraction() <= CompanionRules::CAPTURE_STOP_HP);
+        }
+        return false; // descargado o capturado
     }
 
     // Lo que el líder del equipo le haría a un salvaje de un golpe (DamageRules); sin líder o sin datos, nada.
@@ -839,7 +902,12 @@ struct Scene {
             best = d2;
             m_interaction = { Interaction::MACHINE, 0 };
         }
-        if (const int i = nearestIn(nodes, [](const ResourceNode& n) { return !n.depleted(); }, best); i >= 0) {
+        const float ox = oak.body.position.x - player.body.position.x, oz = oak.body.position.z - player.body.position.z;
+        if (const float d2 = ox * ox + oz * oz; d2 <= oak.reach() * oak.reach() && d2 < best) {
+            best = d2;
+            m_interaction = { Interaction::PROFESSOR, 0 };
+        }
+        if (const int i = nearestIn(nodes, [](const ResourceNode& n) { return n.workable(); }, best); i >= 0) {
             const ResourceNode& node = nodes[i];
             if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
             else {
@@ -882,6 +950,10 @@ struct Scene {
             player.act(PlayerAction::PICK);
             collect(groundItems.entities[m_interaction.index]);
         } else if (m_interaction.kind == Interaction::MACHINE) researchRequested = true;
+        else if (m_interaction.kind == Interaction::PROFESSOR) {
+            if (needsStarter()) starterRequested = true;
+            else showNotice(Notice::REWARD, std::string(Professor::NAME) + ": ¡Cuida bien de tu compañero!");
+        }
         else if (m_interaction.kind == Interaction::NODE) {
             ResourceNode& node = nodes[m_interaction.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -1153,7 +1225,7 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, WEAKENED } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PROFESSOR, WEAKENED } kind = NONE;
         int index = -1;
     };
 
@@ -1166,6 +1238,8 @@ struct Scene {
     static constexpr const char* CAPTURE_VERB = "Capturar";
     static constexpr const char* PICK_VERB = "Recoger";
     static constexpr const char* USE_VERB = "Usar";
+    static constexpr const char* TALK_VERB = "Hablar con";
+    inline static const std::string PROFESSOR_NAME = Professor::NAME;
     inline static const std::string GROUND_NAME = "objeto brillante";
     inline static const std::string MACHINE_NAME = "máquina de investigación";
     static constexpr float CAVE_TEMPERATURE = 12.0f;   // °C dentro de la cueva, la mina y la isla del cielo
@@ -1173,6 +1247,9 @@ struct Scene {
     static constexpr float SKY_TEMPERATURE = 8.0f;
 
     const GameData* m_data;
+    static constexpr float FLOWER_CHECK_SECONDS = 2.0f; // cada cuánto se intenta hacer brotar una flor
+    float m_flowerTimer = 0.0f;
+    std::vector<float> m_flowerWeights;
     float m_clock = 0.0f;       // segundos de partida (marea)
     float m_cascadeTime = 0.0f; // segundos que lleva el jugador en una cascada con un pokémon que la remonta
     static constexpr float CASCADE_RANGE = 5.0f;
@@ -1186,6 +1263,8 @@ struct Scene {
     static constexpr float COLLECT_WAIT_MAX = 60.0f;
     static constexpr float HOLD_REPEAT = 0.45f;        // segundos entre golpes al mantener pulsado interactuar
     float m_collectClock = 12.0f;
+    static constexpr float BALL_SOLID = 0.26f; // semiancho de la caja de la pokéball mientras captura
+    CaptureTarget* m_engaged = nullptr; // salvaje al que el acompañante está atacando ahora
     float m_captureRest = 0.0f; // descanso del acompañante entre ataques en modo captura
     bool m_collecting = false;
     float m_holdClock = 0.0f;

@@ -41,6 +41,8 @@ struct Habitat {
     HabitatPlacement placement = HabitatPlacement::ANY;
     int besideId = -1;        // BESIDE: id del hábitat al que rodea
     int blendA = -1;              int blendB = -1;
+    float warmth = 0.0f;           // °C que suma a la temperatura de la zona (volcán y aguas termales calientan; el hielo enfría)
+    float altitudeCooling = 1.0f;  // cuánto enfría la altura aquí (1 = normal; en un volcán casi nada, el calor del magma lo compensa)
     float friction = 1.0f;    // agarre del suelo: 1 = normal; el hielo resbala (cerca de 0)
     int minChests = 0;       // cofres a la vez por zona (se sortea cada día)
     int maxChests = 2;

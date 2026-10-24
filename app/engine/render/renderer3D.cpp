@@ -282,13 +282,17 @@ namespace {
             float depth = input.info.x;
             float2 flow = input.info.yz;
 
-            if (lava) { // roca fundida: costra oscura que se agrieta sobre brasa viva, siempre brillante
+            if (lava) { // roca fundida que se enfría río abajo: la costra oscura crece hasta que solo queda roca volcánica
+                float cool = saturate((input.kind - 7.0f) / 0.45f);
                 float2 q = pxz * 0.35f + flow * t * 0.25f;
                 float crack = 0.5f + 0.5f * sin(q.x * 2.3f + sin(q.y * 1.7f + t * 0.6f) * 2.0f) * sin(q.y * 2.1f + sin(q.x * 1.3f - t * 0.5f) * 2.0f);
-                float3 ember = lerp(float3(0.45f, 0.06f, 0.02f), float3(1.0f, 0.62f, 0.12f), crack);
-                float3 crust = float3(0.10f, 0.05f, 0.04f);
+                float3 ember = lerp(float3(0.55f, 0.08f, 0.02f), float3(1.0f, 0.60f, 0.10f), crack);
+                float3 crust = float3(0.10f, 0.06f, 0.05f);
                 float3 lc = lerp(ember, crust, smoothstep(0.65f, 0.95f, 1.0f - crack));
-                return float4(ApplyEnv(lc * 0.35f, input.wpos) + lc * 0.9f, 1.0f);
+                lc = lerp(lc, crust, saturate(cool * 1.3f) * saturate(cool * 1.3f));
+                float glow = 1.0f - 0.85f * cool;
+                float alpha = 1.0f - smoothstep(0.7f, 1.0f, cool);
+                return float4(ApplyEnv(lc * 0.35f, input.wpos) + lc * 0.9f * glow, alpha);
             }
             float3 shallow, deep;
             float full;
@@ -490,9 +494,14 @@ std::vector<Renderer3D::Chunk> Renderer3D::createWater(ID3D11Device* device, con
         }
     };
 
+    const auto codeAt = [&](int col, int row) { // la lava lleva además cuánto se ha enfriado (parte decimal, hasta 0,45)
+        float k = code(habitats.kindAtNode(col, row));
+        if (k > 6.5f && k < 7.5f) k += 0.45f * habitats.lavaCoolAt(col, row);
+        return k;
+    };
     const auto vertexAt = [&](int col, int row) {
         float y = level.at(col, row), depth = (std::max)(0.0f, level.at(col, row) - ground.at(col, row)), kind = 0.0f;
-        if (wet(col, row)) kind = code(habitats.kindAtNode(col, row));
+        if (wet(col, row)) kind = codeAt(col, row);
         else { // el borde de la orilla toma el nivel y el tipo del agua que tiene al lado
             float sum = 0.0f;
             int count = 0;
@@ -500,7 +509,7 @@ std::vector<Renderer3D::Chunk> Renderer3D::createWater(ID3D11Device* device, con
                 for (int dc = -1; dc <= 1; ++dc) {
                     if (!wet(col + dc, row + dr)) continue;
                     sum += level.at(col + dc, row + dr);
-                    kind = code(habitats.kindAtNode(col + dc, row + dr));
+                    kind = codeAt(col + dc, row + dr);
                     ++count;
                 }
             }
@@ -553,7 +562,7 @@ std::vector<Renderer3D::Chunk> Renderer3D::createCaveWater(ID3D11Device* device,
 // recoge hacia abajo hasta una punta) en vez de la roca o el abismo; la isla parece apoyada en una nube. Colores y lóbulos fijos.
 std::vector<Renderer3D::Chunk> Renderer3D::createSkyBase(ID3D11Device* device, const HabitatMap& habitats) {
     constexpr int SEGMENTS = 72, RINGS = 8;              // anillos desde el borde (0) hasta la punta
-    constexpr float LIP = 4.0f;                          // cuánto sobresale la nube del borde del mar
+    constexpr float LIP = 6.0f;                          // cuánto sobresale la nube del borde del mar
     constexpr XMFLOAT3 TOP = { 0.98f, 0.98f, 1.0f }, BOTTOM = { 0.70f, 0.76f, 0.88f };
     std::vector<Chunk> chunks;
     for (const HabitatMap::Region& region : habitats.regions()) {
@@ -570,7 +579,7 @@ std::vector<Renderer3D::Chunk> Renderer3D::createSkyBase(ID3D11Device* device, c
                 const float a = static_cast<float>(i) / SEGMENTS * XM_2PI;
                 const float ca = std::cos(a), sa = std::sin(a);
                 const float edge = region.seaRadius * HabitatMap::skyShape(region, ca, sa);
-                const float lump = 1.0f + 0.08f * std::sin(3.0f * a + region.lobe[0] + 2.0f * k) + 0.05f * std::sin(7.0f * a + region.lobe[1] + 1.3f * k) + 0.04f * std::sin(13.0f * a + region.lobe[2] + 0.7f * k);
+                const float lump = 1.0f + 0.10f * std::sin(3.0f * a + region.lobe[0] + 2.0f * k) + 0.09f * std::sin(7.0f * a + region.lobe[1] + 1.3f * k) + 0.08f * std::sin(13.0f * a + region.lobe[2] + 0.7f * k) + 0.05f * std::sin(23.0f * a + region.lobe[0] * 2.0f + 0.9f * k); // borde de nube abultado
                 float radius, y;
                 if (k == 0) { radius = edge - 0.5f; y = level - 0.4f; }                       // bajo la superficie del mar
                 else if (k == 1) { radius = edge + LIP * lump; y = level - 1.6f; }            // el borde abultado
@@ -1012,10 +1021,11 @@ void Renderer3D::collect(const Scene& scene) {
     for (const Chest& chest : scene.chests.entities) addChest(chest);
     for (const ResourceNode& node : scene.nodes) {
         const float dx = node.body.position.x - p.x, dz = node.body.position.z - p.z;
-        if (dx * dx + dz * dz <= kNodeDrawRange * kNodeDrawRange) addNode(node);
+        if (!node.gone() && dx * dx + dz * dz <= kNodeDrawRange * kNodeDrawRange) addNode(node);
     }
     for (const GroundItem& item : scene.groundItems.entities) addGroundItem(item);
     addMachine();
+    addProfessor(scene);
 
     for (const Pokeball& ball : scene.balls) addBall(ball);
 }
@@ -1049,6 +1059,15 @@ void Renderer3D::addPlayer(const Scene& scene) {
     limb(skin, 0.13f, ARM, leftArm);
     limb(pants, 0.18f, LEG, limbFrame(LEG_X, 0.0f, pose.rightLeg, 0.0f));
     limb(pants, 0.18f, LEG, limbFrame(-LEG_X, 0.0f, pose.leftLeg, 0.0f));
+
+    if (player.diving() && player.breathesUnderwater) { // burbuja de aire alrededor de la cabeza
+        const float t = scene.world.time;
+        add(m_cube, XMMatrixScaling(0.78f, 0.78f, 0.78f) * XMMatrixRotationY(t * 0.6f) * XMMatrixTranslation(0.0f, 0.68f, 0.02f) * hip, { 0.78f, 0.93f, 1.0f, 0.22f }, false);
+        for (int i = 0; i < 6; ++i) {
+            const float a = t * 1.4f + i * 1.0472f, rise = std::fmod(t * 0.7f + i * 0.17f, 1.0f);
+            add(m_cube, XMMatrixScaling(0.07f, 0.07f, 0.07f) * XMMatrixTranslation(std::cos(a) * 0.42f, 0.35f + rise * 0.7f, std::sin(a) * 0.42f) * hip, { 0.9f, 0.97f, 1.0f, 0.45f }, false);
+        }
+    }
 
     if (pose.holding != PlayerAction::NONE) {
         const XMMATRIX hand = XMMatrixRotationX(-pose.toolTilt) * XMMatrixTranslation(0.0f, -ARM, 0.0f) * rightArm; // marco de la mano: -y sigue la dirección del brazo
@@ -1416,6 +1435,25 @@ void Renderer3D::addGroundItem(const GroundItem& item) {
 }
 
 // Máquina de investigación: cuerpo metálico con una pantalla que brilla, un panel y una antena.
+// Profesor Oak: bata blanca, pantalón oscuro y pelo canoso; se vuelve hacia el jugador.
+void Renderer3D::addProfessor(const Scene& scene) {
+    const XMFLOAT3& p = Professor::POSITION;
+    const XMFLOAT3& you = scene.player.body.position;
+    const XMMATRIX place = XMMatrixRotationY(Professor::yawToward(you.x, you.z)) * XMMatrixTranslation(p.x, p.y, p.z);
+    const auto part = [&](const XMFLOAT3& size, const XMFLOAT3& at, const XMFLOAT3& color) {
+        add(m_cube, XMMatrixScaling(size.x, size.y, size.z) * XMMatrixTranslation(at.x, at.y, at.z) * place, { color.x, color.y, color.z, 0.0f });
+    };
+    const XMFLOAT3 coat = { 0.93f, 0.93f, 0.95f }, skin = { 0.93f, 0.76f, 0.60f }, hair = { 0.62f, 0.60f, 0.58f }, pants = { 0.30f, 0.27f, 0.24f }, shirt = { 0.40f, 0.30f, 0.55f };
+    part({ 0.17f, 0.80f, 0.20f }, { 0.12f, 0.40f, 0.0f }, pants);                  // piernas
+    part({ 0.17f, 0.80f, 0.20f }, { -0.12f, 0.40f, 0.0f }, pants);
+    part({ 0.52f, 0.70f, 0.30f }, { 0.0f, 1.15f, 0.0f }, coat);                    // bata
+    part({ 0.20f, 0.60f, 0.05f }, { 0.0f, 1.20f, 0.16f }, shirt);                  // camisa bajo la bata
+    part({ 0.14f, 0.62f, 0.16f }, { 0.34f, 1.12f, 0.0f }, coat);                   // brazos
+    part({ 0.14f, 0.62f, 0.16f }, { -0.34f, 1.12f, 0.0f }, coat);
+    part({ 0.30f, 0.30f, 0.30f }, { 0.0f, 1.65f, 0.0f }, skin);                    // cabeza
+    part({ 0.33f, 0.12f, 0.33f }, { 0.0f, 1.83f, -0.02f }, hair);                  // pelo
+}
+
 void Renderer3D::addMachine() {
     const XMMATRIX place = XMMatrixRotationY(ResearchMachine::YAW) *
                            XMMatrixTranslation(ResearchMachine::POSITION.x, ResearchMachine::POSITION.y, ResearchMachine::POSITION.z);

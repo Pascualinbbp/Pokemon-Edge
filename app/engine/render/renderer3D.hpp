@@ -125,6 +125,7 @@ class Renderer3D {
     void addNode(const ResourceNode& node);
     void addGroundItem(const GroundItem& item);
     void addMachine();
+    void addProfessor(const Scene& scene);
     void addCreature(const DirectX::XMFLOAT3& position, float size, float yaw, int speciesId, bool shiny);
     void setObject(ID3D11DeviceContext* context, DirectX::CXMMATRIX world, DirectX::CXMMATRIX worldViewProj,
         const DirectX::XMFLOAT4& tint) const;

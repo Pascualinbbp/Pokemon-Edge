@@ -68,6 +68,7 @@ struct GameStatus {
     float altitude = 0.0f;                       // m sobre el mar
     float health = 1.0f;                         // vida (0..1)
     float hurt = 0.0f;                           // 0..1: destello de dolor
+    float heal = 0.0f;                           // 0..1: brillo de curación
     float oxygen = 1.0f;                         // aire restante (0..1)
     bool showOxygen = false;                     // el medidor solo se ve bajo el agua o recuperándose
     bool exhausted = false;                      // sin aire

@@ -87,11 +87,11 @@ class Player {
         trackFall(streaming);
         if (!streaming) world.step(body, dt);
         if (!streaming && !inWater && !wasGrounded && body.onGround) { // al tocar el suelo: el agua poco profunda también amortigua
-            m_impact = HealthRules::impactInWater(m_fallSpeed, world.waterDepth(body.position.x, body.position.z, body.feet()));
+            m_impact = HealthRules::impactInWater(m_fallSpeed, columnDepth(world));
             land(input);
         }
-        if (inWater && m_fallSpeed > 0.0f) { // cae al agua: la profundidad amortigua la caída
-            m_impact = HealthRules::impactInWater(m_fallSpeed, world.waterDepth(body.position.x, body.position.z, body.feet()));
+        if (inWater && m_fallSpeed > 0.0f) { // cae al agua: lo profunda que sea la columna de agua amortigua la caída
+            m_impact = HealthRules::impactInWater(m_fallSpeed, columnDepth(world));
         }
         if (body.onGround || streaming || inWater) m_fallSpeed = 0.0f;
 
@@ -104,6 +104,11 @@ class Player {
 
     bool crouched() const { return m_crouching; }
     // Velocidad (m/s) con la que acaba de tocar el suelo tras caer; la lee y la borra quien calcule el daño.
+    // Profundidad de toda la columna de agua bajo el jugador (del fondo a la superficie), no solo lo que lleva sumergido.
+    float columnDepth(const Physics::World& world) const {
+        const float x = body.position.x, z = body.position.z;
+        return (std::max)(0.0f, world.waterLevel(x, z, body.feet()) - world.groundHeight(x, z));
+    }
     float takeImpact() { const float v = m_impact; m_impact = 0.0f; return v; }
     // Sin aire con la cabeza bajo el agua (se ahoga).
     bool drowning() const { return m_drowning; }
@@ -118,7 +123,7 @@ class Player {
     bool streaming() const { return m_streaming; } // volando en una corriente ascendente
     float oxygen() const { return oxygenCapacity > 0.0f ? (std::clamp)(m_oxygen / oxygenCapacity, 0.0f, 1.0f) : 0.0f; }
     bool oxygenFull() const { return m_oxygen >= oxygenCapacity - 1.0e-3f; }
-    bool exhausted() const { return m_exhausted; } // sin aire: sube solo a la superficie
+    bool exhausted() const { return m_exhausted; } // sin aire (recibe daño; el jugador decide)
 
     // --- Acciones (usar una herramienta...) ---
     // Empieza la animación de una acción (si ya hay una del mismo tipo a medias, la reinicia).
@@ -225,7 +230,7 @@ class Player {
 
     // Nadar en la superficie o sumergirse: avanzando mientras la cámara mira hacia abajo (no hay tecla de bucear). Sumergido el cuerpo
     // sigue hacia donde mira la cámara. Correr también vale en el agua; "saltar" en la superficie da un impulso. Bajo el agua se gasta
-    // aire; sin aire el cuerpo sube solo a la superficie.
+    // aire; sin aire no sube solo: el jugador decide qué hacer y recibe daño.
     void updateWater(float dt, const InputState& input, float look, const Physics::World& world, float dirX, float dirZ, float amount, bool forward) {
         m_swimming = true;
         m_climbing = m_sliding = m_crouching = m_crouchQueued = false;
@@ -246,7 +251,7 @@ class Player {
             body.underwater = true;
             body.onGround = false;
             const float push = (std::clamp)(input.moveY, -1.0f, 1.0f);
-            const float vy = m_exhausted ? SURFACE_RISE : -std::sin(look) * base * push;
+            const float vy = -std::sin(look) * base * push; // sin aire el jugador decide: solo recibe daño y el aviso
             horizontal *= 1.0f - std::fabs(push) * (1.0f - std::cos(look));
             body.velocity.y = vy;
             if (body.position.y >= surfaceY && vy >= 0.0f) { // volvió a la superficie

@@ -93,19 +93,31 @@ class ResourceNode {
 
     // 'plant': se riega para acelerar su rebrote. 'regrowSeconds': tiempo en volver a estar listo. 'growth' (0..1): cuánto lleva.
     ResourceNode(int typeIndex, int typeId, int hitsNeeded, bool plant, float regrowSeconds, float growth,
-                 const DirectX::XMFLOAT3& position, float yaw)
+                 const DirectX::XMFLOAT3& position, float yaw, bool waterable = true, bool ephemeral = false)
         : m_type(typeIndex), m_typeId(typeId), m_need(hitsNeeded), m_yaw(yaw), m_plant(plant),
-          m_regrowSeconds((std::max)(1.0f, regrowSeconds)), m_growth(growth) {
+          m_regrowSeconds((std::max)(1.0f, regrowSeconds)), m_growth(growth), m_waterable(waterable), m_ephemeral(ephemeral) {
         body.position = position;
+    }
+
+    // Una flor recogida desaparece: su hueco queda libre hasta que el hábitat haga brotar otra (respawn).
+    bool gone() const { return m_gone; }
+    float goneTime() const { return m_goneTime; }
+    void respawn(int typeIndex, int typeId, int hitsNeeded, float growSeconds, const DirectX::XMFLOAT3& position, float yaw, bool underground) {
+        m_type = typeIndex; m_typeId = typeId; m_need = hitsNeeded; m_yaw = yaw; m_regrowSeconds = (std::max)(1.0f, growSeconds);
+        m_growth = 0.0f; m_hits = 0; m_gone = false; m_goneTime = 0.0f; m_harvested = false; m_plant = true; m_waterable = false; m_ephemeral = true;
+        body.position = position;
+        body.underground = underground;
     }
 
     int typeIndex() const { return m_type; }
     int typeId() const { return m_typeId; }
     float yaw() const { return m_yaw; }
     bool plant() const { return m_plant; }
-    bool growing() const { return m_growth < 1.0f; } // aún no se puede recoger (o extraer)
-    bool depleted() const { return !m_plant && growing(); } // extraíble agotado: nada que hacer hasta que se regenere
+    bool growing() const { return m_growth < 1.0f && !m_gone; } // aún no se puede recoger (o extraer)
+    bool depleted() const { return m_gone || (!m_plant && growing()); } // extraíble agotado: nada que hacer hasta que se regenere
     float growth() const { return m_growth; }
+    // ¿Se puede trabajar ahora? (no una flor o alga que aún crece sola, ni un nodo agotado)
+    bool workable() const { return !depleted() && !(m_plant && growing() && !m_waterable); }
 
     // Distancia máxima (desde el centro) a la que el jugador puede golpearlo.
     float reach() const { return INTERACT_RANGE + ResourceStyle::look(m_typeId).half; }
@@ -118,13 +130,15 @@ class ResourceNode {
     // Devuelve true si cuenta (no está agotado ni en enfriamiento).
     bool work(bool byPlayer, float speed = 1.0f) {
         if (depleted() || m_cooldown > 0.0f) return false;
+        if (m_plant && growing() && !m_waterable) return false; // las flores y algas crecen solas: no se riegan
         (byPlayer ? m_playerTimer : m_companionTimer) = TEAM_WINDOW;
         const float rate = teamBonus(byPlayer) * speed;
         if (growing()) m_growth = (std::min)(1.0f, m_growth + WATER_STEP * rate);
         else if (++m_hits >= m_need) {
             m_hits = 0;
-            m_growth = 0.0f; // queda el tocón / la base y empieza a regenerarse
             m_harvested = true;
+            if (m_ephemeral) { m_gone = true; m_goneTime = 0.0f; }
+            else m_growth = 0.0f; // queda el tocón / la base y empieza a regenerarse
         }
         m_cooldown = HIT_COOLDOWN / rate;
         m_shake = SHAKE_TIME;
@@ -144,7 +158,8 @@ class ResourceNode {
     void update(float dt) {
         m_cooldown = (std::max)(0.0f, m_cooldown - dt);
         m_shake = (std::max)(0.0f, m_shake - dt);
-        if (growing()) m_growth = (std::min)(1.0f, m_growth + dt / m_regrowSeconds);
+        if (m_gone) m_goneTime += dt;
+        else if (growing()) m_growth = (std::min)(1.0f, m_growth + dt / m_regrowSeconds);
         m_playerTimer = (std::max)(0.0f, m_playerTimer - dt);
         m_companionTimer = (std::max)(0.0f, m_companionTimer - dt);
     }
@@ -167,6 +182,10 @@ class ResourceNode {
     bool m_plant;
     float m_regrowSeconds;
     float m_growth;                // 0..1; 1 = listo
+    bool m_waterable = true;       // regarla acelera su crecimiento (solo arbustos)
+    bool m_ephemeral = false;      // al recogerse desaparece
+    bool m_gone = false;
+    float m_goneTime = 0.0f;
     int m_hits = 0;
     bool m_harvested = false;
     float m_cooldown = 0.0f;

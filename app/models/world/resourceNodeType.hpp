@@ -8,7 +8,7 @@ struct ResourceNodeType {
     std::string name;
     std::string action; // verbo de la ayuda: "Talar", "Picar"...
     int materialId = -1;
-    int skillId = -1;   // habilidad necesaria para recolectarlo
+    int skillId = -1;   // habilidad necesaria para recolectarlo (-1 = ninguna)
     int level = 1;      // nivel mínimo de esa habilidad
     int hits = 1;
     int growSeconds = 0; // 0 = se extrae con su habilidad; mayor = planta cuyos frutos rebrotan solos en ese tiempo (regarla lo acelera)
@@ -16,5 +16,8 @@ struct ResourceNodeType {
     bool plant() const { return growSeconds > 0; }
     int minYield = 1;
     int maxYield = 1;
+    bool waterable = false;  // regarla acelera su crecimiento (arbustos); las flores y algas crecen solas
+    bool ephemeral = false;  // flor: desaparece al recogerse y el hábitat hace brotar otras con el tiempo
+    bool embedded = false;   // mineral: en cuevas y minas sale incrustado en las paredes, a distintas alturas (no en el suelo)
     bool aquatic = false; // crece bajo el agua (coral, algas): solo se coloca en el fondo del agua
 };

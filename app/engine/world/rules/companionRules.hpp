@@ -25,7 +25,7 @@ namespace CompanionRules {
     inline constexpr float RANGED_APPROACH = 0.75f;  // fracción del alcance a la que se detiene un atacante a distancia
     inline constexpr float WEAK_PROMPT_TIME = 8.0f;  // segundos que se ofrece capturar al debilitado antes de retirar el aviso
     inline constexpr float WEAK_REACH = 14.0f;       // distancia a la que se puede capturar al salvaje debilitado
-    inline constexpr float CAPTURE_REST_MIN = 6.0f;  // en modo captura, descanso tras cada golpe antes de atacar a otro (o al mismo)
+    inline constexpr float CAPTURE_REST_MIN = 6.0f;  // en modo captura, descanso, al terminar con un salvaje, antes de atacar a otro
     inline constexpr float CAPTURE_REST_MAX = 12.0f;
     inline constexpr float CAPTURE_STOP_HP = 0.3f;   // en modo captura deja de atacar por debajo de esta fracción de vida
 }

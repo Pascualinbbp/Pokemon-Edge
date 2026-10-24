@@ -81,57 +81,107 @@ namespace HudComponent {
         }
 
         // Medidor de aire (solo bajo el agua o recuperándolo) y temperatura / altura / región, bajo el nivel del jugador.
-        inline void drawVitals(ImDrawList* dl, const GameStatus& status) {
+        // Arco de un anillo desde arriba en el sentido del reloj ('fraction' 0..1 de la vuelta).
+        inline void ringArc(ImDrawList* dl, const ImVec2& c, float radius, float from, float to, ImU32 color, float width) {
+            if (to <= from) return;
+            constexpr float START = -1.5707963f, TURN = 6.2831853f;
+            dl->PathArcTo(c, radius, START + TURN * from, START + TURN * to, 48);
+            dl->PathStroke(color, 0, width);
+        }
+
+        // Círculo del jugador (arriba a la derecha, se abre con la tecla del inventario): alrededor, anillos de vida, experiencia y aire.
+        // Sin números: la vida pierde un tramo blanco que se va apagando al recibir daño y brilla en verde, con cruces que suben, al curarse.
+        inline void drawVitals(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
-            constexpr float WIDTH = 150.0f;
-            const ImVec2 at(screen.x - WIDTH - 24.0f, 14.0f);
-            float y = at.y + ImGui::GetFontSize() + 18.0f;
+            const float dt = ImGui::GetIO().DeltaTime, time = static_cast<float>(ImGui::GetTime());
+            constexpr float CORE = 28.0f, HEALTH_R = 36.0f, XP_R = 45.0f, AIR_R = 53.0f;
+            ImVec2 c(screen.x - 74.0f, 74.0f);
+            const float health = (std::clamp)(status.health, 0.0f, 1.0f);
+            static float ghost = 1.0f; // la vida que se acaba de perder, que se apaga despacio
+            ghost = (std::max)(health, ghost - dt * 0.35f);
+            if (status.hurt > 0.0f) { c.x += std::sin(time * 70.0f) * 2.5f * status.hurt; c.y += std::cos(time * 63.0f) * 2.0f * status.hurt; }
+
+            const ImU32 track = IM_COL32(255, 255, 255, 38);
+            dl->AddCircleFilled(c, CORE + 3.0f, IM_COL32(12, 16, 24, 190), 40);
+            dl->AddCircle(c, HEALTH_R, track, 48, 7.0f);
+            const ImU32 healthColor = health < 0.25f ? IM_COL32(235, 70, 60, 255) : health < 0.5f ? IM_COL32(255, 170, 50, 255) : IM_COL32(90, 220, 120, 255);
+            ringArc(dl, c, HEALTH_R, health, ghost, IM_COL32(255, 255, 255, 200), 7.0f);
+            ringArc(dl, c, HEALTH_R, 0.0f, health, healthColor, 7.0f);
+            if (status.heal > 0.0f) {
+                ringArc(dl, c, HEALTH_R, 0.0f, health, IM_COL32(190, 255, 220, static_cast<int>(200.0f * status.heal)), 10.0f * status.heal + 7.0f);
+                dl->AddCircle(c, HEALTH_R + 6.0f * (1.0f - status.heal), IM_COL32(120, 255, 190, static_cast<int>(120.0f * status.heal)), 48, 2.0f);
+                for (int i = 0; i < 4; ++i) { // cruces que suben
+                    const float phase = std::fmod(time * 0.9f + i * 0.25f, 1.0f), x = c.x + (i - 1.5f) * 14.0f, y = c.y + 8.0f - phase * 46.0f, r = 4.0f;
+                    const ImU32 plus = IM_COL32(150, 255, 200, static_cast<int>(230.0f * (1.0f - phase) * status.heal));
+                    dl->AddLine(ImVec2(x - r, y), ImVec2(x + r, y), plus, 2.0f);
+                    dl->AddLine(ImVec2(x, y - r), ImVec2(x, y + r), plus, 2.0f);
+                }
+            }
+            if (status.hurt > 0.0f) dl->AddCircle(c, HEALTH_R, IM_COL32(255, 60, 40, static_cast<int>(160.0f * status.hurt)), 48, 11.0f);
+            if (status.burning) dl->AddCircle(c, HEALTH_R + 2.0f, IM_COL32(255, static_cast<int>(120 + 60 * std::sin(time * 14.0f)), 30, 170), 48, 4.0f);
+
+            dl->AddCircle(c, XP_R, track, 48, 3.0f);
+            ringArc(dl, c, XP_R, 0.0f, (std::clamp)(status.playerXp, 0.0f, 1.0f), IM_COL32(250, 205, 70, 255), 3.0f);
+            if (status.showOxygen) {
+                const float air = (std::clamp)(status.oxygen, 0.0f, 1.0f);
+                const bool low = status.exhausted || air < 0.25f;
+                dl->AddCircle(c, AIR_R, track, 48, 3.0f);
+                ringArc(dl, c, AIR_R, 0.0f, air, low ? IM_COL32(235, 70, 60, static_cast<int>(150 + 105 * std::sin(time * 12.0f))) : IM_COL32(90, 190, 255, 255), 3.0f);
+            }
+
+            // El jugador: cabeza y hombros; se tiñe de rojo con el daño y de verde al curarse.
+            const ImU32 body = status.hurt > 0.0f ? IM_COL32(255, 120, 110, 255) : status.heal > 0.0f ? IM_COL32(170, 255, 205, 255) : IM_COL32(235, 238, 245, 255);
+            dl->AddCircleFilled(ImVec2(c.x, c.y - 7.0f), 8.5f, body, 24);
+            dl->PathArcTo(ImVec2(c.x, c.y + 20.0f), 16.0f, 3.1415927f * 1.08f, 3.1415927f * 1.92f, 20);
+            dl->PathFillConvex(body);
+            const bool pad = isGamepad(device);
+            GuiDraw::keycap(dl, ImVec2(c.x - (pad ? 18.0f : 9.0f), c.y + AIR_R + 7.0f), pad ? "View" : "I", pad ? 36.0f : 18.0f, 20.0f);
+
+            // Temperatura y altura debajo; el aviso de región y los estados a su lado.
             char text[64];
             std::snprintf(text, sizeof(text), "%.0f °C   %.0f m", status.temperature, status.altitude);
-            const ImU32 tone = status.temperature <= 0.0f ? IM_COL32(170, 220, 255, 255) : status.temperature < 10.0f ? IM_COL32(200, 230, 255, 235) : IM_COL32(255, 255, 255, 220);
-            dl->AddText(ImVec2(at.x, y), tone, text);
+            const ImU32 tone = status.temperature >= 45.0f ? IM_COL32(255, 120, 60, 255) : status.temperature >= 32.0f ? IM_COL32(255, 190, 90, 255) : status.temperature <= 0.0f ? IM_COL32(170, 220, 255, 255) : status.temperature < 10.0f ? IM_COL32(200, 230, 255, 235) : IM_COL32(255, 255, 255, 220);
+            const float width = ImGui::CalcTextSize(text).x;
+            float y = c.y + AIR_R + 34.0f;
+            dl->AddText(ImVec2(c.x + HEALTH_R - width, y), tone, text);
             y += ImGui::GetFontSize() + 4.0f;
-            if (status.burning) {
-                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 120, 40, 255), "¡Quemado!");
+            const auto line = [&](const char* label, ImU32 color) {
+                dl->AddText(ImVec2(c.x + HEALTH_R - ImGui::CalcTextSize(label).x, y), color, label);
                 y += ImGui::GetFontSize() + 4.0f;
-            }
-            if (status.spring == 1) {
-                std::snprintf(text, sizeof(text), "Aguas termales: %.0f s", status.springLeft);
-                dl->AddText(ImVec2(at.x, y), IM_COL32(120, 235, 215, 255), text);
-                y += ImGui::GetFontSize() + 4.0f;
-            } else if (status.spring == 2) {
-                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 110, 90, 255), "¡Demasiado tiempo en el agua!");
-                y += ImGui::GetFontSize() + 4.0f;
-            }
-            if (status.regionName) {
-                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 215, 90, 235), status.regionName->c_str());
-                y += ImGui::GetFontSize() + 4.0f;
-            }
-            if (status.health < 0.999f || status.hurt > 0.0f) {
-                const float k = (std::clamp)(status.health, 0.0f, 1.0f);
-                const ImU32 fill = k < 0.25f ? IM_COL32(235, 70, 60, 255) : k < 0.5f ? IM_COL32(255, 170, 50, 255) : IM_COL32(90, 220, 120, 255);
-                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 255, 255, 235), "Vida");
-                const ImVec2 bar(at.x, y + ImGui::GetFontSize() + 2.0f);
-                dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH, bar.y + 8.0f), IM_COL32(255, 255, 255, 50), 4.0f);
-                dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH * k, bar.y + 8.0f), fill, 4.0f);
-                y += ImGui::GetFontSize() + 18.0f;
-            }
-            if (status.showOxygen) {
-                const float k = (std::clamp)(status.oxygen, 0.0f, 1.0f);
-                const ImU32 fill = status.exhausted || k < 0.25f ? IM_COL32(235, 70, 60, 255) : IM_COL32(90, 190, 255, 255);
-                dl->AddText(ImVec2(at.x, y), IM_COL32(255, 255, 255, 235), "Aire");
-                const ImVec2 bar(at.x, y + ImGui::GetFontSize() + 2.0f);
-                dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH, bar.y + 8.0f), IM_COL32(255, 255, 255, 50), 4.0f);
-                dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH * k, bar.y + 8.0f), fill, 4.0f);
-            }
+            };
+            if (status.burning) line("¡Quemado!", IM_COL32(255, 120, 40, 255));
+            if (status.spring == 1) line("Aguas termales", IM_COL32(120, 235, 215, 255));
+            else if (status.spring == 2) line("¡Demasiado tiempo en el agua!", IM_COL32(255, 110, 90, 255));
+            if (status.exhausted) line("¡Sin aire!", IM_COL32(255, 90, 80, 255));
+            if (status.regionName) line(status.regionName->c_str(), IM_COL32(255, 215, 90, 235));
         }
 
         // Tinte de pantalla: azul bajo el agua, oscuridad en cuevas y minas.
+        // Viñeta de pantalla: un borde que se desvanece hacia el centro (daño, curación, quemadura).
+        inline void vignette(ImDrawList* dl, const ImVec2& screen, int r, int g, int b, float strength) {
+            if (strength <= 0.0f) return;
+            const int a = static_cast<int>((std::clamp)(strength, 0.0f, 1.0f) * 150.0f);
+            const ImU32 edge = IM_COL32(r, g, b, a), none = IM_COL32(r, g, b, 0);
+            const float w = screen.x * 0.18f, h = screen.y * 0.22f;
+            dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(screen.x, h), edge, edge, none, none);
+            dl->AddRectFilledMultiColor(ImVec2(0, screen.y - h), ImVec2(screen.x, screen.y), none, none, edge, edge);
+            dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(w, screen.y), edge, none, none, edge);
+            dl->AddRectFilledMultiColor(ImVec2(screen.x - w, 0), ImVec2(screen.x, screen.y), none, edge, edge, none);
+        }
+
+        // Tinte de pantalla: azul bajo el agua, oscuridad en cuevas y minas, y los efectos de daño (rojo), quemadura (naranja), falta de aire y curación (verde).
         inline void drawTint(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
-            if (status.hurt > 0.0f) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(220, 20, 20, static_cast<int>(110.0f * status.hurt)));
+            const float time = static_cast<float>(ImGui::GetTime());
             if (status.underwater) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(20, 70, 120, 110));
             if (status.darkness > 0.0f) dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(0, 0, 0, static_cast<int>(120.0f * status.darkness))); // cueva y mina: oscuras
+            if (status.burning) vignette(dl, screen, 255, 110, 20, 0.55f + 0.25f * std::sin(time * 13.0f));
+            if (status.exhausted && status.underwater) vignette(dl, screen, 20, 40, 120, 0.7f + 0.2f * std::sin(time * 9.0f));
+            if (status.hurt > 0.0f) {
+                dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(220, 20, 20, static_cast<int>(60.0f * status.hurt)));
+                vignette(dl, screen, 230, 20, 20, status.hurt * 1.2f);
+            }
+            if (status.heal > 0.0f) vignette(dl, screen, 70, 235, 160, status.heal * 0.8f);
         }
 
         // Aviso de autoguardado (esquina inferior derecha): panel translúcido con el contorno de una pokéball
@@ -183,9 +233,9 @@ namespace HudComponent {
         // y el multiplicador de captura. Q / E o la rueda en teclado; L1 / R1 en mando.
         inline void drawBallSelector(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             const Inventory& inventory = *status.inventory;
-            std::vector<int> shown; // solo las que se tienen (si no hay ninguna, la elegida en rojo)
+            std::vector<int> shown; // solo las que se tienen (si no hay ninguna, no se muestra nada)
             for (int i = 0; i < inventory.ballCount(); ++i) if (inventory.owned(i)) shown.push_back(i);
-            if (shown.empty()) shown.push_back(inventory.selectedIndex());
+            if (shown.empty()) return;
             const int count = static_cast<int>(shown.size());
             const float alpha = status.aimBlend;
             const int a = static_cast<int>(255.0f * alpha);
@@ -362,7 +412,7 @@ namespace HudComponent {
         detail::drawNameTags(dl, status);
         detail::drawTint(dl, status);
         detail::drawLevel(dl, status);
-        detail::drawVitals(dl, status);
+        detail::drawVitals(dl, status, device);
         MinimapComponent::draw(dl, status, device);
         detail::drawLocation(dl, status);
         detail::drawTeam(dl, status);

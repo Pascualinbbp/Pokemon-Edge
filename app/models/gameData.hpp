@@ -131,6 +131,13 @@ struct GameData {
         return (active && active->floats()) || (passive && passive->floats());
     }
 
+    // ¿Alguna de sus habilidades le permite respirar bajo el agua (y dar aire al jugador)?
+    bool breathesUnderwater(const PokemonSpecies& species) const {
+        const Ability* active = ability(species.abilityId);
+        const Ability* passive = ability(species.passiveId);
+        return (active && active->breathesWater()) || (passive && passive->breathesWater());
+    }
+
     // La herramienta que representa un objeto (nullptr si no es una herramienta).
     const Tool* toolOf(const Item& item) const { return item.category == ItemCategory::TOOL ? tool(item.refId) : nullptr; }
 

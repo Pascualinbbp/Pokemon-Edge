@@ -29,7 +29,7 @@ class HabitatMap {
     enum Layer : int { UNDERGROUND = 0, SURFACE, SKY, LAYERS };
 
     static constexpr float SNOW_LINE = 24.0f;      // altura (m) desde la que hay nieve y hielo
-    static constexpr float SEA_FLOOR = -17.0f;
+    static constexpr float SEA_FLOOR = -44.0f;     // fondo del mar abierto: muy hondo, y poco a poco (junto a la orilla es bajo)
     static constexpr float PLATEAU_FLAT = 22.0f;   // radio del terreno llano del inicio (m) y hasta dónde se funde con el resto
     static constexpr float PLATEAU_FADE = 40.0f;
     static constexpr float FALLOFF = 1.5f;         // cuanto mayor, más corta la transición entre zonas
@@ -131,7 +131,7 @@ class HabitatMap {
     float coastDistance(float x, float z) const { return m_coast.sample(x, z); }
 
     // Temperatura (°C) a una altura dada: baja con la altitud.
-    static float temperature(float altitude) { return 26.0f - 0.95f * (std::max)(altitude, 0.0f); }
+    static float temperature(float altitude, float cooling = 1.0f) { return 26.0f - 0.95f * cooling * (std::max)(altitude, 0.0f); }
 
     // ¿Se puede estar en este punto? (el archipiélago o la isla del cielo)
     bool playable(float x, float z) const {
@@ -187,6 +187,8 @@ class HabitatMap {
     }
     const Physics::Heightfield& flowX() const { return m_flowX; }
     const Physics::Heightfield& flowZ() const { return m_flowZ; }
+    // Cuánto se ha enfriado la lava en un nodo (0 = recién salida del cráter, 1 = ya casi roca).
+    float lavaCoolAt(int col, int row) const { return m_lavaCool.at(col, row); }
     uint8_t kindAtNode(int col, int row) const { return m_kind[static_cast<size_t>(row) * m_ground.count() + col]; }
     float riverDistance(float x, float z) const { return m_riverDist.sample(x, z); }
     float lakeDistance(float x, float z) const { return m_lakeDist.sample(x, z); }
@@ -513,9 +515,10 @@ class HabitatMap {
 
     // Altura del terreno natural (sin agua) en (x, z); s = distancia con signo a la costa.
     float landHeight(float x, float z, float s) const {
-        constexpr float SEA_SCALE = 140.0f;
-        if (s < 0.0f) { // mar: el fondo baja con la distancia a la costa
-            const float bed = SEA_FLOOR * (1.0f - std::exp(-(-s) / SEA_SCALE));
+        constexpr float SEA_SCALE = 160.0f;
+        if (s < 0.0f) { // mar: el fondo baja con la distancia a la costa, suave junto a la orilla y cada vez más hondo
+            const float t = -s / SEA_SCALE;
+            const float bed = SEA_FLOOR * (t * t / (1.0f + t * t));
             return bed + 1.3f * m_noise.fbm(x * 0.03f, z * 0.03f, 3) * (std::min)(1.0f, -s / 40.0f);
         }
         float w[MAX_ZONES];
@@ -549,6 +552,7 @@ class HabitatMap {
         m_surface = m_ground;
         m_sea.init(half, 0.0f);
         m_flowX.init(half, 0.0f);
+        m_lavaCool.init(half, 1.0f);
         m_flowZ.init(half, 0.0f);
         m_riverDist.init(half, 999.0f);
         m_lakeDist.init(half, 999.0f);
@@ -579,7 +583,7 @@ class HabitatMap {
                 const float x = m_ground.nodeCoord(col), z = m_ground.nodeCoord(row);
                 const float wobble = 1.0f + irregularity * m_noise.fbm((x - cx) * frequency + seed, (z - cz) * frequency - seed, 3); // orilla irregular
                 const float u = std::sqrt((x - cx) * (x - cx) + (z - cz) * (z - cz)) / wobble / radius;
-                if (u > 2.6f) continue;
+                if (u > 2.6f || m_coast.at(col, row) < 0.0f) continue; // el mar no se rellena: nada de tierra sin isla
                 float& g = m_ground.at(col, row);
                 const float flat = g + (h0 - g) * (1.0f - smooth(1.0f, 2.4f, u));
                 if (u < 1.0f) {
@@ -744,6 +748,7 @@ class HabitatMap {
                 const float x = m_ground.nodeCoord(col), z = m_ground.nodeCoord(row);
                 const float wobble = 1.0f + 0.15f * m_noise.fbm((x - cx) * 0.08f + seed, (z - cz) * 0.08f - seed, 3);
                 const float u = std::sqrt((x - cx) * (x - cx) + (z - cz) * (z - cz)) / wobble / radius;
+                if (m_coast.at(col, row) < 0.0f) continue;
                 float& g = m_ground.at(col, row);
                 const size_t index = static_cast<size_t>(row) * m_ground.count() + col;
                 if (u < 1.0f) {
@@ -904,7 +909,7 @@ class HabitatMap {
             const float d = best[index], hw = p.halfWidth;
             const uint8_t before = m_kind[index];
             if (lakeKind(before) || before == LAVA || riverKind(before) || before == CASCADE) continue; // los lagos, la lava y los ríos ya excavados no se tocan
-            const bool fill = p.level > 0.5f; // en la desembocadura el cauce solo corta (no levanta una barrera en el mar)
+            const bool fill = p.level > 0.5f && m_coast.data()[index] > 0.0f; // en la desembocadura el cauce solo corta (no levanta una barrera en el mar)
             const float slope = p.gorge ? GORGE_SLOPE : VALLEY_SLOPE;
             const float top = p.level + 0.15f + BANK_FIX * 0.12f;
             float bank;
@@ -1085,6 +1090,7 @@ class HabitatMap {
                     const size_t index = static_cast<size_t>(row) * m_ground.count() + col;
                     m_level[index] = lava;
                     m_kind[index] = LAVA;
+                    m_lavaCool.at(col, row) = 0.0f; // la lava del cráter está al rojo
                 }
             });
         }
@@ -1145,6 +1151,7 @@ class HabitatMap {
                     const float speed = LAVA_SPEED * (0.25f + 0.75f * strength);
                     m_flowX.at(col, row) = tx * speed;
                     m_flowZ.at(col, row) = tz * speed;
+                    m_lavaCool.at(col, row) = (std::min)(m_lavaCool.at(col, row), 1.0f - strength);
                 }
             }
         }
@@ -1168,7 +1175,8 @@ class HabitatMap {
                 const float radius = between(habitat.minRadius, habitat.maxRadius);
                 for (int attempt = 0; attempt < 200; ++attempt) {
                     const Zone& host = *hosts[std::uniform_int_distribution<size_t>(0, hosts.size() - 1)(*m_random)];
-                    const float a = between(0.0f, 6.2831853f), r = std::sqrt(between(0.0f, 1.0f)) * host.radius * 0.75f;
+                    const float a = between(0.0f, 6.2831853f);
+                    const float r = host.peak > 0.0f ? between(0.9f, 1.4f) * host.radius : std::sqrt(between(0.0f, 1.0f)) * host.radius * 0.75f; // junto a un volcán: en la llanura que lo rodea
                     const float x = host.x + std::cos(a) * r, z = host.z + std::sin(a) * r;
                     if (coastSigned(x, z) < 25.0f || x * x + z * z < PLATEAU_FADE * PLATEAU_FADE) continue;
                     if (!dryAround(x, z, radius * GEYSER_PAD) || m_ground.slope(x, z) > 0.45f) continue;
@@ -1179,6 +1187,7 @@ class HabitatMap {
                     }
                     if (!apart) continue;
                     const float h0 = averageHeight(x, z, radius);
+                    if (coastSigned(x, z) < radius * GEYSER_PAD * 1.8f) continue;
                     flatten(x, z, radius * GEYSER_PAD, h0);
                     Zone zone;
                     zone.habitat = h; zone.x = x; zone.z = z; zone.radius = radius; zone.altitude = h0;
@@ -1355,6 +1364,14 @@ class HabitatMap {
     // ---- Agua final: nivel, mar, distancias ----
     void finishWater() {
         const int n = m_ground.count();
+        // Red de seguridad: ninguna capa (ríos, lagos, parcelas) deja tierra emergida lejos de una isla; el mar sigue siendo mar.
+        for (int row = 0; row < n; ++row) {
+            for (int col = 0; col < n; ++col) {
+                if (m_coast.at(col, row) >= -2.0f) continue;
+                float& g = m_ground.at(col, row);
+                if (g > -0.3f) g = -0.3f - 0.1f * smooth(0.0f, 30.0f, -m_coast.at(col, row));
+            }
+        }
         m_lava.init(m_ground.half(), 0.0f);
         m_hot.init(m_ground.half(), 0.0f);
         for (int row = 0; row < n; ++row) {
@@ -1510,11 +1527,12 @@ class HabitatMap {
     // nube se hunde en un abismo blanco (el renderizador lo tapa con nubes). Se baja caminando o nadando hasta el borde y dejándose caer. Para
     // subir, cada isla tiene su propia Corriente Ascendente en el mar del archipiélago.
     public:
-    static constexpr float SKY_SHORE = 7.0f;      // ancho (m) de la orilla del suelo de nube al mar de nubes
+    static constexpr float SKY_SHORE = 4.0f;      // ancho (m) de la orilla del suelo de nube al mar de nubes
     static constexpr float SKY_SEA_DEPTH = 3.2f;  // profundidad del mar de nubes bajo el suelo
-    static constexpr float SKY_ABYSS = 12.0f;     // ancho (m) del talud blanco más allá del mar
+    static constexpr float SKY_ABYSS = 4.0f;      // ancho (m) del talud blanco más allá del mar
     static constexpr float SKY_ABYSS_DROP = 55.0f;
-    static constexpr float SKY_SEA_RATIO = 1.1f;  // ancho mínimo del mar de nubes respecto al radio del suelo: el mar es el hábitat mayor
+    static constexpr float SKY_SEA_RATIO = 0.3f;  // ancho mínimo del mar de nubes respecto al radio del suelo: el mar es el hábitat mayor
+    static constexpr float SKY_LAND_SHARE = 0.2f; // parte de la isla que ocupan los demás hábitats (el resto es nube)
     static constexpr float SKY_RIM = 1.5f;        // altura (m) del borde de nube que contiene el mar
 
     // Contorno irregular de una isla: factor (≈1) por el que se divide la distancia al centro según la dirección (dx, dz: desde su centro).
@@ -1601,7 +1619,7 @@ class HabitatMap {
                 for (int attempt = 0; attempt < 60; ++attempt) {
                     const int h = land[static_cast<size_t>(betweenInt(0, static_cast<int>(land.size()) - 1))];
                     const Habitat& info = data.habitats[h];
-                    const float radius = (std::min)(between(info.minRadius, info.maxRadius) * 0.45f, region.floorRadius * 0.38f);
+                    const float radius = (std::min)(between(info.minRadius, info.maxRadius) * 0.45f, region.floorRadius * std::sqrt(SKY_LAND_SHARE / (static_cast<float>(count) * 1.3f))); // todos juntos, no más del 20 % de la isla
                     if (radius < 6.0f) continue;
                     const float angle = between(0.0f, 6.2831853f), dist = between(0.0f, (std::max)(0.0f, region.floorRadius * 0.72f - radius * 0.5f));
                     const float shape = skyShape(region, std::cos(angle), std::sin(angle));
@@ -1840,7 +1858,7 @@ class HabitatMap {
     int m_peakHabitat = -1, m_riverBank = -1, m_lakeBank = -1, m_ventHabitat = -1;
     std::vector<Overlay> m_overlays;
     std::vector<Physics::World::Geyser> m_geysers;
-    Physics::Heightfield m_grip, m_caveGrip, m_lava, m_hot;
+    Physics::Heightfield m_grip, m_caveGrip, m_lava, m_hot, m_lavaCool;
     std::vector<Physics::World::Spring> m_springs;
     float m_bankWidth[2] = { 7.0f, 7.0f };
     float m_worldRadius = 200.0f;

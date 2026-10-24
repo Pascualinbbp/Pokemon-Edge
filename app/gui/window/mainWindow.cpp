@@ -94,12 +94,12 @@ namespace {
     }
 
     void startNewGame(int slot) {
-        SessionManager::startNew(slot);
+        SessionManager::beginNew(slot);
         beginLoading();
     }
 
     void startSavedGame(int slot) {
-        SessionManager::startSaved(slot);
+        SessionManager::beginSaved(slot);
         beginLoading();
     }
 
@@ -267,16 +267,16 @@ void MainWindow::run() {
         const float dt = timer.tick(kMaxFrameSeconds);
 
         bool justPaused = false;
-        if (g_state == GameState::PLAYING && engine.needsStarter()) {
-            g_state = GameState::STARTER; // partida nueva: primero se elige el pokémon inicial
-            StarterComponent::detail::reset();
-            redrawFrames = 2;
-        }
         if (g_state == GameState::PLAYING) {
             const InputState input = InputHandler::poll(dt);
             if (input.pause || engine.update(dt, input) || input.inventory || input.map || input.pokedex) {
                 g_state = input.pause ? GameState::PAUSED : input.inventory ? GameState::INVENTORY : input.map ? GameState::MAP : input.pokedex ? GameState::POKEDEX : GameState::PAUSED;
                 g_backState = GameState::PLAYING;
+                redrawFrames = 2;
+                justPaused = true;
+            } else if (engine.takeStarterRequest()) {
+                g_state = GameState::STARTER; // el Profesor Oak ofrece los iniciales
+                StarterComponent::detail::reset();
                 redrawFrames = 2;
                 justPaused = true;
             } else if (engine.takeResearchRequest()) {
@@ -349,7 +349,7 @@ void MainWindow::run() {
                 break;
             }
             case GameState::LOADING:
-                LoadingComponent::render(g_state, g_loadTimer);
+                if (LoadingComponent::render(g_state, g_loadTimer, SessionManager::loadReady())) SessionManager::finishLoad();
                 break;
             case GameState::PLAYING:
                 HudComponent::render(InputHandler::activeDevice(), engine.status(), savingAlpha());

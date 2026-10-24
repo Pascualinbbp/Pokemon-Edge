@@ -23,6 +23,9 @@ class Underground {
     static constexpr float NONE = -1.0e4f;       // sin galería en ese nodo
     static constexpr float DEFINED = -5.0e3f;    // por encima de esto el nodo existe
     static constexpr float CLEARANCE = 2.2f;     // altura mínima libre para poder estar dentro
+    static constexpr float MOUND_SLOPE = 0.5f;   // pendiente del montículo que cubre la entrada (sube poco a poco desde el terreno)
+    static constexpr float MOUND_REACH = 26.0f;  // margen que se reserva alrededor de la galería para el montículo
+    static constexpr int MOUND_PASSES = 14;      // pasadas para extender ese montículo (cada una alcanza una casilla más)
     static constexpr float COVER = 1.4f;         // roca mínima entre el techo y la superficie
     static constexpr float DROP = 0.42f;         // metros que baja el suelo por cada metro recorrido desde la boca
     static constexpr float DOOR = 3.0f;          // tramo de la boca al aire libre, a ras de la ladera tallada
@@ -130,6 +133,17 @@ class Underground {
     float nearestWall(float x, float z, float limit) const {
         float best = limit;
         for (int k = 0; k < 8; ++k) best = (std::min)(best, wallDistance(x, z, std::cos(k * 0.785398f), std::sin(k * 0.785398f), best));
+        return best;
+    }
+
+    // Como nearestWall, y además la dirección (unitaria, en el plano) hacia esa pared.
+    float wallDirection(float x, float z, float limit, float& dirX, float& dirZ) const {
+        float best = limit;
+        dirX = 1.0f; dirZ = 0.0f;
+        for (int k = 0; k < 16; ++k) {
+            const float cx = std::cos(k * 0.392699f), cz = std::sin(k * 0.392699f), d = wallDistance(x, z, cx, cz, best);
+            if (d < best) { best = d; dirX = cx; dirZ = cz; }
+        }
         return best;
     }
 
@@ -266,8 +280,8 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
     // ---- 2. Campo de apertura: dónde hay hueco ----
     float minX = mouth.x - TRENCH_LENGTH - 10.0f, maxX = mouth.x + TRENCH_LENGTH + 10.0f, minZ = minX - mouth.x + mouth.z, maxZ = maxX - mouth.x + mouth.z;
     const auto grow = [&](float x, float z, float r) { minX = (std::min)(minX, x - r); maxX = (std::max)(maxX, x + r); minZ = (std::min)(minZ, z - r); maxZ = (std::max)(maxZ, z + r); };
-    for (const Cap& c : caps) { grow(c.ax, c.az, c.r + 5.0f); grow(c.bx, c.bz, c.r + 5.0f); }
-    for (const Hall& h : halls) grow(h.x, h.z, h.r * 1.4f + 5.0f);
+    for (const Cap& c : caps) { grow(c.ax, c.az, c.r + MOUND_REACH); grow(c.bx, c.bz, c.r + MOUND_REACH); }
+    for (const Hall& h : halls) grow(h.x, h.z, h.r * 1.4f + MOUND_REACH);
     const int c0 = (std::max)(nodeOf(minX), 2), c1 = (std::min)(nodeOf(maxX), n - 3), r0 = (std::max)(nodeOf(minZ), 2), r1 = (std::min)(nodeOf(maxZ), n - 3);
     const int W = c1 - c0 + 1, Hh = r1 - r0 + 1;
     if (W < 4 || Hh < 4) return false;
@@ -444,7 +458,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
             raised[i] = mouthDist[i] < DOOR ? floorNode[i] : (std::max)(original[i], ceilNode[i] + COVER);
         }
     }
-    for (int pass = 0; pass < 3; ++pass) { // la roca elevada se funde con la ladera (pendiente máxima 1.3)
+    for (int pass = 0; pass < MOUND_PASSES; ++pass) { // la roca elevada se funde con la ladera en un montículo suave (pendiente máxima MOUND_SLOPE)
         std::vector<float> next = raised;
         for (int r = r0; r <= r1; ++r) for (int c = c0; c <= c1; ++c) {
             const size_t i = at(c, r);
@@ -452,7 +466,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
             for (int dr = -1; dr <= 1; ++dr) for (int dc = -1; dc <= 1; ++dc) {
                 if (!inBox(c + dc, r + dr) || (!dc && !dr)) continue;
                 const float v = raised[at(c + dc, r + dr)];
-                if (v > -INF * 0.5f) next[i] = (std::max)(next[i], v - 1.3f * ((dc && dr) ? 2.83f : 2.0f));
+                if (v > -INF * 0.5f) next[i] = (std::max)(next[i], v - MOUND_SLOPE * ((dc && dr) ? 2.83f : 2.0f));
             }
         }
         raised = next;

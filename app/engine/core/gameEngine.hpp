@@ -21,28 +21,30 @@ class GameEngine {
     }
 
     // Datos de juego de la base de datos (pokéballs, objetos, cofres...): con ellos se crea cada partida.
-    // El mundo no se genera aquí sino al empezar o cargar una partida (newGame / applySave).
+    // El mundo no se genera aquí sino al empezar o cargar una partida (buildNew / buildSaved).
     void setData(GameData data) {
         m_data = std::move(data);
     }
 
-    void newGame() {
-        m_scene = Scene(m_data);
+    // El mundo se construye sin tocar la GPU, así que puede hacerse en otro hilo mientras la pantalla de carga sigue dibujándose.
+    Scene buildNew() const { return Scene(m_data); }
+
+    Scene buildSaved(const SaveData& save) const {
+        Scene scene = save.worldSeed != 0 ? Scene(m_data, save.worldSeed) : Scene(m_data);
+        float x = save.playerPosition[0], z = save.playerPosition[2];
+        if (!scene.habitats.playable(x, z)) x = z = 0.0f; // partidas de antes del mundo nuevo: el inicio
+        scene.player.body.position = { x, (std::max)(save.playerPosition[1], scene.world.surfaceHeight(x, z)) + 0.5f, z };
+        scene.dayCycle.setTime(save.worldTime);
+        scene.exploration.restore(save.explored);
+        scene.inventory.restore(save.items, save.selectedBall, save.money);
+        scene.storage.restore(save.team, save.pc, save.autoReleaseRank, save.activeIndex);
+        scene.storage.restoreDex(save.dexSeen, save.dexCaught);
+        scene.storage.dexProgress.restore(save.dexProgress);
+        scene.progress.restore(save.playerLevel, save.playerXp, save.badges);
+        return scene;
     }
 
-    void applySave(const SaveData& save) {
-        m_scene = save.worldSeed != 0 ? Scene(m_data, save.worldSeed) : Scene(m_data);
-        float x = save.playerPosition[0], z = save.playerPosition[2];
-        if (!m_scene.habitats.playable(x, z)) x = z = 0.0f; // partidas de antes del mundo nuevo: el inicio
-        m_scene.player.body.position = { x, (std::max)(save.playerPosition[1], m_scene.world.surfaceHeight(x, z)) + 0.5f, z };
-        m_scene.dayCycle.setTime(save.worldTime);
-        m_scene.exploration.restore(save.explored);
-        m_scene.inventory.restore(save.items, save.selectedBall, save.money);
-        m_scene.storage.restore(save.team, save.pc, save.autoReleaseRank, save.activeIndex);
-        m_scene.storage.restoreDex(save.dexSeen, save.dexCaught);
-        m_scene.storage.dexProgress.restore(save.dexProgress);
-        m_scene.progress.restore(save.playerLevel, save.playerXp, save.badges);
-    }
+    void adopt(Scene&& scene) { m_scene = std::move(scene); }
 
     SaveData captureSave() const {
         const DirectX::XMFLOAT3& p = m_scene.player.body.position;
@@ -91,6 +93,13 @@ class GameEngine {
 
     bool needsStarter() const { return m_scene.needsStarter(); }
     void chooseStarter(int speciesId) { m_scene.chooseStarter(speciesId); }
+
+    // true una sola vez cuando el jugador acaba de hablar con el Profesor Oak sin tener pokémon.
+    bool takeStarterRequest() {
+        const bool requested = m_scene.starterRequested;
+        m_scene.starterRequested = false;
+        return requested;
+    }
 
     // true una sola vez cuando el jugador acaba de usar la máquina de investigación.
     bool takeResearchRequest() {
