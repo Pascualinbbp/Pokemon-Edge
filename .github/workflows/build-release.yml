@@ -80,31 +80,10 @@ jobs:
           }
           Write-Host "[LOG] Dependencias listas."
 
-      - name: 🔐 Cifrar Base de Datos usando Secret de GitHub
+      - name: 🗄️ Comprobar Base de Datos (se incrusta tal cual en el .exe)
         shell: pwsh
-        env:
-          DB_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
         run: |
-          $dbPath = "app/data/db/pokemonEdge.db"
-          if (-not (Test-Path $dbPath)) { throw "No se encontró la base de datos en $dbPath" }
-
-          $key = if ($env:DB_KEY) { [byte][int]$env:DB_KEY } else { [byte]90 }
-
-          # XOR en C# compilado: miles de veces más rápido que un bucle de PowerShell
-          Add-Type -TypeDefinition @'
-          public static class XorCipher {
-              public static void Apply(byte[] data, byte key) {
-                  for (int i = 0; i < data.Length; i++) data[i] ^= key;
-              }
-          }
-          '@
-          $bytes = [System.IO.File]::ReadAllBytes($dbPath)
-          [XorCipher]::Apply($bytes, $key)
-          [System.IO.File]::WriteAllBytes($dbPath, $bytes)
-
-          # La clave efectiva (con el valor por defecto si no hay secret) se reutiliza al compilar
-          "DB_KEY_EFFECTIVE=$key" | Add-Content -Path $env:GITHUB_ENV
-          Write-Host "[LOG] Base de datos cifrada."
+          if (-not (Test-Path "app/data/db/pokemonEdge.db")) { throw "No se encontró la base de datos en app/data/db/pokemonEdge.db" }
 
       - name: 🎨 Incrustar assets (todo assets/ dentro del .exe)
         shell: pwsh
@@ -142,13 +121,13 @@ jobs:
           dir /b /s app\*.cpp > sources.txt
           echo main.cpp >> sources.txt
 
-          cl.exe /nologo /MP /std:c++17 /EHsc /O2 /DXOR_KEY_VAL=%DB_KEY_EFFECTIVE% /I app/utils/sqlite /I app/utils/imgui /Fo:build\ @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
+          cl.exe /nologo /MP /std:c++17 /EHsc /O2 /I app/utils/sqlite /I app/utils/imgui /Fo:build\ @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh
         run: |
           $out = "release_build"
-          New-Item -ItemType Directory -Force -Path "$out/app/data/db" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out/app/data" | Out-Null
 
           Copy-Item "PokemonEdge.exe" "$out/"
           Copy-Item "app/data/version.json" "$out/app/data/"

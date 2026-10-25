@@ -30,9 +30,9 @@ namespace ResourceSpawn {
     inline constexpr float EMBED_REACH = 2.2f;      // distancia máxima a la pared de un mineral incrustado
     inline constexpr float VEIN_REGROW_MIN = 1500.0f; // las vetas tardan mucho en volver a asomar (s)
     inline constexpr float EMBED_DEPTH = 0.18f;     // cuánto se hunde en la roca
-    inline constexpr float EMBED_MAX_HEIGHT = 3.2f; // altura máxima sobre el suelo a la que se incrusta
+    inline constexpr float EMBED_MAX_HEIGHT = 2.0f; // altura máxima sobre el suelo a la que se incrusta
     inline constexpr float EMBED_SEPARATION = 1.9f; // distancia mínima entre dos minerales incrustados
-    inline constexpr float ENTRANCE_CLEAR = 7.0f;  // zona libre ante la bocana de cada cueva y mina
+    inline constexpr float ENTRANCE_CLEAR = 24.0f;  // zona libre ante la bocana de cada cueva y mina
 
     // Altura a la que se asienta un nodo: la más baja del suelo bajo su base, para que no flote por el lado de cuesta abajo.
     inline float seat(const Physics::World& world, float x, float z, float half) {

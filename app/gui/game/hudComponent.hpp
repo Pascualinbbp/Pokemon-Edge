@@ -94,7 +94,7 @@ namespace HudComponent {
         inline void drawVitals(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
             const float dt = ImGui::GetIO().DeltaTime, time = static_cast<float>(ImGui::GetTime());
-            constexpr float CORE = 28.0f, HEALTH_R = 36.0f, XP_R = 45.0f, AIR_R = 53.0f;
+            constexpr float CORE = 28.0f, HEALTH_R = 36.0f, AIR_R = 45.0f;
             ImVec2 c(screen.x - 74.0f, 74.0f);
             const float health = (std::clamp)(status.health, 0.0f, 1.0f);
             static float ghost = 1.0f; // la vida que se acaba de perder, que se apaga despacio
@@ -120,8 +120,6 @@ namespace HudComponent {
             if (status.hurt > 0.0f) dl->AddCircle(c, HEALTH_R, IM_COL32(255, 60, 40, static_cast<int>(160.0f * status.hurt)), 48, 11.0f);
             if (status.burning) dl->AddCircle(c, HEALTH_R + 2.0f, IM_COL32(255, static_cast<int>(120 + 60 * std::sin(time * 14.0f)), 30, 170), 48, 4.0f);
 
-            dl->AddCircle(c, XP_R, track, 48, 3.0f);
-            ringArc(dl, c, XP_R, 0.0f, (std::clamp)(status.playerXp, 0.0f, 1.0f), IM_COL32(250, 205, 70, 255), 3.0f);
             if (status.showOxygen) {
                 const float air = (std::clamp)(status.oxygen, 0.0f, 1.0f);
                 const bool low = status.exhausted || air < 0.25f;
@@ -300,7 +298,7 @@ namespace HudComponent {
                 add(Action::AIM, "Modo captura");
                 if (status.team.size() > 1) add(Action::BALL_SWITCH, "Cambiar de pokémon");
                 if (!status.team.empty()) add(Action::MODE, "Modo del pokémon");
-                add(Action::INVENTORY, "Mochila");
+                add(Action::INVENTORY, "Jugador");
                 add(Action::PAUSE, "Pausa");
             }
 
@@ -329,17 +327,18 @@ namespace HudComponent {
             }
         }
 
-        // Nivel del jugador y su experiencia (arriba a la derecha).
+        // Nivel del jugador y su barra de experiencia, justo debajo del círculo.
         inline void drawLevel(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
-            constexpr float WIDTH = 150.0f;
-            char text[48];
-            std::snprintf(text, sizeof(text), "Nv. %d / %d", status.playerLevel, status.levelCap);
-            const ImVec2 at(screen.x - WIDTH - 24.0f, 14.0f);
-            dl->AddText(at, IM_COL32(255, 255, 255, 235), text);
-            const ImVec2 bar(at.x, at.y + ImGui::GetFontSize() + 4.0f);
-            dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH, bar.y + 6.0f), IM_COL32(255, 255, 255, 50), 3.0f);
-            dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH * status.playerXp, bar.y + 6.0f), IM_COL32(120, 220, 255, 255), 3.0f);
+            constexpr float WIDTH = 84.0f;
+            const float cx = screen.x - 74.0f, top = 74.0f + 45.0f + 10.0f;
+            const ImVec2 bar(cx - WIDTH * 0.5f, top);
+            dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH, bar.y + 7.0f), IM_COL32(12, 16, 24, 190), 3.5f);
+            dl->AddRectFilled(bar, ImVec2(bar.x + WIDTH * (std::clamp)(status.playerXp, 0.0f, 1.0f), bar.y + 7.0f), IM_COL32(250, 205, 70, 255), 3.5f);
+            char text[32];
+            std::snprintf(text, sizeof(text), "Nv. %d", status.playerLevel);
+            const ImVec2 size = ImGui::CalcTextSize(text);
+            dl->AddText(ImVec2(cx - size.x * 0.5f, bar.y + 10.0f), IM_COL32(255, 255, 255, 235), text);
         }
 
         // Equipo en círculos verticales a la derecha, siempre en el mismo orden (el del menú de pokémon). El que acompaña

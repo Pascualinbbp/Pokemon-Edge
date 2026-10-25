@@ -16,6 +16,9 @@ namespace PokemonRules {
     inline int xpToNext(int level) { return static_cast<int>(XP_BASE * std::pow(static_cast<float>(level), XP_EXPONENT)); }
     inline int battleXp(int wildLevel) { return BATTLE_XP_BASE + BATTLE_XP_PER_LEVEL * wildLevel; }
 
+    // PS máximos según la fórmula de la serie (sin EVs ni IVs: base, nivel). Los decimales se descartan siempre a la baja.
+    inline int maxHp(const PokemonSpecies& species, int level) { return (2 * species.stats.hp * level) / 100 + level + 10; }
+
     inline bool rollShiny() { return RandomUtil::roll(SHINY_CHANCE); }
 
     // Nivel con el que aparece un pokémon salvaje de la especie.

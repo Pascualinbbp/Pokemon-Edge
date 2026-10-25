@@ -22,6 +22,7 @@ struct OwnedPokemon {
     EvRules::Evs evs = {};          // EVs actuales: empiezan en 0 y suben entrenándolo
     EvRules::Evs evCaps = {};       // EVs máximos con los que salió (su potencial)
     int xp = 0;                     // experiencia hacia el siguiente nivel (no se guarda)
+    int hp = -1;                    // PS actuales (-1 = al máximo); 0 = debilitado
 };
 
 // Resultado de un análisis de la máquina de investigación.
@@ -81,7 +82,33 @@ class PokemonStorage {
 
     // El pokémon que acompaña al jugador: uno del equipo. Cambiarlo no altera el orden del equipo.
     const OwnedPokemon* active() const { return m_team.empty() ? nullptr : &m_team[m_active]; }
+    OwnedPokemon* activeMut() { return m_team.empty() ? nullptr : &m_team[m_active]; }
     int activeIndex() const { return m_active; }
+
+    // --- PS ---
+    int maxHp(const OwnedPokemon& owned) const {
+        const PokemonSpecies* species = m_data->speciesById(owned.speciesId);
+        return species ? PokemonRules::maxHp(*species, owned.level) : 1;
+    }
+    int hpOf(const OwnedPokemon& owned) const { return owned.hp < 0 ? maxHp(owned) : (std::min)(owned.hp, maxHp(owned)); }
+    float hpFraction(const OwnedPokemon& owned) const { return static_cast<float>(hpOf(owned)) / static_cast<float>((std::max)(1, maxHp(owned))); }
+    bool fainted(const OwnedPokemon& owned) const { return hpOf(owned) <= 0; }
+    // Quita PS (al menos 1 si 'amount' > 0).
+    void hurt(OwnedPokemon& owned, int amount) { owned.hp = (std::max)(0, hpOf(owned) - (std::max)(amount, 0)); }
+    // Poción: devuelve PS (0 = todos). Solo a uno vivo y herido; false si no hace nada.
+    bool heal(bool inTeam, int index, int amount) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned || fainted(*owned) || hpOf(*owned) >= maxHp(*owned)) return false;
+        owned->hp = amount <= 0 ? maxHp(*owned) : (std::min)(maxHp(*owned), hpOf(*owned) + amount);
+        return true;
+    }
+    // Revivir: solo a uno debilitado. Deja la mitad de sus PS (redondeando a la baja) o todos.
+    bool revive(bool inTeam, int index, bool full) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned || !fainted(*owned)) return false;
+        owned->hp = full ? maxHp(*owned) : (std::max)(1, maxHp(*owned) / 2);
+        return true;
+    }
     void setActive(int teamIndex) { if (teamIndex >= 0 && teamIndex < static_cast<int>(m_team.size())) m_active = teamIndex; }
     void cycleActive(int direction) { if (!m_team.empty()) m_active = ((m_active + direction) % static_cast<int>(m_team.size()) + static_cast<int>(m_team.size())) % static_cast<int>(m_team.size()); }
 
@@ -180,7 +207,9 @@ class PokemonStorage {
     LevelResult levelUp(bool inTeam, int index, int cap) {
         OwnedPokemon* owned = at(inTeam, index);
         if (!owned || owned->level >= cap) return LevelResult::NONE;
+        const int hpBefore = hpOf(*owned), maxBefore = maxHp(*owned);
         ++owned->level;
+        if (owned->hp >= 0 && hpBefore > 0) owned->hp = hpBefore + (std::max)(0, maxHp(*owned) - maxBefore); // el aumento de PS máximos también sube los actuales
         dexProgress.leveled(owned->speciesId, owned->level);
         const PokemonSpecies* species = m_data->speciesById(owned->speciesId);
         const Evolution* evolution = species ? species->levelEvolution(owned->level, RandomUtil::range(0.0f, 1.0f)) : nullptr;
@@ -362,7 +391,7 @@ class PokemonStorage {
             if (!species) continue;
             result.push_back(species->name + SEPARATOR + std::to_string(owned.level) + SEPARATOR + (owned.shiny ? "1" : "0") + SEPARATOR +
                              (ball ? ball->name : std::string()) + SEPARATOR + (owned.analyzed ? "1" : "0") + SEPARATOR +
-                             join(owned.evs) + SEPARATOR + join(owned.evCaps));
+                             join(owned.evs) + SEPARATOR + join(owned.evCaps) + SEPARATOR + std::to_string(owned.hp));
         }
         return result;
     }
@@ -390,6 +419,7 @@ class PokemonStorage {
         owned.evs = split(field(5));
         owned.evCaps = field(6).empty() ? EvRules::Evs{} : split(field(6));
         for (int i = 0; i < BaseStats::COUNT; ++i) owned.evs[i] = (std::min)(owned.evs[i], owned.evCaps[i]);
+        owned.hp = field(7).empty() ? -1 : std::atoi(field(7).c_str());
         list.push_back(owned);
     }
 

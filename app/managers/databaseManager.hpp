@@ -1,6 +1,5 @@
 #pragma once
 #include "../models/gameData.hpp"
-#include "../utils/data/databaseUtil.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "../daos/typeDao.hpp"
 #include "../daos/pokeballDao.hpp"
@@ -38,8 +37,7 @@ class DatabaseManager {
 
     public:
     static void init() {
-        Logger::logInfo("DB_MANAGER", "Inicializando y verificando base de datos local...");
-        DatabaseUtil::extractDatabaseIfNeeded();
+        Logger::logInfo("DB_MANAGER", "Base de datos incrustada en el exe (se abre en memoria al primer uso).");
     }
 
     static TypeDao& getTypeDao() {

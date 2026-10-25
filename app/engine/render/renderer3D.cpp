@@ -470,6 +470,7 @@ std::vector<Renderer3D::Chunk> Renderer3D::createTerrain(ID3D11Device* device, c
                 tint = { tint.x + weights[i] * habitatColors[i].x, tint.y + weights[i] * habitatColors[i].y, tint.z + weights[i] * habitatColors[i].z };
             }
             if (seabed > 0.01f) color = mix(color, { tint.x / seabed, tint.y / seabed, tint.z / seabed }, seabed * 0.85f);
+            if (habitats.waterKind(x, z) == HabitatMap::HOT) color = XMFLOAT3{ 0.66f, 0.64f, 0.60f }; // el fondo de las aguas termales es de piedra
         } else {
             color = habitatColors.empty() ? DEFAULT_GROUND : XMFLOAT3{ 0.0f, 0.0f, 0.0f };
             habitats.weights(x, z, weights);
@@ -478,6 +479,7 @@ std::vector<Renderer3D::Chunk> Renderer3D::createTerrain(ID3D11Device* device, c
                 color.y += weights[i] * habitatColors[i].y;
                 color.z += weights[i] * habitatColors[i].z;
             }
+            if (habitats.waterKind(x, z) == HabitatMap::HOT) color = mix(color, XMFLOAT3{ 0.66f, 0.64f, 0.60f }, 0.9f); // las charcas termales y su orilla son de piedra
             if (const float basalt = habitats.volcanicRockAt(col, row); basalt > 0.01f) color = mix(color, XMFLOAT3{ 0.13f, 0.12f, 0.13f }, basalt * 0.92f); // roca volcánica junto a la lava
             if (!habitats.regionAt(x, z)) {
                 color = mix(color, SAND, smooth(0.5f, 0.0f, height) * 0.6f * (1.0f - habitats.volcanicRockAt(col, row)));           // la tierra pegada al mar es arenosa

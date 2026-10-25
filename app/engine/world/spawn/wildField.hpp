@@ -23,8 +23,8 @@ class WildField {
     static constexpr int MAX_PER_CHUNK = MAX_SURFACE + MAX_DEEP; // capacidad fija de cada chunk (las direcciones de sus pokémon no cambian)
     static constexpr int DEEP_GRID = 5;             // puntos por lado con los que se mide cuánta galería hay en un chunk
     static constexpr float SPAWN_RADIUS = 100.0f;   // zona de aparición, centrada en el jugador (invisible)
-    static constexpr float DEEP_EXCLUSION_RADIUS = 14.0f; // ídem en las galerías, que son más pequeñas
-    static constexpr float EXCLUSION_RADIUS = 30.0f; // zona pegada al jugador donde nunca nace nada
+    static constexpr float DEEP_EXCLUSION_RADIUS = 8.0f; // ídem en las galerías, que son más pequeñas
+    static constexpr float EXCLUSION_RADIUS = 20.0f; // zona pegada al jugador donde nunca nace nada
     static constexpr float DEEP_SPACING = 5.0f;     // ídem en las galerías (más estrechas)
     static constexpr float SPACING = 10.0f;         // distancia mínima entre dos pokémon al nacer (menor que CHUNK)
     static constexpr int MAX_IN_ZONE = 70;          // máximo de pokémon vivos dentro de la zona de aparición

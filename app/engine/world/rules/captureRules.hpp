@@ -31,8 +31,8 @@ namespace CaptureRules {
     // Potencial mínimo que garantiza cada tipo de lanzamiento al pokémon capturado.
     inline EvRules::Rank minimumRank(Throw kind) {
         switch (kind) {
-            case Throw::SUPER_LUCKY: return EvRules::Rank::S;
-            case Throw::LUCKY:       return EvRules::Rank::A;
+            case Throw::SUPER_LUCKY: return EvRules::Rank::S_PLUS;
+            case Throw::LUCKY:       return EvRules::Rank::S;
             default:                 return EvRules::Rank::D;
         }
     }

@@ -164,7 +164,7 @@ class HabitatMap {
         const Region* r = regionAt(x, z);
         return r && r->kind == HabitatPlacement::SKY && ground(x, z) < r->floorY + CLOUD_FLOOR_HEIGHT;
     }
-    static constexpr float CLOUD_FLOOR_HEIGHT = 1.0f;
+    static constexpr float CLOUD_FLOOR_HEIGHT = 2.5f;
 
     // Capa del mapa en la que está el punto de la superficie: el cielo (islas de nube) o la superficie.
     Layer surfaceLayerAt(float x, float z) const { return regionAt(x, z) ? SKY : SURFACE; }
@@ -394,7 +394,7 @@ class HabitatMap {
         m_islands.push_back({ 0.0f, 0.0f, mainRadius, between(0, 100), between(0, 100), between(0, 6.28f), between(0, 6.28f) });
         const int satellites = (std::clamp)(static_cast<int>(mainRadius / 28.0f), 3, 8);
         for (int i = 0, tries = 0; i < satellites && tries < 400; ++tries) {
-            Island island{ 0, 0, mainRadius * between(0.14f, 0.30f), between(0, 100), between(0, 100), between(0, 6.28f), between(0, 6.28f) };
+            Island island{ 0, 0, mainRadius * between(0.12f, 0.42f), between(0, 100), between(0, 100), between(0, 6.28f), between(0, 6.28f) };
             const float angle = between(0.0f, 6.2831853f);
             const float distance = between(mainRadius * 1.25f + island.r, m_worldRadius - island.r * 1.3f);
             island.x = std::cos(angle) * distance;
@@ -439,6 +439,7 @@ class HabitatMap {
         }
         // De la más alta a la más baja: cada una se pega a la de altura más parecida y el relieve baja gradualmente.
         std::stable_sort(requests.begin(), requests.end(), [](const Request& a, const Request& b) { return a.altitude > b.altitude; });
+        std::vector<int> islandZones(m_islands.size(), 0); // hábitats ya puestos en cada isla
         for (const Request& request : requests) {
             const Habitat& habitat = data.habitats[request.habitat];
             Zone zone;
@@ -452,8 +453,18 @@ class HabitatMap {
             for (float& phase : zone.lobe) phase = between(0.0f, 6.2831853f);
             const bool coast = habitat.placement == HabitatPlacement::COAST;
             float bestCost = 1.0e9f, bestX = 0.0f, bestZ = 0.0f, bestAngle = 0.0f;
+            size_t bestIsland = 0;
             for (int attempt = 0; attempt < 160; ++attempt) {
-                const Island& island = m_islands[std::uniform_int_distribution<size_t>(0, m_islands.size() - 1)(*m_random)];
+                // Las islas grandes reciben más hábitats que las pequeñas: se elige una con probabilidad según su superficie libre.
+                float pick = 0.0f, total = 0.0f;
+                for (size_t k = 0; k < m_islands.size(); ++k) total += m_islands[k].r * m_islands[k].r / (1.0f + islandZones[k] * islandZones[k] * (k == 0 ? 0.05f : 1.0f));
+                pick = between(0.0f, total);
+                size_t chosen = 0;
+                for (size_t k = 0; k < m_islands.size(); ++k) {
+                    pick -= m_islands[k].r * m_islands[k].r / (1.0f + islandZones[k] * islandZones[k] * (k == 0 ? 0.05f : 1.0f));
+                    if (pick <= 0.0f) { chosen = k; break; }
+                }
+                const Island& island = m_islands[chosen];
                 const float a = between(0.0f, 6.2831853f), r = std::sqrt(between(0.0f, 1.0f)) * island.r * 1.05f;
                 const float x = island.x + std::cos(a) * r, z = island.z + std::sin(a) * r;
                 const float s = coastSigned(x, z);
@@ -475,7 +486,7 @@ class HabitatMap {
                 if (neighbours == 0 && !m_zones.empty()) cost = 60.0f;
                 cost += between(0.0f, 1.5f);
                 if (cost < bestCost) {
-                    bestCost = cost; bestX = x; bestZ = z;
+                    bestCost = cost; bestX = x; bestZ = z; bestIsland = chosen;
                     const float gx = coastSigned(x + 3.0f, z) - coastSigned(x - 3.0f, z), gz = coastSigned(x, z + 3.0f) - coastSigned(x, z - 3.0f);
                     bestAngle = coast ? std::atan2(gx, -gz) : between(0.0f, 6.2831853f); // las playas se alargan a lo largo de la costa
                 }
@@ -484,6 +495,7 @@ class HabitatMap {
                 bestX = between(-0.3f, 0.3f) * m_islands.front().r;
                 bestZ = between(-0.3f, 0.3f) * m_islands.front().r;
             }
+            ++islandZones[bestIsland];
             zone.x = bestX; zone.z = bestZ;
             zone.cosA = std::cos(bestAngle); zone.sinA = std::sin(bestAngle);
             m_zones.push_back(zone);
@@ -1230,7 +1242,8 @@ class HabitatMap {
                             const float bx = x + std::cos(ba) * br, bz = z + std::sin(ba) * br;
                             if (!free(bx, bz, pr)) continue;
                             spots.push_back({ bx, bz, pr });
-                            carveBasin(bx, bz, pr, 1.6f, h0 - 0.35f, POND, h0, 0.4f, 0.28f);
+                            carveBasin(bx, bz, pr, 0.8f, h0 - 0.2f, HOT, h0, 0.4f, 0.28f); // agua caliente y poco profunda
+                            m_springs.push_back({ bx, bz, pr * 1.5f });
                             Physics::World::Geyser geyser;
                             const float size = (pr - GEYSER_MIN_BASIN) / (GEYSER_MAX_BASIN - GEYSER_MIN_BASIN); // las charcas grandes lanzan chorros más altos
                             geyser.x = bx; geyser.z = bz; geyser.radius = (std::max)(1.2f, pr * 0.55f);
@@ -1251,7 +1264,7 @@ class HabitatMap {
                                 const float px = x + std::cos(pa) * pd, pz = z + std::sin(pa) * pd;
                                 if (!free(px, pz, pr)) continue;
                                 spots.push_back({ px, pz, pr });
-                                carveBasin(px, pz, pr, 1.3f, h0 - 0.25f, HOT, h0, 0.34f, 0.24f);
+                                carveBasin(px, pz, pr, 0.8f, h0 - 0.2f, HOT, h0, 0.34f, 0.24f);
                                 m_springs.push_back({ px, pz, pr * 1.5f });
                                 Zone pool;
                                 pool.habitat = spring; pool.x = px; pool.z = pz; pool.radius = pr * 1.8f; pool.altitude = h0;

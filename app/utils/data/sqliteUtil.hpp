@@ -1,4 +1,5 @@
 #pragma once
+#include "../core/resourceUtil.hpp"
 #include <sqlite3.h>
 #include <memory>
 #include <string>
@@ -55,10 +56,22 @@ class SqliteUtil {
     static sqlite3* connection() {
         static std::unique_ptr<sqlite3, DbCloser> db;
         if (!db) {
+            // La base de datos va incrustada en el exe (sin cifrar): se abre en memoria directamente sobre esos bytes, de solo lectura.
+            const ResourceUtil::Blob blob = ResourceUtil::loadRaw(IDR_DATABASE);
+            if (!blob) {
+                Logger::logError("SQLITE_UTIL", "La base de datos no está incrustada en el exe.");
+                return nullptr;
+            }
             sqlite3* raw = nullptr;
-            // u8string(): SQLite espera UTF-8 (C++17).
-            if (sqlite3_open_v2(PathsUtil::DB_PATH.u8string().c_str(), &raw, SQLITE_OPEN_READWRITE, nullptr) != SQLITE_OK) {
+            if (sqlite3_open_v2(":memory:", &raw, SQLITE_OPEN_READWRITE, nullptr) != SQLITE_OK) {
                 Logger::logError("SQLITE_UTIL", std::string("Error al abrir BD: ") + sqlite3_errmsg(raw));
+                sqlite3_close(raw);
+                return nullptr;
+            }
+            const int status = sqlite3_deserialize(raw, "main", const_cast<unsigned char*>(blob.data), static_cast<sqlite3_int64>(blob.size),
+                                                   static_cast<sqlite3_int64>(blob.size), SQLITE_DESERIALIZE_READONLY);
+            if (status != SQLITE_OK) {
+                Logger::logError("SQLITE_UTIL", std::string("No se pudo cargar la BD incrustada: ") + sqlite3_errmsg(raw));
                 sqlite3_close(raw);
                 return nullptr;
             }

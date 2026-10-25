@@ -147,7 +147,7 @@ struct Scene {
         else if (input.lockTap) cycleLock();
         validateLock(dt);
 
-        camera.setSwimming(player.swimming());
+        camera.setSwimming(player.swimming() || player.diving());
         camera.update(dt, m_aiming);
         if (lockedTarget) camera.trackToward(player.body.position, lockedTarget->center(), dt);
         else camera.rotate(input.lookX, input.lookY);
@@ -175,6 +175,7 @@ struct Scene {
             const PokemonSpecies* gills = lead ? m_data->speciesById(lead->speciesId) : nullptr;
             player.breathesUnderwater = gills && companion.active() && !companion.changing() && m_data->breathesUnderwater(*gills);
         }
+        player.onCloud = habitats.cloudFloor(player.body.position.x, player.body.position.z);
         player.update(dt, moveInput, camera.yaw(), camera.lookAngle(), world);
         updateHealth(dt);
 
@@ -262,7 +263,8 @@ struct Scene {
         const float feet = player.body.feet();
         const float floor = player.swimming() ? world.groundHeight(eye.x, eye.z, feet) : world.surfaceHeight(eye.x, eye.z, feet);
         const float ceiling = world.under(eye.x, eye.z, feet) ? world.ceiling(eye.x, eye.z) - 0.3f : Physics::World::ABOVE;
-        return camera.viewMatrix(player.body.position, floor + 0.35f, ceiling, pull); // la cámara no se hunde en el terreno (bajo el agua sí se sumerge)
+        const float minEye = player.swimming() ? (std::min)(floor + 0.35f, at.y - 0.15f) : floor + 0.35f; // nadando el suelo nunca fuerza la cámara por encima de lo que mira: girar sigue libre
+        return camera.viewMatrix(player.body.position, minEye, ceiling, pull); // la cámara no se hunde en el terreno (bajo el agua sí se sumerge)
     }
 
     GameStatus status() const {
@@ -492,8 +494,9 @@ struct Scene {
         health.update(dt);
         const float impact = player.takeImpact();
         const DirectX::XMFLOAT3& at = player.body.position;
-        if (habitats.cloudFloor(at.x, at.z) && impact >= HealthRules::CLOUD_BOUNCE_MIN) player.body.velocity.y = impact * HealthRules::CLOUD_BOUNCE; // la nube rebota
-        if (!habitats.cloudFloor(at.x, at.z)) health.hurt(HealthRules::fallDamage(impact)); // el suelo de nube no hace daño
+        const bool cloud = habitats.cloudFloor(at.x, at.z);
+        if (cloud && impact >= HealthRules::CLOUD_BOUNCE_MIN) player.body.velocity.y = impact * HealthRules::CLOUD_BOUNCE; // la nube rebota según lo alto que se cayó y cada rebote es menor
+        if (!cloud) health.hurt(HealthRules::fallDamage(impact)); // el suelo de nube no hace daño
         if (player.drowning()) health.hurt(HealthRules::DROWN_PER_SECOND * dt);
         updateBurn(dt);
         updateSpring(dt);
@@ -802,26 +805,20 @@ struct Scene {
 
     // Combate por turnos contra el salvaje al que ataca el acompañante: tras cada golpe suyo responde el salvaje (de cerca si es físico, de lejos si
     // es especial) con el mismo cálculo (tipos y estadísticas) contra la vida del acompañante. Si este cae, descansa un rato y se recupera.
-    float& companionHp(const OwnedPokemon& lead) { return m_hpByUid.try_emplace(lead.uid, 1.0f).first->second; }
-    // Cura al compañero (pociones, aguas termales, centro pokémon...). Uno debilitado (sin vida) no se cura con esto: solo con 'reviveCompanion'.
+    // Cura al compañero (aguas termales...). Uno debilitado (0 PS) no se cura con esto: solo reviviéndolo (objeto o centro pokémon).
     void healCompanion(float fraction) {
-        if (const OwnedPokemon* lead = storage.active()) { float& hp = companionHp(*lead); if (hp > 0.0f) hp = (std::min)(1.0f, hp + fraction); }
+        OwnedPokemon* lead = storage.activeMut();
+        if (!lead || storage.fainted(*lead)) return;
+        m_healAcc += fraction * static_cast<float>(storage.maxHp(*lead));
+        if (m_healAcc >= 1.0f) { const int whole = static_cast<int>(m_healAcc); m_healAcc -= static_cast<float>(whole); storage.heal(true, storage.activeIndex(), whole); }
     }
-    void reviveCompanion(float fraction) {
-        if (const OwnedPokemon* lead = storage.active()) { float& hp = companionHp(*lead); if (hp <= 0.0f) hp = (std::clamp)(fraction, 0.05f, 1.0f); }
-    }
-    bool companionDown() const { return companionHpFraction() <= 0.0f; }
-    float companionHpFraction() const {
-        const OwnedPokemon* lead = storage.active();
-        if (!lead) return 1.0f;
-        const auto it = m_hpByUid.find(lead->uid);
-        return it == m_hpByUid.end() ? 1.0f : it->second;
-    }
+    bool companionDown() const { const OwnedPokemon* lead = storage.active(); return lead && storage.fainted(*lead); }
+    float companionHpFraction() const { const OwnedPokemon* lead = storage.active(); return lead ? storage.hpFraction(*lead) : 1.0f; }
 
     void updateDuel(float dt, const OwnedPokemon* lead, const PokemonSpecies* species) {
         if (!lead) { m_engaged = nullptr; return; }
-        float& hp = companionHp(*lead);
-        if (hp <= 0.0f) { // debilitado: no se cura solo (hace falta revivirlo)
+        OwnedPokemon* mine = storage.activeMut();
+        if (storage.fainted(*mine)) { // debilitado: no se cura solo (hace falta revivirlo)
             if (m_engaged) { m_engaged->stopFight(); m_engaged = nullptr; }
             return;
         }
@@ -844,13 +841,13 @@ struct Scene {
             const DamageRules::Hit hit = DamageRules::compute(*m_data, *attacker, foe.level(), *species, lead->level, foe.hpFraction());
             if (hit.lands()) {
                 strikes.push_back({ foe.center(), companion.center(), hit.typeId, hit.style == DamageRules::Style::RANGED, 0.0f });
-                hp = (std::max)(0.0f, hp - hit.fraction * WILD_DAMAGE_SCALE);
+                storage.hurt(*mine, (std::max)(1, static_cast<int>(hit.fraction * WILD_DAMAGE_SCALE * static_cast<float>(storage.maxHp(*mine)))));
             }
             m_duelTurn = DuelTurn::COMPANION;
         } else if (m_turnClock >= WILD_TURN_TIMEOUT) {
             m_duelTurn = DuelTurn::COMPANION; // no llega a tiempo: pasa el turno
         }
-        if (hp <= 0.0f) {
+        if (storage.fainted(*mine)) {
             foe.stopFight();
             m_engaged = nullptr;
             m_duelTurn = DuelTurn::COMPANION;
@@ -1351,7 +1348,7 @@ struct Scene {
     static constexpr float WILD_DAMAGE_SCALE = 0.8f;   // los salvajes pegan algo menos que el compañero
     DuelTurn m_duelTurn = DuelTurn::COMPANION;
     float m_turnClock = 0.0f;
-    std::map<int, float> m_hpByUid;                    // vida del compañero (fracción) de cada pokémon del equipo
+    float m_healAcc = 0.0f;                            // PS fraccionarios acumulados al curarse poco a poco
     CaptureTarget* m_engaged = nullptr; // salvaje al que el acompañante está atacando ahora
     float m_captureRest = 0.0f; // descanso del acompañante entre ataques en modo captura
     bool m_collecting = false;

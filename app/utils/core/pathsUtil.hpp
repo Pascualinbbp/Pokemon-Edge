@@ -22,14 +22,12 @@ class PathsUtil {
     inline static const fs::path BASE_DIR = EXE_PATH.parent_path();
     inline static const fs::path APP_DIR = BASE_DIR / "app";
     inline static const fs::path DATA_DIR = APP_DIR / "data";
-    inline static const fs::path DB_DIR = DATA_DIR / "db";
     inline static const fs::path LOG_DIR = APP_DIR / "logs";
     inline static const fs::path SAVE_DIR = APP_DIR / "saves";
     inline static const fs::path DOWNLOAD_FOLDER = BASE_DIR / "temp_download";
 
     // --- Archivos ---
     inline static const fs::path VERSION_JSON_PATH = DATA_DIR / "version.json";
-    inline static const fs::path DB_PATH = DB_DIR / "pokemonEdge.db";
     inline static const fs::path LOG_FILE_PATH = LOG_DIR / "app.log";
     inline static const fs::path CRASH_DUMP_PATH = LOG_DIR / "crash.dmp"; // volcado del último cierre inesperado (CrashUtil)
     inline static const fs::path TEMP_ZIP_PATH = DOWNLOAD_FOLDER / "update.zip";

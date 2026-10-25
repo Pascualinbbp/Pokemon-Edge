@@ -20,6 +20,8 @@ class Player {
     static constexpr float SLIDE_DURATION = 0.9f;  // segundos
     static constexpr float SLIDE_EASE_OUT = 0.2f;  // al final baja hasta la velocidad de correr
     static constexpr float JUMP_SPEED     = 7.0f;
+    static constexpr float CLOUD_JUMP     = 1.45f; // el suelo de nube es blando: saltar en él rebota más
+    bool onCloud = false;                          // lo fija la escena antes de cada actualización
     static constexpr float SWIM_SPEED     = 3.4f;  // nadar en la superficie
     static constexpr float DIVE_SPEED     = 4.6f;  // nadar sumergido (más rápido que en la superficie)
     static constexpr float SWIM_SPRINT    = 5.6f;  // nadar rápido (doble toque adelante, como al correr)
@@ -448,7 +450,7 @@ class Player {
     }
 
     void jump(const Physics::World& world) {
-        world.jump(body, JUMP_SPEED);
+        world.jump(body, JUMP_SPEED * (onCloud ? CLOUD_JUMP : 1.0f));
         m_crouching = false;
         if (m_sliding) { // saltar desde un deslizamiento conserva el impulso de carrera
             m_sliding = false;

@@ -461,6 +461,44 @@ namespace PokemonComponent {
             if (storage.bound(owned)) GuiCards::chip(dl, chipAt, "Inicial", IM_COL32(120, 70, 190, 255), 0.8f);
             if (const PokeballType* ball = data.ball(owned.ballId)) ItemIcon::ball(dl, ImVec2(pos.x + size.x - 26.0f, pos.y + 26.0f), 12.0f, PokeballStyle::look(ball->id));
 
+            // PS (barra) y medicinas: pociones curan, revivir reanima a un debilitado. Cada botón es el objeto con las unidades que quedan.
+            {
+                const int maxHp = storage.maxHp(owned), hp = storage.hpOf(owned);
+                const ImVec2 bar(pos.x + 108.0f, pos.y + 92.0f);
+                const float barW = size.x - 108.0f - 16.0f;
+                dl->AddRectFilled(bar, ImVec2(bar.x + barW, bar.y + 16.0f), IM_COL32(0, 0, 0, 130), 8.0f);
+                const float f = storage.hpFraction(owned);
+                if (f > 0.0f) dl->AddRectFilled(bar, ImVec2(bar.x + barW * f, bar.y + 16.0f), f > 0.5f ? IM_COL32(90, 210, 110, 255) : f > 0.2f ? IM_COL32(235, 200, 60, 255) : IM_COL32(230, 70, 70, 255), 8.0f);
+                std::snprintf(text, sizeof(text), hp > 0 ? "PS %d/%d" : "PS 0/%d  (debilitado)", hp > 0 ? hp : maxHp, maxHp);
+                GuiCards::text(dl, ImVec2(bar.x + 8.0f, bar.y + 1.0f), IM_COL32(255, 255, 255, 245), text, 0.75f);
+                float bx = pos.x + 16.0f;
+                int index = 0;
+                for (const TrainingItem& med : data.trainingItems) {
+                    if (med.effect != TrainingItem::Effect::HEAL && med.effect != TrainingItem::Effect::REVIVE) continue;
+                    const Item* medItem = data.itemOf(ItemCategory::TRAINING, med.id);
+                    if (!medItem) continue;
+                    const int count = inventory.count(medItem->id);
+                    const bool applies = med.effect == TrainingItem::Effect::REVIVE ? hp <= 0 : (hp > 0 && hp < maxHp);
+                    const bool usable = count > 0 && applies;
+                    const ImVec2 a(bx, pos.y + headerHeight - 28.0f), b(a.x + 46.0f, a.y + 24.0f);
+                    ImGui::SetCursorScreenPos(a);
+                    ImGui::PushID(1000 + index++);
+                    const bool clicked = ImGui::InvisibleButton("##med", ImVec2(46.0f, 24.0f));
+                    const bool hovered = ImGui::IsItemHovered();
+                    ImGui::PopID();
+                    dl->AddRectFilled(a, b, IM_COL32(0, 0, 0, hovered && usable ? 150 : 90), 6.0f);
+                    ItemIcon::training(dl, ImVec2(a.x + 12.0f, a.y + 13.0f), 9.0f, med.effect, usable ? 1.0f : 0.4f, med.amount);
+                    std::snprintf(text, sizeof(text), "%d", count);
+                    GuiCards::text(dl, ImVec2(a.x + 25.0f, a.y + 6.0f), usable ? IM_COL32(255, 255, 255, 255) : IM_COL32(180, 180, 190, 180), text, 0.85f);
+                    if (hovered) ImGui::SetTooltip("%s\n%s", med.name.c_str(), med.description.c_str());
+                    if (clicked && usable) {
+                        const bool done = med.effect == TrainingItem::Effect::REVIVE ? storage.revive(selection.inTeam, selection.index, med.amount >= 100) : storage.heal(selection.inTeam, selection.index, med.amount >= 99999 ? 0 : med.amount);
+                        if (done) { inventory.add(medItem->id, -1); message = med.name + " usado en " + species->name; }
+                    }
+                    bx += 50.0f;
+                }
+            }
+
             // Caramelo: sube un nivel (sin pasar del límite del jugador).
             if (const TrainingItem* candy = data.trainingWith(TrainingItem::Effect::LEVEL)) if (const Item* item = data.itemOf(ItemCategory::TRAINING, candy->id)) {
                 const int count = inventory.count(item->id);
