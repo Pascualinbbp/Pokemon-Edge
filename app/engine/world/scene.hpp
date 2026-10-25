@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <map>
 #include <array>
 #include <cmath>
 #include <random>
@@ -135,7 +136,8 @@ struct Scene {
         }
         if (input.teamSelect > 0) storage.setActive(input.teamSelect - 1); // la misma tecla que el que ya está fuera no cambia nada
 
-        wild.update(dt, player.body.position.x, player.body.position.z, camera.yaw(), *m_data, habitats, [this](CaptureTarget& target) { return assignSpecies(target); });
+        wild.update(dt, player.body.position.x, player.body.position.z, camera.yaw(), player.body.underground, *m_data, habitats, [this](CaptureTarget& target) { return assignSpecies(target); },
+                    [this](float x, float y, float z) { return canSee(x, y, z); });
 
         for (const CaptureTarget* target : wild.loaded()) { // lo que se ve de cerca queda registrado en la Pokédex
             if (target->hittable() && target->speciesIndex() >= 0 && nearPlayer(target->body.position, SEEN_RANGE) && visible(*target)) storage.markSeen(target->speciesId());
@@ -161,7 +163,7 @@ struct Scene {
         }
         world.props.clear();
         for (const Chest& chest : chests.entities) if (chest.closed()) world.props.push_back(chest.solid());
-        for (const ResourceNode& node : nodes) if (!node.gone() && nearPlayer(node.body.position, PROP_RANGE)) world.props.push_back(node.solid());
+        for (const ResourceNode& node : nodes) if (!node.gone() && !node.vein() && nearPlayer(node.body.position, PROP_RANGE)) world.props.push_back(node.solid());
         world.props.push_back(machine.solid());
         world.props.push_back(oak.solid());
 
@@ -455,7 +457,7 @@ struct Scene {
         }
         if (companion.active() && !companion.changing() && storage.active()) {
             const OwnedPokemon& lead = *storage.active();
-            add(companion.speciesId(), lead.level, companion.shiny(), { companion.body.position.x, companion.body.position.y + Companion::SIZE, companion.body.position.z });
+            add(companion.speciesId(), lead.level, companion.shiny(), { companion.body.position.x, companion.body.position.y + Companion::SIZE, companion.body.position.z }, companionHpFraction());
         }
     }
 
@@ -520,7 +522,10 @@ struct Scene {
         if (pool != m_pool) { m_pool = pool; m_poolTime = 0.0f; }
         if (pool < 0) return;
         m_poolTime += dt;
-        if (m_poolTime < HealthRules::SPRING_SAFE_TIME) health.heal(HealthRules::SPRING_HEAL_PER_SECOND * dt);
+        if (m_poolTime < HealthRules::SPRING_SAFE_TIME) {
+            health.heal(HealthRules::SPRING_HEAL_PER_SECOND * dt);
+            healCompanion(HealthRules::SPRING_HEAL_PER_SECOND * 0.01f * dt); // el compañero también se cura en el agua caliente
+        }
         else health.hurt(HealthRules::SPRING_HURT_PER_SECOND * dt);
     }
 
@@ -710,6 +715,8 @@ struct Scene {
             companion.swap(species->id, m_data->levitates(*species), lead->ballId, lead->shiny, player.body.position, camera.yaw());
         }
         if (companion.changing()) species = nullptr; // durante el cambio no trabaja
+        updateDuel(dt, lead, species);
+        if (companionDown()) species = nullptr; // debilitado: solo sigue al jugador hasta que lo reviva un objeto o el centro pokémon
 
         // Busca lo más cercano que sabe trabajar dentro de su radio de búsqueda; si está lejos, va hacia ello (aunque se separe
         // del jugador) y, al llegar, lo trabaja. Sin nada que hacer vuelve a seguir al jugador.
@@ -785,7 +792,69 @@ struct Scene {
         if (nodeTarget) workNode(*nodeTarget, false);
         else if (groundTarget) collect(*groundTarget);
         else if (fightTarget) {
-            strike(*fightTarget);
+            if (m_duelTurn == DuelTurn::COMPANION) { // combate por turnos: pega uno y luego el otro, así ninguno se pasa la pelea huyendo del otro
+                strike(*fightTarget);
+                m_duelTurn = DuelTurn::WILD;
+                m_turnClock = 0.0f;
+            }
+        }
+    }
+
+    // Combate por turnos contra el salvaje al que ataca el acompañante: tras cada golpe suyo responde el salvaje (de cerca si es físico, de lejos si
+    // es especial) con el mismo cálculo (tipos y estadísticas) contra la vida del acompañante. Si este cae, descansa un rato y se recupera.
+    float& companionHp(const OwnedPokemon& lead) { return m_hpByUid.try_emplace(lead.uid, 1.0f).first->second; }
+    // Cura al compañero (pociones, aguas termales, centro pokémon...). Uno debilitado (sin vida) no se cura con esto: solo con 'reviveCompanion'.
+    void healCompanion(float fraction) {
+        if (const OwnedPokemon* lead = storage.active()) { float& hp = companionHp(*lead); if (hp > 0.0f) hp = (std::min)(1.0f, hp + fraction); }
+    }
+    void reviveCompanion(float fraction) {
+        if (const OwnedPokemon* lead = storage.active()) { float& hp = companionHp(*lead); if (hp <= 0.0f) hp = (std::clamp)(fraction, 0.05f, 1.0f); }
+    }
+    bool companionDown() const { return companionHpFraction() <= 0.0f; }
+    float companionHpFraction() const {
+        const OwnedPokemon* lead = storage.active();
+        if (!lead) return 1.0f;
+        const auto it = m_hpByUid.find(lead->uid);
+        return it == m_hpByUid.end() ? 1.0f : it->second;
+    }
+
+    void updateDuel(float dt, const OwnedPokemon* lead, const PokemonSpecies* species) {
+        if (!lead) { m_engaged = nullptr; return; }
+        float& hp = companionHp(*lead);
+        if (hp <= 0.0f) { // debilitado: no se cura solo (hace falta revivirlo)
+            if (m_engaged) { m_engaged->stopFight(); m_engaged = nullptr; }
+            return;
+        }
+        if (!m_engaged || !species || companion.changing()) {
+            m_duelTurn = DuelTurn::COMPANION;
+            return;
+        }
+        CaptureTarget& foe = *m_engaged;
+        const PokemonSpecies* attacker = m_data->speciesById(foe.speciesId());
+        if (!attacker) return;
+        const bool ranged = DamageRules::styleOf(*attacker) == DamageRules::Style::RANGED;
+        const float keep = ranged ? CompanionRules::RANGED_RANGE * 0.7f : CompanionRules::ATTACK_RANGE * 0.7f;
+        if (m_duelTurn != DuelTurn::WILD) { foe.fightToward(companion.center(), keep); return; } // espera su turno encarándolo
+        m_turnClock += dt;
+        foe.fightToward(companion.center(), keep);
+        const float dx = foe.body.position.x - companion.body.position.x, dz = foe.body.position.z - companion.body.position.z, d2 = dx * dx + dz * dz;
+        const float reach = ranged ? CompanionRules::RANGED_RANGE : CompanionRules::ATTACK_RANGE;
+        const bool inReach = d2 <= reach * reach && (!ranged || !world.blocked(foe.center(), companion.center()));
+        if (m_turnClock >= WILD_TURN_DELAY && inReach) {
+            const DamageRules::Hit hit = DamageRules::compute(*m_data, *attacker, foe.level(), *species, lead->level, foe.hpFraction());
+            if (hit.lands()) {
+                strikes.push_back({ foe.center(), companion.center(), hit.typeId, hit.style == DamageRules::Style::RANGED, 0.0f });
+                hp = (std::max)(0.0f, hp - hit.fraction * WILD_DAMAGE_SCALE);
+            }
+            m_duelTurn = DuelTurn::COMPANION;
+        } else if (m_turnClock >= WILD_TURN_TIMEOUT) {
+            m_duelTurn = DuelTurn::COMPANION; // no llega a tiempo: pasa el turno
+        }
+        if (hp <= 0.0f) {
+            foe.stopFight();
+            m_engaged = nullptr;
+            m_duelTurn = DuelTurn::COMPANION;
+            showNotice(Notice::REWARD, species->name + " está agotado");
         }
     }
 
@@ -823,6 +892,18 @@ struct Scene {
             return !(mode == CompanionRules::Mode::CAPTURE && target->hpFraction() <= CompanionRules::CAPTURE_STOP_HP);
         }
         return false; // descargado o capturado
+    }
+
+    // ¿Ve el jugador ese punto? No si hay terreno (montaña, loma, entrada de cueva) o un sólido de por medio.
+    bool canSee(float x, float y, float z) const {
+        const DirectX::XMFLOAT3 eye = { player.body.position.x, player.body.position.y + 1.5f, player.body.position.z };
+        const float dx = x - eye.x, dy = y - eye.y, dz = z - eye.z;
+        const int steps = (std::min)(40, (std::max)(2, static_cast<int>(std::sqrt(dx * dx + dz * dz) / 3.0f)));
+        for (int i = 1; i < steps; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(steps);
+            if (world.terrain.sample(eye.x + dx * t, eye.z + dz * t) > eye.y + dy * t + 0.3f) return false;
+        }
+        return !world.blocked(eye, { x, y, z });
     }
 
     // Lo que el líder del equipo le haría a un salvaje de un golpe (DamageRules); sin líder o sin datos, nada.
@@ -1264,6 +1345,13 @@ struct Scene {
     static constexpr float HOLD_REPEAT = 0.45f;        // segundos entre golpes al mantener pulsado interactuar
     float m_collectClock = 12.0f;
     static constexpr float BALL_SOLID = 0.26f; // semiancho de la caja de la pokéball mientras captura
+    enum class DuelTurn { COMPANION, WILD };
+    static constexpr float WILD_TURN_DELAY = 0.9f;     // pausa antes de que responda el salvaje
+    static constexpr float WILD_TURN_TIMEOUT = 4.0f;   // si no llega a su rival en este tiempo, pasa el turno
+    static constexpr float WILD_DAMAGE_SCALE = 0.8f;   // los salvajes pegan algo menos que el compañero
+    DuelTurn m_duelTurn = DuelTurn::COMPANION;
+    float m_turnClock = 0.0f;
+    std::map<int, float> m_hpByUid;                    // vida del compañero (fracción) de cada pokémon del equipo
     CaptureTarget* m_engaged = nullptr; // salvaje al que el acompañante está atacando ahora
     float m_captureRest = 0.0f; // descanso del acompañante entre ataques en modo captura
     bool m_collecting = false;

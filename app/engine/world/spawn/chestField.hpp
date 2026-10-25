@@ -79,6 +79,7 @@ class ChestField {
             const Underground& under = habitats.under();
             if (!under.covered(x, z) || under.depthAt(x, z) > 0.05f || under.ceilAt(x, z) - under.floorAt(x, z) < 2.0f || under.floor().slope(x, z) > MAX_SLOPE) return false;
         } else if (world.waterDepth(x, z) > 0.05f || world.groundHeight(x, z) < MIN_LAND_DEPTH || world.slope(x, z) > MAX_SLOPE) return false; // nunca en el agua ni en una pared
+        if (!deep && HabitatMap::inCity(x, z)) return false;
         if ((x - playerX) * (x - playerX) + (z - playerZ) * (z - playerZ) < EXCLUSION_RADIUS * EXCLUSION_RADIUS) return false;
         const float mx = x - ResearchMachine::POSITION.x, mz = z - ResearchMachine::POSITION.z;
         if (mx * mx + mz * mz < 16.0f) return false;

@@ -32,5 +32,5 @@ constexpr bool isFullscreen(GameState state) {
 
 // Estados que se redibujan continuamente; el resto solo con eventos.
 constexpr bool isAnimated(GameState state) {
-    return state == GameState::TITLE_SCREEN || state == GameState::LOADING || state == GameState::PLAYING || state == GameState::UPDATING;
+    return state == GameState::TITLE_SCREEN || state == GameState::LOADING || state == GameState::PLAYING || state == GameState::UPDATING || state == GameState::STARTER;
 }

@@ -7,6 +7,7 @@
 #include "../gameState.hpp"
 #include "../style/guiCards.hpp"
 #include "../style/guiStyle.hpp"
+#include "../style/icons/typeIcons.hpp"
 #include "../window/guiInput.hpp"
 #include "../../models/gameData.hpp"
 
@@ -119,14 +120,14 @@ namespace TypeChartComponent {
             const ImVec2 b(a.x + cell - 4.0f, origin.y + header - 4.0f);
             dl->AddRectFilled(a, b, GuiCards::typeColor(data.types[sequence.columns[c]].id), 6.0f);
             if (hot && hotColumn == c) dl->AddRect(a, b, GuiCards::SELECT, 6.0f, 0, 2.0f);
-            GuiCards::centeredText(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), IM_COL32(255, 255, 255, 255), shortName(data.types[sequence.columns[c]].name, 3).c_str(), 0.8f);
+            TypeIcons::draw(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), (std::min)(b.x - a.x, cell) * 0.42f, data.types[sequence.columns[c]]);
         }
         for (int r = 0; r < count; ++r) { // cabecera de filas: atacantes
             const ImVec2 a(origin.x + 2.0f, origin.y + header + r * cell + 2.0f);
             const ImVec2 b(origin.x + header - 4.0f, a.y + cell - 4.0f);
             dl->AddRectFilled(a, b, GuiCards::typeColor(data.types[sequence.rows[r]].id), 6.0f);
             if (hot && hotRow == r) dl->AddRect(a, b, GuiCards::SELECT, 6.0f, 0, 2.0f);
-            GuiCards::centeredText(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), IM_COL32(255, 255, 255, 255), shortName(data.types[sequence.rows[r]].name, 5).c_str(), 0.8f);
+            TypeIcons::draw(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), (std::min)(b.y - a.y, cell) * 0.42f, data.types[sequence.rows[r]]);
             for (int c = 0; c < count; ++c) {
                 const float multiplier = data.typeChart.multiplier(data.types[sequence.rows[r]].id, data.types[sequence.columns[c]].id);
                 const ImVec2 ca(origin.x + header + c * cell + 2.0f, a.y);

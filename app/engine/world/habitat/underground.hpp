@@ -23,17 +23,17 @@ class Underground {
     static constexpr float NONE = -1.0e4f;       // sin galería en ese nodo
     static constexpr float DEFINED = -5.0e3f;    // por encima de esto el nodo existe
     static constexpr float CLEARANCE = 2.2f;     // altura mínima libre para poder estar dentro
-    static constexpr float MOUND_SLOPE = 0.5f;   // pendiente del montículo que cubre la entrada (sube poco a poco desde el terreno)
-    static constexpr float MOUND_REACH = 26.0f;  // margen que se reserva alrededor de la galería para el montículo
-    static constexpr int MOUND_PASSES = 14;      // pasadas para extender ese montículo (cada una alcanza una casilla más)
+    static constexpr float MOUND_SLOPE = 0.36f;   // pendiente del montículo que cubre la entrada (sube poco a poco desde el terreno)
+    static constexpr float MOUND_REACH = 34.0f;  // margen que se reserva alrededor de la galería para el montículo
+    static constexpr int MOUND_PASSES = 22;      // pasadas para extender ese montículo (cada una alcanza una casilla más)
     static constexpr float COVER = 1.4f;         // roca mínima entre el techo y la superficie
     static constexpr float DROP = 0.42f;         // metros que baja el suelo por cada metro recorrido desde la boca
     static constexpr float DOOR = 3.0f;          // tramo de la boca al aire libre, a ras de la ladera tallada
     static constexpr float DOOR_HEIGHT = 4.0f;   // altura de la boca
     static constexpr float MOUND = 18.0f;        // hasta esta distancia de la boca el terreno se eleva para cubrir la galería
     static constexpr float MAX_DROP = 16.0f;     // lo más que baja el suelo respecto a la boca
-    static constexpr float TRENCH_LENGTH = 10.0f; // explanada tallada ante la boca
-    static constexpr float TRENCH_HALF = 4.5f;
+    static constexpr float TRENCH_LENGTH = 5.0f; // explanada tallada ante la boca
+    static constexpr float TRENCH_HALF = 2.8f;
     static constexpr float MIN_RADIUS = 6.0f;    // alcance mínimo de un sistema
     static constexpr float MIN_FILL = 0.3f;      // fracción del tamaño pedido que debe alcanzar como mínimo
     static constexpr float GROW_START = 8.0f;    // a partir de esta distancia a la boca las galerías empiezan a ensancharse
@@ -481,7 +481,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
             if (!inside) { // explanada ante la boca
                 const float x = height.nodeCoord(c) - mouth.x, z = height.nodeCoord(r) - mouth.z;
                 const float u = x * mouth.dirX + z * mouth.dirZ, v = -x * mouth.dirZ + z * mouth.dirX;
-                const float w = (1.0f - smooth(TRENCH_HALF, TRENCH_HALF + 4.5f, std::fabs(v))) * (1.0f - smooth(-TRENCH_LENGTH, -TRENCH_LENGTH - 7.0f, u)) * (1.0f - smooth(2.0f, 6.0f, u));
+                const float w = (1.0f - smooth(TRENCH_HALF, TRENCH_HALF + 6.0f, std::fabs(v))) * (1.0f - smooth(-TRENCH_LENGTH, -TRENCH_LENGTH - 9.0f, u)) * (1.0f - smooth(2.0f, 6.0f, u));
                 g += (S0 - g) * w;
             }
             if (std::fabs(terrain.surface.at(c, r) - original[i]) < 1.0e-3f) terrain.surface.at(c, r) = g; // solo donde la superficie era el terreno

@@ -39,6 +39,7 @@ namespace ResourceStyle {
             case 20: return { Shape::CORAL, { 0.95f, 0.45f, 0.50f }, { 0.98f, 0.70f, 0.30f }, false, 0.55f, 1.0f };  // coral
             case 21: return { Shape::KELP, { 0.15f, 0.45f, 0.22f }, { 0.30f, 0.65f, 0.28f }, false, 0.3f, 2.4f };    // alga
             case 22: return { Shape::ROCK, { 0.62f, 0.82f, 0.92f }, { 0.85f, 0.97f, 1.00f }, true, 0.85f, 1.1f };    // cristal de hielo
+            case 23: return { Shape::ROCK, { 0.45f, 0.45f, 0.48f }, { 0.99f, 0.82f, 0.18f }, true, 0.85f, 1.1f };  // filón de oro
             case 4:  return { Shape::ROCK, { 0.42f, 0.42f, 0.45f }, { 0.07f, 0.07f, 0.08f }, true,  0.85f, 1.1f }; // filón de carbón
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca
         }
@@ -87,6 +88,7 @@ class ResourceNode {
     static constexpr float SHAKE_AMOUNT = 0.07f;
     static constexpr float TEAM_WINDOW  = 1.5f;   // segundos durante los que cuenta que el otro siga trabajándolo
     static constexpr float TEAM_BONUS   = 2.0f;   // velocidad al trabajarlo jugador y pokémon a la vez
+    static constexpr float VEIN_REACH   = 2.9f;   // las vetas de pared se alcanzan desde el centro del paso
     static constexpr float WATER_STEP   = 0.08f;  // fracción de crecimiento que da cada riego (con velocidad 1)
 
     Physics::Body body;
@@ -120,7 +122,12 @@ class ResourceNode {
     bool workable() const { return !depleted() && !(m_plant && growing() && !m_waterable); }
 
     // Distancia máxima (desde el centro) a la que el jugador puede golpearlo.
-    float reach() const { return INTERACT_RANGE + ResourceStyle::look(m_typeId).half; }
+    float reach() const { return m_vein ? VEIN_REACH : INTERACT_RANGE + ResourceStyle::look(m_typeId).half; }
+
+    // Veta incrustada en la pared de una galería: un parche de mineral a ras de roca (no estorba ni se pisa). 'yaw' mira hacia fuera de la pared.
+    void makeVein(float yaw) { m_vein = true; m_yaw = yaw; }
+    bool vein() const { return m_vein; }
+    void setRegrowSeconds(float seconds) { m_regrowSeconds = (std::max)(1.0f, seconds); }
 
     // Jugador y pokémon lo están trabajando a la vez: ambos van más rápido.
     float teamBonus(bool byPlayer) const { return (byPlayer ? m_companionTimer : m_playerTimer) > 0.0f ? TEAM_BONUS : 1.0f; }
@@ -184,6 +191,7 @@ class ResourceNode {
     float m_growth;                // 0..1; 1 = listo
     bool m_waterable = true;       // regarla acelera su crecimiento (solo arbustos)
     bool m_ephemeral = false;      // al recogerse desaparece
+    bool m_vein = false;           // mineral incrustado en una pared
     bool m_gone = false;
     float m_goneTime = 0.0f;
     int m_hits = 0;

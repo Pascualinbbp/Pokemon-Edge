@@ -23,6 +23,8 @@ class CaptureTarget {
     static constexpr float LIFETIME_MAX  = 840.0f;
     static constexpr float APPEAR_TIME   = 1.4f;  // segundos que tarda en aparecer o desaparecer al entrar/salir del alcance
     static constexpr float SOLID_APPEAR  = 0.6f;  // a partir de este avance de aparición ya se puede golpear y es sólido
+    static constexpr float FIGHT_SPEED   = 3.6f;  // m/s al pelear
+    static constexpr float FIGHT_HOLD    = 0.6f;  // segundos que sigue peleando tras la última orden
     static constexpr float WALK_SPEED    = 1.8f;  // m/s al vagar
     static constexpr float TURN_SPEED    = 6.0f;  // rad/s al girar hacia donde camina
     static constexpr float WATER_EDGE    = 0.3f;  // profundidad que separa "tierra" de "agua" para vagar
@@ -76,6 +78,11 @@ class CaptureTarget {
     void setDive(float fraction, bool surface = false) { m_diveFraction = fraction; m_surface = surface; }
     void setLeash(float meters) { m_leash = meters; }
     bool underwater() const { return body.underwater; }
+
+    // Pelea: el salvaje se coloca frente a su rival (se acerca si ataca de cerca; mantiene la distancia 'keep' si ataca de lejos).
+    void fightToward(const DirectX::XMFLOAT3& foe, float keep) { m_foe = { foe.x, foe.z }; m_keep = keep; m_fightClock = FIGHT_HOLD; }
+    void stopFight() { m_fightClock = 0.0f; }
+    bool fighting() const { return m_fightClock > 0.0f; }
 
     bool hittable() const { return m_state == State::IDLE && m_appear >= SOLID_APPEAR; }
     bool gone() const { return m_state == State::HIDDEN; }       // capturado o derrotado: espera a que el chunk lo renueve
@@ -248,6 +255,22 @@ class CaptureTarget {
     // Alterna paradas y paseos en una dirección al azar; si se aleja demasiado de su punto, vuelve hacia él.
     // Los que no nadan evitan el agua y los que nadan evitan la tierra: al acercarse al límite dan media vuelta hacia su punto.
     void wander(float dt, const Physics::World& world) {
+        if (m_fightClock > 0.0f && !m_leaving) { // peleando: encara a su rival y se acerca o se mantiene a distancia
+            m_fightClock -= dt;
+            const float fx = m_foe.x - body.position.x, fz = m_foe.y - body.position.z, dist = std::sqrt(fx * fx + fz * fz);
+            m_heading = std::atan2(fx, fz);
+            m_yaw += (std::clamp)(DirectX::XMScalarModAngle(m_heading - m_yaw), -TURN_SPEED * 2.0f * dt, TURN_SPEED * 2.0f * dt);
+            float move = 0.0f;
+            if (dist > m_keep + 0.4f) move = 1.0f;
+            else if (dist < m_keep - 1.5f) move = -0.8f; // el que ataca de lejos se aparta si le encima
+            const float vx = std::sin(m_yaw) * FIGHT_SPEED * move, vz = std::cos(m_yaw) * FIGHT_SPEED * move;
+            const float ax = body.position.x + vx * 0.4f, az = body.position.z + vz * 0.4f;
+            const bool water = world.waterDepth(ax, az, body.feet()) >= WATER_EDGE;
+            const bool blocked = m_swims ? !water : water; // no se mete donde no puede estar
+            body.velocity.x = blocked ? 0.0f : vx;
+            body.velocity.z = blocked ? 0.0f : vz;
+            return;
+        }
         if (m_leaving) { // se aleja sin pararse
             m_walking = true;
             m_wanderTimer = 1.0f;
@@ -291,6 +314,9 @@ class CaptureTarget {
     float m_wanderTimer = 0.0f;
     bool m_walking = false;
     float m_hp = 1.0f;
+    DirectX::XMFLOAT2 m_foe = {};   // dónde está su rival (x, z)
+    float m_keep = 1.5f;            // distancia a la que pelea
+    float m_fightClock = 0.0f;
     int m_speciesIndex = -1;
     int m_speciesId = -1;
     int m_level = 1;

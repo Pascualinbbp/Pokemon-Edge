@@ -134,6 +134,7 @@ namespace {
             }
             color *= lerp(float3(1.0f, 1.0f, 1.0f), gain, Env.x);
             float fog = 1.0f - exp(-dist * Env.y);
+            if (Env.z > 0.5f) fog = max(fog, smoothstep(7.0f, 20.0f, dist)); // bajo el agua solo se ve un área alrededor del jugador
             return lerp(color, FogColor.rgb, saturate(fog));
         }
 
@@ -265,6 +266,30 @@ namespace {
             return output;
         }
 
+        float LavaHash(float2 p) { return frac(sin(dot(p, float2(127.1f, 311.7f))) * 43758.5453f); }
+        float LavaNoise(float2 p) {
+            float2 i = floor(p), f = frac(p);
+            f = f * f * (3.0f - 2.0f * f);
+            return lerp(lerp(LavaHash(i), LavaHash(i + float2(1.0f, 0.0f)), f.x), lerp(LavaHash(i + float2(0.0f, 1.0f)), LavaHash(i + float2(1.0f, 1.0f)), f.x), f.y);
+        }
+        float2 CausticPoint(float2 cell, float t) { // punto de cada celda que se mueve despacio
+            float2 h = float2(LavaHash(cell), LavaHash(cell + 17.31f));
+            return 0.5f + 0.38f * sin(t * 0.55f + 6.2831f * h);
+        }
+        // Red de celdas como el reflejo de la luz en el agua: devuelve cuánto cae la posición sobre una arista (1 = en la línea blanca).
+        float Caustic(float2 p, float t) {
+            float2 i = floor(p), f = frac(p);
+            float d1 = 8.0f, d2 = 8.0f;
+            [unroll] for (int y = -1; y <= 1; ++y) {
+                [unroll] for (int x = -1; x <= 1; ++x) {
+                    float2 g = float2(x, y);
+                    float d = length(g + CausticPoint(i + g, t) - f);
+                    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+                }
+            }
+            return 1.0f - smoothstep(0.0f, 0.11f, d2 - d1);
+        }
+
         float4 PS_WATER(WATER_IN input) : SV_Target {
             float k = floor(input.kind + 0.5f);
             float2 pxz = input.wpos.xz;
@@ -282,17 +307,17 @@ namespace {
             float depth = input.info.x;
             float2 flow = input.info.yz;
 
-            if (lava) { // roca fundida que se enfría río abajo: la costra oscura crece hasta que solo queda roca volcánica
+            if (lava) { // roca fundida: masa espesa y brillante de lenta corriente; aguas abajo se oscurece y se agrieta hasta ser roca
                 float cool = saturate((input.kind - 7.0f) / 0.45f);
-                float2 q = pxz * 0.35f + flow * t * 0.25f;
-                float crack = 0.5f + 0.5f * sin(q.x * 2.3f + sin(q.y * 1.7f + t * 0.6f) * 2.0f) * sin(q.y * 2.1f + sin(q.x * 1.3f - t * 0.5f) * 2.0f);
-                float3 ember = lerp(float3(0.55f, 0.08f, 0.02f), float3(1.0f, 0.60f, 0.10f), crack);
-                float3 crust = float3(0.10f, 0.06f, 0.05f);
-                float3 lc = lerp(ember, crust, smoothstep(0.65f, 0.95f, 1.0f - crack));
-                lc = lerp(lc, crust, saturate(cool * 1.3f) * saturate(cool * 1.3f));
-                float glow = 1.0f - 0.85f * cool;
-                float alpha = 1.0f - smoothstep(0.7f, 1.0f, cool);
-                return float4(ApplyEnv(lc * 0.35f, input.wpos) + lc * 0.9f * glow, alpha);
+                float2 q = pxz * 0.16f - flow * t * 0.35f;
+                float m = LavaNoise(q) * 0.6f + LavaNoise(q * 2.7f + 11.0f) * 0.4f;                 // manchas grandes y lentas
+                float3 molten = lerp(float3(0.80f, 0.16f, 0.02f), float3(1.0f, 0.70f, 0.14f), smoothstep(0.30f, 0.85f, m));
+                float plate = smoothstep(0.55f, 0.72f, 1.0f - m) * (0.25f + 0.75f * cool);          // placas de costra oscura que se van uniendo
+                float3 crust = float3(0.09f, 0.06f, 0.055f);
+                float3 lc = lerp(molten, crust, saturate(plate + cool * cool));
+                float glow = (1.0f - 0.9f * cool) * (0.85f + 0.15f * LavaNoise(q * 5.0f + t * 0.4f));
+                float alpha = 1.0f - smoothstep(0.75f, 1.0f, cool);
+                return float4(ApplyEnv(lc * 0.3f, input.wpos) + lc * glow * 1.1f, alpha);
             }
             float3 shallow, deep;
             float full;
@@ -305,7 +330,7 @@ namespace {
             else                      { shallow = float3(0.80f, 0.92f, 0.96f); deep = float3(0.45f, 0.70f, 0.85f); full = 3.0f; }
             float tdep = saturate(depth / full);
             float3 base = lerp(shallow, deep, sqrt(tdep));
-            float alpha = cloud ? lerp(0.55f, 0.88f, sqrt(tdep)) : (k > 2.5f && k < 3.5f) ? lerp(0.55f, 0.92f, tdep) : (k > 3.5f && k < 4.5f) ? 0.85f : lerp(0.28f, 0.96f, sqrt(tdep));
+            float alpha = cloud ? lerp(0.55f, 0.88f, sqrt(tdep)) : (k > 2.5f && k < 3.5f) ? lerp(0.55f, 0.92f, tdep) : (k > 3.5f && k < 4.5f) ? 0.85f : lerp(0.28f, 1.0f, smoothstep(0.0f, (k < 0.5f || open) ? 11.0f : 9.0f, depth)); // el agua profunda no deja ver el fondo ni lo que nada en él
             alpha *= smoothstep(0.0f, 0.25f, depth); // en la orilla es transparente
             if (open) alpha = 1.0f;
 
@@ -332,6 +357,14 @@ namespace {
             if (k > 3.5f && k < 4.5f) foam += 0.5f + 0.4f * sin(pxz.x * 2.1f + pxz.y * 3.0f - t * 9.0f);
             color = lerp(color, float3(0.95f, 0.98f, 1.0f), saturate(foam) * 0.85f);
             alpha = saturate(alpha + foam * 0.5f + fres * 0.25f);
+            if (!(k > 3.5f && k < 4.5f)) { // reflejos de luz sobre la superficie: red de líneas blancas que ondula (no en cascadas)
+                float2 cp = pxz * (cloud ? 0.18f : 0.32f) + float2(sin(t * 0.21f + pxz.y * 0.05f), cos(t * 0.17f + pxz.x * 0.05f)) * 0.6f;
+                float ln = Caustic(cp, t) * 0.7f + Caustic(cp * 1.9f + 3.7f, t * 1.3f) * 0.3f;
+                float shine = saturate(dot(n, LightDir.xyz)) * 0.5f + 0.5f;
+                float k2 = ln * (cloud ? 0.25f : 0.5f) * shine * (1.0f - 0.5f * saturate(fres));
+                color = lerp(color, float3(1.0f, 1.0f, 1.0f), k2);
+                alpha = saturate(alpha + k2 * 0.35f);
+            }
             return float4(ApplyEnv(color, input.wpos), alpha);
         }
     )";
@@ -445,8 +478,9 @@ std::vector<Renderer3D::Chunk> Renderer3D::createTerrain(ID3D11Device* device, c
                 color.y += weights[i] * habitatColors[i].y;
                 color.z += weights[i] * habitatColors[i].z;
             }
+            if (const float basalt = habitats.volcanicRockAt(col, row); basalt > 0.01f) color = mix(color, XMFLOAT3{ 0.13f, 0.12f, 0.13f }, basalt * 0.92f); // roca volcánica junto a la lava
             if (!habitats.regionAt(x, z)) {
-                color = mix(color, SAND, smooth(0.5f, 0.0f, height) * 0.6f);           // la tierra pegada al mar es arenosa
+                color = mix(color, SAND, smooth(0.5f, 0.0f, height) * 0.6f * (1.0f - habitats.volcanicRockAt(col, row)));           // la tierra pegada al mar es arenosa
                 const float feature = habitats.featureWeight(x, z);                     // volcanes y glaciares conservan su color
                 const float rock = smooth(0.55f, 1.0f, slope) * (1.0f - feature);      // lo empinado es roca
                 color = mix(color, ROCK, rock);
@@ -1405,6 +1439,24 @@ void Renderer3D::addNode(const ResourceNode& node) {
             part({ f, f, f }, 0.2f, { -0.3f, 0.5f, 0.4f }, look.accent, 0.3f);
             part({ f, f, f }, 0.7f, { 0.2f, 0.85f, 0.3f }, look.accent, 0.3f);
             part({ f, f, f }, 0.1f, { -0.4f, 0.35f, -0.3f }, look.accent, 0.3f);
+        }
+        return;
+    }
+
+    if (node.vein()) { // veta incrustada en la pared: pegotes de mineral a ras de roca; al extraerse queda solo el hueco oscuro
+        static const float BLOB[][3] = { { -0.32f, 0.22f, 0.2f }, { -0.05f, 0.30f, 0.17f }, { 0.28f, 0.12f, 0.2f }, { -0.18f, -0.05f, 0.24f }, { 0.12f, -0.12f, 0.21f },
+                                         { 0.36f, -0.30f, 0.16f }, { -0.38f, -0.28f, 0.18f }, { 0.0f, -0.40f, 0.15f }, { 0.04f, 0.04f, 0.14f } };
+        constexpr float SURFACE = 0.18f; // la pared está a esta distancia por delante del centro del nodo
+        const bool ready = g >= 1.0f;
+        const float rise = ready ? 1.0f : 0.0f;
+        for (int i = 0; i < 9; ++i) {
+            const float size = BLOB[i][2];
+            if (ready) {
+                const XMFLOAT3 tint = (i % 3 == 0) ? XMFLOAT3{ look.accent.x * 0.8f, look.accent.y * 0.8f, look.accent.z * 0.8f } : look.accent;
+                part({ size, size, 0.07f }, 0.0f, { BLOB[i][0], BLOB[i][1], SURFACE + 0.02f }, tint, 0.45f * rise);
+            } else if (i < 6) { // el hueco: manchas más oscuras que la pared
+                part({ size * 0.85f, size * 0.85f, 0.04f }, 0.0f, { BLOB[i][0], BLOB[i][1], SURFACE + 0.005f }, { 0.07f, 0.07f, 0.08f }, 0.0f);
+            }
         }
         return;
     }

@@ -21,9 +21,9 @@ namespace StarterComponent {
         inline constexpr double DROP_INTERVAL = 8.0;          // segundos entre descartes
         inline constexpr const char* FALLBACK[] = { "Pichu", "Eevee" };
         inline std::set<int> discarded;                       // ids descartados por el tiempo
-        inline double nextDrop = -1.0;                        // instante del próximo descarte (-1 = aún sin iniciar)
+        inline float elapsed = 0.0f;                          // segundos desde el último descarte
 
-        inline void reset() { selected = -1; discarded.clear(); nextDrop = -1.0; }
+        inline void reset() { selected = -1; discarded.clear(); elapsed = 0.0f; }
 
         // Las especies que se pueden elegir ahora; 'fallback' = se acabaron las iniciales y se ofrecen las de reserva.
         inline std::vector<const PokemonSpecies*> offered(const GameData& data, bool& fallback) {
@@ -45,17 +45,18 @@ namespace StarterComponent {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 70.0f), IM_COL32(255, 255, 255, 255), "ELIGE A TU POKÉMON INICIAL", 1.8f);
 
-        const double now = ImGui::GetTime();
-        if (detail::nextDrop < 0.0) detail::nextDrop = now + detail::DROP_INTERVAL;
         bool fallback = false;
         std::vector<const PokemonSpecies*> offered = detail::offered(data, fallback);
-        while (!fallback && now >= detail::nextDrop) { // cada DROP_INTERVAL se retira uno al azar, aunque la ventana se haya quedado sin dibujar
-            static std::mt19937 random{ std::random_device{}() };
-            const PokemonSpecies* gone = offered[std::uniform_int_distribution<size_t>(0, offered.size() - 1)(random)];
-            if (detail::selected == gone->id) detail::selected = -1;
-            detail::discarded.insert(gone->id);
-            detail::nextDrop += detail::DROP_INTERVAL;
-            offered = detail::offered(data, fallback);
+        if (!fallback) {
+            detail::elapsed += (std::min)(ImGui::GetIO().DeltaTime, 0.25f); // un tramo largo sin dibujar nunca descarta varios a la vez
+            if (detail::elapsed >= static_cast<float>(detail::DROP_INTERVAL)) { // pasado el tiempo se retira UNO al azar y vuelve a contar
+                static std::mt19937 random{ std::random_device{}() };
+                const PokemonSpecies* gone = offered[std::uniform_int_distribution<size_t>(0, offered.size() - 1)(random)];
+                if (detail::selected == gone->id) detail::selected = -1;
+                detail::discarded.insert(gone->id);
+                detail::elapsed = 0.0f;
+                offered = detail::offered(data, fallback);
+            }
         }
         const int count = static_cast<int>(offered.size());
         if (count == 0) return -1;

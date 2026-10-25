@@ -287,6 +287,7 @@ class Player {
         const bool was = m_climbing;
         m_climbing = false;
         m_climbSlope = 0.0f;
+        body.stickToGround = true;
         if (!grounded || m_sliding) return;
         // Dentro de una galería (o su boca) nunca se trepa: el terreno de encima es roca, no el suelo que se pisa.
         if (body.underground || world.inCave(body.position.x, body.position.z)) return;
@@ -302,7 +303,10 @@ class Player {
         const float limit = Physics::World::CLIMB_SLOPE * (was ? CLIMB_KEEP : 1.0f); // histéresis: no parpadea en el borde
         const bool wall = steep > limit && std::sqrt(fx * fx + fz * fz) > limit * 0.7f;
         m_climbSlope = amount > 0.0f ? along : 0.0f;
-        m_climbing = wall && (amount <= 0.0f || std::fabs(along) > steep * 0.35f); // de frente a la pared (subiendo o bajando)
+        // Solo se trepa hacia arriba. Cuesta abajo no hay escalada: si no es muy empinada se baja andando y, si lo es, el personaje deja de
+        // pegarse al suelo y cae (con su daño de caída si la altura lo merece).
+        if (wall && amount > 0.0f && along < -steep * 0.35f) body.stickToGround = false;
+        m_climbing = wall && amount > 0.0f && along > steep * 0.35f;
         if (!m_climbing) return;
         m_climbSteep = steep;
         m_sprinting = false;

@@ -30,8 +30,9 @@ class HabitatMap {
 
     static constexpr float SNOW_LINE = 24.0f;      // altura (m) desde la que hay nieve y hielo
     static constexpr float SEA_FLOOR = -44.0f;     // fondo del mar abierto: muy hondo, y poco a poco (junto a la orilla es bajo)
-    static constexpr float PLATEAU_FLAT = 22.0f;   // radio del terreno llano del inicio (m) y hasta dónde se funde con el resto
-    static constexpr float PLATEAU_FADE = 40.0f;
+    static constexpr float CITY_RADIUS = 70.0f;    // ciudad principal junto al inicio: sin hábitats
+    static constexpr float PLATEAU_FLAT = 55.0f;   // radio del terreno llano del inicio (m) y hasta dónde se funde con el resto
+    static constexpr float PLATEAU_FADE = 85.0f;
     static constexpr float FALLOFF = 1.5f;         // cuanto mayor, más corta la transición entre zonas
     static constexpr float SPACING = 0.5f;         // separación mínima entre centros, en fracción de la suma de radios
     static constexpr int LOBES = 4;
@@ -140,6 +141,11 @@ class HabitatMap {
         return std::sqrt(x * x + z * z) <= m_worldRadius - 4.0f;
     }
 
+    // Zona de la futura ciudad principal, alrededor del punto de inicio: terreno llano y sin hábitats (nada que recolectar ni cazar).
+    static bool inCity(float x, float z, float margin = 0.0f) { return x * x + z * z < (CITY_RADIUS + margin) * (CITY_RADIUS + margin); }
+    // ¿Pueden aparecer aquí recursos, pokémon, cofres y objetos?
+    bool spawnable(float x, float z) const { return playable(x, z) && !inCity(x, z); }
+
     // Región en la que está el punto (nullptr = mundo principal).
     const Region* regionAt(float x, float z) const {
         for (const Region& r : m_regions) {
@@ -189,6 +195,8 @@ class HabitatMap {
     const Physics::Heightfield& flowZ() const { return m_flowZ; }
     // Cuánto se ha enfriado la lava en un nodo (0 = recién salida del cráter, 1 = ya casi roca).
     float lavaCoolAt(int col, int row) const { return m_lavaCool.at(col, row); }
+    // Cuánta roca volcánica (0..1) hay en un nodo: la lava enfriada deja basalto a su alrededor.
+    float volcanicRockAt(int col, int row) const { return m_rock.at(col, row); }
     uint8_t kindAtNode(int col, int row) const { return m_kind[static_cast<size_t>(row) * m_ground.count() + col]; }
     float riverDistance(float x, float z) const { return m_riverDist.sample(x, z); }
     float lakeDistance(float x, float z) const { return m_lakeDist.sample(x, z); }
@@ -452,6 +460,7 @@ class HabitatMap {
                 if (coast ? (s < 8.0f || s > 26.0f) : s < (std::min)((zone.feature ? 0.8f : 0.45f) * zone.radius, zone.feature ? 90.0f : 55.0f)) continue;
                 if (zone.feature && x * x + z * z < (PLATEAU_FADE + zone.radius) * (PLATEAU_FADE + zone.radius)) continue; // el inicio queda libre de volcanes y hielo
                 if (!coast && x * x + z * z < 30.0f * 30.0f && zone.altitude < 0.9f) continue; // el inicio no se moja
+                if (inCity(x, z, zone.radius * 0.5f)) continue; // el centro de cada hábitat queda fuera de la ciudad
                 float cost = 0.0f;
                 bool spaced = true;
                 int neighbours = 0;
@@ -518,7 +527,12 @@ class HabitatMap {
         constexpr float SEA_SCALE = 160.0f;
         if (s < 0.0f) { // mar: el fondo baja con la distancia a la costa, suave junto a la orilla y cada vez más hondo
             const float t = -s / SEA_SCALE;
-            const float bed = SEA_FLOOR * (t * t / (1.0f + t * t));
+            float bed = SEA_FLOOR * (t * t / (1.0f + t * t));
+            if (s > -30.0f) { // frente a un acantilado el mar es hondo desde la misma pared
+                float w[MAX_ZONES];
+                const float cliff = smooth(5.0f, 12.0f, shape(x, z, w).altitude);
+                bed -= 9.0f * cliff * smooth(0.0f, 14.0f, -s) * (1.0f - smooth(14.0f, 30.0f, -s));
+            }
             return bed + 1.3f * m_noise.fbm(x * 0.03f, z * 0.03f, 3) * (std::min)(1.0f, -s / 40.0f);
         }
         float w[MAX_ZONES];
@@ -530,7 +544,11 @@ class HabitatMap {
         const float start = 1.0f - smooth(PLATEAU_FLAT, PLATEAU_FADE, std::sqrt(x * x + z * z)); // inicio llano
         t += (Physics::World::START_HEIGHT - t) * start;
         // La altura máxima crece con la distancia a la costa: la isla sube gradualmente desde la playa.
-        const float cap = 0.18f * s + 0.42f * (std::max)(0.0f, s - 25.0f);
+        // Costa: si la tierra es alta, acantilado (sube de golpe junto al mar y el oleaje rompe contra él); si es baja, playa gradual.
+        const float cliff = smooth(5.0f, 12.0f, mix.altitude);
+        const float beachCap = 0.18f * s + 0.42f * (std::max)(0.0f, s - 25.0f);
+        const float cliffCap = 0.25f * s + 11.0f * smooth(0.0f, 4.5f, s) + 0.42f * (std::max)(0.0f, s - 25.0f);
+        const float cap = beachCap + (cliffCap - beachCap) * cliff;
         constexpr float K = 1.2f;
         return -K * std::log(std::exp(-t / K) + std::exp(-cap / K));
     }
@@ -553,6 +571,7 @@ class HabitatMap {
         m_sea.init(half, 0.0f);
         m_flowX.init(half, 0.0f);
         m_lavaCool.init(half, 1.0f);
+        m_rock.init(half, 0.0f);
         m_flowZ.init(half, 0.0f);
         m_riverDist.init(half, 999.0f);
         m_lakeDist.init(half, 999.0f);
@@ -1143,8 +1162,13 @@ class HabitatMap {
                 float& g = m_ground.at(col, row);
                 const size_t index = static_cast<size_t>(row) * m_ground.count() + col;
                 const float bed = level - (0.25f + 0.65f * strength);
-                const float wall = d < half ? bed + (level + 0.3f - bed) * (d / half) * (d / half) : level + 0.3f + (d - half) * 0.6f;
-                g = (std::min)(g, wall);
+                if (m_kind[index] != LAVA || d < half) { // cauce con orillas: en el lado cuesta abajo se levanta un reborde que contiene la lava (nunca flota)
+                    const float rim = level + 0.3f + (d > half ? (d - half) * 0.4f : 0.0f);
+                    if (d < half) g = bed + (level + 0.3f - bed) * (d / half) * (d / half);
+                    else g += (rim - g) * (1.0f - smooth(half, half + 3.0f, d));
+                }
+                const float rockWeight = (1.0f - smooth(half * 0.7f, half + 3.0f, d)) * (0.45f + 0.55f * (1.0f - strength)); // al enfriarse deja más roca
+                m_rock.at(col, row) = (std::max)(m_rock.at(col, row), rockWeight);
                 if (d < half && g < level && (m_kind[index] == DRY || m_kind[index] == LAVA)) {
                     if (m_kind[index] != LAVA || level < m_level[index]) m_level[index] = level;
                     m_kind[index] = LAVA;
@@ -1371,6 +1395,12 @@ class HabitatMap {
                 float& g = m_ground.at(col, row);
                 if (g > -0.3f) g = -0.3f - 0.1f * smooth(0.0f, 30.0f, -m_coast.at(col, row));
             }
+        }
+        for (size_t i = 0; i < m_kind.size(); ++i) { // la lava de las coladas nunca flota: su nivel no pasa de poco sobre el suelo que tiene debajo
+            if (m_kind[i] != LAVA) continue;
+            const int col = static_cast<int>(i % n), row = static_cast<int>(i / n);
+            const float cool = m_lavaCool.at(col, row), limit = cool > 0.05f ? 0.7f : 6.5f;
+            m_level[i] = (std::min)(m_level[i], m_ground.at(col, row) + limit);
         }
         m_lava.init(m_ground.half(), 0.0f);
         m_hot.init(m_ground.half(), 0.0f);
@@ -1858,7 +1888,7 @@ class HabitatMap {
     int m_peakHabitat = -1, m_riverBank = -1, m_lakeBank = -1, m_ventHabitat = -1;
     std::vector<Overlay> m_overlays;
     std::vector<Physics::World::Geyser> m_geysers;
-    Physics::Heightfield m_grip, m_caveGrip, m_lava, m_hot, m_lavaCool;
+    Physics::Heightfield m_grip, m_caveGrip, m_lava, m_hot, m_lavaCool, m_rock;
     std::vector<Physics::World::Spring> m_springs;
     float m_bankWidth[2] = { 7.0f, 7.0f };
     float m_worldRadius = 200.0f;

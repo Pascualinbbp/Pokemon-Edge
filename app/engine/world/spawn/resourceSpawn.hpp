@@ -26,7 +26,9 @@ namespace ResourceSpawn {
     inline constexpr float WALL_MAX = 0.95f;
     inline constexpr float AQUATIC_MIN_DEPTH = 0.8f; // coral y algas: profundidad del agua en la que crecen
     inline constexpr float AQUATIC_MAX_DEPTH = 16.0f;
+    inline constexpr float VEIN_DEEP_DISTANCE = 60.0f; // distancia a la boca desde la que una galería cuenta como profunda
     inline constexpr float EMBED_REACH = 2.2f;      // distancia máxima a la pared de un mineral incrustado
+    inline constexpr float VEIN_REGROW_MIN = 1500.0f; // las vetas tardan mucho en volver a asomar (s)
     inline constexpr float EMBED_DEPTH = 0.18f;     // cuánto se hunde en la roca
     inline constexpr float EMBED_MAX_HEIGHT = 3.2f; // altura máxima sobre el suelo a la que se incrusta
     inline constexpr float EMBED_SEPARATION = 1.9f; // distancia mínima entre dos minerales incrustados
@@ -81,12 +83,20 @@ namespace ResourceSpawn {
         };
 
         // Tipo de nodo que crece en (x, z) (en la galería de debajo si 'deep'): suma de lo que pide cada hábitat del punto, según lo que pesa.
-        const auto pickType = [&](float x, float z, bool deep) -> std::optional<int> {
+        const auto pickType = [&](float x, float z, bool deep, float inward = 0.0f) -> std::optional<int> {
             habitats.weights(x, z, weights, deep);
             std::fill(typeWeights.begin(), typeWeights.end(), 0.0f);
             for (size_t h = 0; h < weights.size() && h < data.habitats.size(); ++h) {
                 for (const ResourceChance& chance : data.habitats[h].resources) {
                     if (const int type = nodeIndex(chance.nodeId); type >= 0) typeWeights[type] += weights[h] * chance.weight;
+                }
+            }
+            if (deep) { // los minerales raros (nivel alto) aparecen más cuanto más adentro; los comunes, junto a la entrada
+                for (size_t t = 0; t < typeWeights.size(); ++t) {
+                    if (!data.nodes[t].embedded) continue;
+                    const float rare = (std::min)(1.0f, static_cast<float>(data.nodes[t].level - 1) / 2.0f);
+                    typeWeights[t] *= 1.4f - 1.1f * rare + (2.4f * rare - 0.4f) * inward * (rare > 0.0f ? 1.0f : 0.0f);
+                    if (typeWeights[t] < 0.0f) typeWeights[t] = 0.0f;
                 }
             }
             float total = 0.0f;
@@ -112,7 +122,7 @@ namespace ResourceSpawn {
         for (int row = 0; row < chunks; ++row) {
             for (int col = 0; col < chunks; ++col) {
                 const float x0 = -half + col * CHUNK, z0 = -half + row * CHUNK;
-                if (!habitats.playable(x0 + CHUNK * 0.5f, z0 + CHUNK * 0.5f)) continue;
+                if (!habitats.spawnable(x0 + CHUNK * 0.5f, z0 + CHUNK * 0.5f)) continue;
                 habitats.weights(x0 + CHUNK * 0.5f, z0 + CHUNK * 0.5f, weights);
                 float count = weights.empty() ? 3.0f : 0.0f;
                 for (size_t h = 0; h < weights.size() && h < data.habitats.size(); ++h) {
@@ -143,7 +153,8 @@ namespace ResourceSpawn {
                 if (height < 2.0f || habitats.under().floor().slope(x, z) > MAX_SLOPE) continue;
                 const float mx = x - system.mouthX, mz = z - system.mouthZ;
                 if (mx * mx + mz * mz < ENTRANCE_CLEAR * ENTRANCE_CLEAR) continue;
-                const auto type = pickType(x, z, true);
+                const float reachDepth = (std::min)(1.0f, std::sqrt(mx * mx + mz * mz) / VEIN_DEEP_DISTANCE); // 0 en la boca, 1 muy adentro
+                const auto type = pickType(x, z, true, reachDepth);
                 if (!type) continue;
                 const ResourceNodeType& node = data.nodes[*type];
                 float px = x, pz = z, py = habitats.under().floorAt(x, z) - 0.04f;
@@ -172,6 +183,12 @@ namespace ResourceSpawn {
                 }
                 place(*type, px, pz, true);
                 nodes.back().body.position.y = py;
+                if (node.embedded) {
+                    float dirX, dirZ;
+                    habitats.under().wallDirection(x, z, EMBED_REACH, dirX, dirZ);
+                    nodes.back().makeVein(std::atan2(-dirX, -dirZ)); // el parche mira hacia el paso
+                    nodes.back().setRegrowSeconds((std::max)(node.regrowSeconds * 1.0f, VEIN_REGROW_MIN));
+                }
                 ++i;
             }
         }
@@ -197,7 +214,7 @@ namespace ResourceSpawn {
         for (int attempt = 0; attempt < 12; ++attempt) {
             const float a = RandomUtil::range(0.0f, 6.2831853f), r = RandomUtil::range(FLOWER_MIN_RANGE, FLOWER_MAX_RANGE);
             const float x = px + std::cos(a) * r, z = pz + std::sin(a) * r;
-            if (!habitats.playable(x, z) || world.waterDepth(x, z) > 0.05f || world.slope(x, z) > MAX_SLOPE || world.groundHeight(x, z) < 0.0f) continue;
+            if (!habitats.spawnable(x, z) || world.waterDepth(x, z) > 0.05f || world.slope(x, z) > MAX_SLOPE || world.groundHeight(x, z) < 0.0f) continue;
             habitats.weights(x, z, weights);
             std::vector<float> chance(data.nodes.size(), 0.0f);
             float total = 0.0f;

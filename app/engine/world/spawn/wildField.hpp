@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <utility>
 #include <vector>
 #include "../entities/captureTarget.hpp"
@@ -35,10 +36,14 @@ class WildField {
 
     // Los pokémon solo nacen en el semicírculo que el jugador tiene delante (hacia donde mira la cámara, yaw).
     // assign elige especie, nivel y brillo del recién colocado; devuelve false si ahí no puede vivir ninguno.
-    template <typename Assign>
-    void update(float dt, float playerX, float playerZ, float yaw, const GameData& data, const HabitatMap& habitats, Assign assign) {
+    // Solo se cargan los que el jugador puede ver: los de la superficie, si no hay roca de por medio ('visible') y no está bajo tierra; los de las
+    // galerías, si está dentro o muy cerca de ellas. Lo que no se puede cargar se queda guardado hasta que se pueda hacerlo de golpe.
+    template <typename Assign, typename Visible>
+    void update(float dt, float playerX, float playerZ, float yaw, bool playerUnder, const GameData& data, const HabitatMap& habitats, Assign assign, Visible visible) {
         if (m_chunks.empty()) m_chunks.resize(CHUNKS * CHUNKS);
         m_loaded.clear();
+        m_playerUnder = playerUnder;
+        m_visible = [&visible](float x, float y, float z) { return visible(x, y, z); };
         m_view = { std::sin(yaw), std::cos(yaw) };
 
         // Vivos dentro de la zona de aparición y chunks por poblar (los más cercanos primero).
@@ -50,16 +55,18 @@ class WildField {
                 const float distance = distanceTo(col, row, playerX, playerZ);
                 chunk.distance = distance;
                 if (distance > SPAWN_RADIUS) continue;
-                if (!chunk.populated) m_pending.push_back({ distance, row * CHUNKS + col });
+                if (!chunk.populated || (!chunk.deepDone && deepAllowed(distance))) m_pending.push_back({ distance, row * CHUNKS + col });
                 for (const CaptureTarget& wild : chunk.wilds) if (!wild.gone() && !wild.leaving()) ++alive;
             }
         }
         std::sort(m_pending.begin(), m_pending.end());
         for (const auto& entry : m_pending) {
             const int col = entry.second % CHUNKS, row = entry.second / CHUNKS;
-            const int count = countFor(col, row, data, habitats), deep = deepCountFor(col, row, data, habitats);
+            Chunk& pendingChunk = m_chunks[entry.second];
+            const bool doSurface = !pendingChunk.populated, doDeep = !pendingChunk.deepDone && deepAllowed(pendingChunk.distance);
+            const int count = doSurface ? countFor(col, row, data, habitats) : 0, deep = doDeep ? deepCountFor(col, row, data, habitats) : 0;
             if (alive + count + deep > MAX_IN_ZONE) break;
-            alive += populate(col, row, count, deep, playerX, playerZ, habitats, assign);
+            alive += populate(col, row, count, deep, doSurface, doDeep, playerX, playerZ, habitats, assign);
             if (alive >= MAX_IN_ZONE) break;
         }
 
@@ -87,7 +94,8 @@ class WildField {
                     const float radius = wild.shown() ? UNLOAD_RADIUS : LOAD_RADIUS;
                     const bool inside = dx * dx + dz * dz <= radius * radius;
                     if (wild.shown() && wild.lifetimeOver(dt)) { wild.leave(playerX, playerZ); --alive; }
-                    const bool want = wild.speciesIndex() >= 0 && !wild.leaving() && (wild.capturing() || inside);
+                    const bool layerOk = wild.deepSlot() ? deepAllowed(chunk.distance) : !m_playerUnder; // nadie ve lo de otra capa
+                    const bool want = wild.speciesIndex() >= 0 && !wild.leaving() && (wild.capturing() || (inside && layerOk));
                     wild.fade(dt, want);
                     if (wild.shown()) {
                         m_loaded.push_back(&wild);
@@ -140,10 +148,14 @@ class WildField {
     private:
     static constexpr float HOOK_LEASH = 0.8f;       // el pokémon picado no se aleja del corcho
 
+    static constexpr float DEEP_OUTSIDE_RADIUS = 22.0f; // desde fuera, las galerías solo se pueblan y cargan a esta distancia (junto a la boca)
+    bool deepAllowed(float chunkDistance) const { return m_playerUnder || chunkDistance <= DEEP_OUTSIDE_RADIUS; }
+
     struct Chunk {
         std::vector<CaptureTarget> wilds;
         float distance = 0.0f;
         bool populated = false;
+        bool deepDone = false;
         bool dormant = false; // sin nada cargado ni pendiente de renovar: se salta mientras el jugador esté lejos
     };
 
@@ -183,6 +195,7 @@ class WildField {
                 y = habitats.under().floorAt(out.x, out.y);
             } else {
                 y = habitats.height(out.x, out.y);
+                if (m_visible && !m_visible(out.x, y + 0.8f, out.y)) continue; // detrás de una montaña o una cueva: se queda sin cargar
             }
             return true;
         }
@@ -192,7 +205,7 @@ class WildField {
     // Cuántos pokémon caben en el chunk: lo que pide cada hábitat, según lo que pesa en el centro del chunk.
     static int countFor(int col, int row, const GameData& data, const HabitatMap& habitats) {
         const float cx = -Physics::World::HALF_SIZE + (col + 0.5f) * CHUNK, cz = -Physics::World::HALF_SIZE + (row + 0.5f) * CHUNK;
-        if (!habitats.playable(cx, cz)) return 0;
+        if (!habitats.spawnable(cx, cz)) return 0;
         std::vector<float> weights;
         habitats.weights(cx, cz, weights);
         float count = 0.0f;
@@ -219,10 +232,10 @@ class WildField {
     }
 
     template <typename Assign>
-    int populate(int col, int row, int count, int deepCount, float px, float pz, const HabitatMap& habitats, Assign& assign) {
+    int populate(int col, int row, int count, int deepCount, bool doSurface, bool doDeep, float px, float pz, const HabitatMap& habitats, Assign& assign) {
         Chunk& chunk = m_chunks[row * CHUNKS + col];
         chunk.wilds.reserve(MAX_PER_CHUNK); // sin realojar: Scene guarda punteros a estos pokémon
-        int placed = 0;
+        int placed = 0, placedSurface = 0, placedDeep = 0;
         for (int i = 0; i < count + deepCount; ++i) {
             const bool deep = i >= count;
             DirectX::XMFLOAT2 at;
@@ -233,14 +246,18 @@ class WildField {
             if (!assign(wild)) continue;
             chunk.wilds.push_back(std::move(wild));
             ++placed;
+            (deep ? placedDeep : placedSurface)++;
         }
-        // Un chunk que está detrás del jugador no se da por poblado: se reintenta cuando quede delante.
-        chunk.populated = count + deepCount == 0 || placed > 0;
+        // Un chunk que está detrás del jugador (o tapado por roca) no se da por poblado: se reintenta cuando quede a la vista.
+        if (doSurface) chunk.populated = count == 0 || placedSurface > 0;
+        if (doDeep) chunk.deepDone = deepCount == 0 || placedDeep > 0;
         return placed;
     }
 
     CaptureTarget m_hooked;
     bool m_hookActive = false;
+    bool m_playerUnder = false;
+    std::function<bool(float, float, float)> m_visible;
     DirectX::XMFLOAT2 m_view = { 0.0f, 1.0f }; // hacia dónde mira el jugador (x, z)
     std::vector<Chunk> m_chunks;
     std::vector<CaptureTarget*> m_loaded;
