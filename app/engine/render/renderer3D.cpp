@@ -272,6 +272,19 @@ namespace {
             f = f * f * (3.0f - 2.0f * f);
             return lerp(lerp(LavaHash(i), LavaHash(i + float2(1.0f, 0.0f)), f.x), lerp(LavaHash(i + float2(0.0f, 1.0f)), LavaHash(i + float2(1.0f, 1.0f)), f.x), f.y);
         }
+        float2 LavaCells(float2 p) { // Voronoi: (distancia al centro más cercano, distancia a la arista entre los dos más cercanos)
+            float2 i = floor(p), f = frac(p);
+            float d1 = 8.0f, d2 = 8.0f;
+            for (int y = -1; y <= 1; ++y) {
+                for (int x = -1; x <= 1; ++x) {
+                    float2 g = float2(x, y);
+                    float2 o = float2(LavaHash(i + g), LavaHash(i + g + 17.31f));
+                    float d = length(g + o - f);
+                    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+                }
+            }
+            return float2(d1, d2 - d1);
+        }
         float2 CausticPoint(float2 cell, float t) { // punto de cada celda que se mueve despacio
             float2 h = float2(LavaHash(cell), LavaHash(cell + 17.31f));
             return 0.5f + 0.38f * sin(t * 0.55f + 6.2831f * h);
@@ -307,17 +320,22 @@ namespace {
             float depth = input.info.x;
             float2 flow = input.info.yz;
 
-            if (lava) { // roca fundida: masa espesa y brillante de lenta corriente; aguas abajo se oscurece y se agrieta hasta ser roca
+            if (lava) { // lava como en las fotos: costra negra agrietada con venas incandescentes de naranja a amarillo; aguas abajo se enfría y solo quedan grietas rojas
                 float cool = saturate((input.kind - 7.0f) / 0.45f);
-                float2 q = pxz * 0.16f - flow * t * 0.35f;
-                float m = LavaNoise(q) * 0.6f + LavaNoise(q * 2.7f + 11.0f) * 0.4f;                 // manchas grandes y lentas
-                float3 molten = lerp(float3(0.80f, 0.16f, 0.02f), float3(1.0f, 0.70f, 0.14f), smoothstep(0.30f, 0.85f, m));
-                float plate = smoothstep(0.55f, 0.72f, 1.0f - m) * (0.25f + 0.75f * cool);          // placas de costra oscura que se van uniendo
-                float3 crust = float3(0.09f, 0.06f, 0.055f);
-                float3 lc = lerp(molten, crust, saturate(plate + cool * cool));
-                float glow = (1.0f - 0.9f * cool) * (0.85f + 0.15f * LavaNoise(q * 5.0f + t * 0.4f));
-                float alpha = 1.0f - smoothstep(0.75f, 1.0f, cool);
-                return float4(ApplyEnv(lc * 0.3f, input.wpos) + lc * glow * 1.1f, alpha);
+                float2 q = pxz * 0.22f;                                                            // sin arrastrar por la corriente (cizalla con el tiempo): solo palpita despacio
+                float2 warp = float2(LavaNoise(q * 0.7f + t * 0.03f), LavaNoise(q * 0.7f + 31.0f - t * 0.03f)) - 0.5f;
+                q += warp * 1.6f;
+                float2 cell = LavaCells(q * 1.1f);                                                  // x = distancia al centro, y = distancia a la arista
+                float vein = 1.0f - smoothstep(0.02f, 0.20f + 0.10f * (1.0f - cool), cell.y);       // grietas incandescentes entre placas
+                float mottle = LavaNoise(q * 3.1f + 7.0f) * 0.6f + LavaNoise(q * 7.3f) * 0.4f;
+                float heat = saturate(vein * (0.65f + 0.55f * mottle) * (1.0f - 0.85f * cool) + (1.0f - cool) * 0.28f * smoothstep(0.45f, 0.9f, mottle));
+                float3 crust = lerp(float3(0.07f, 0.035f, 0.03f), float3(0.20f, 0.06f, 0.03f), mottle);
+                float3 ember = lerp(float3(0.62f, 0.10f, 0.02f), float3(0.98f, 0.38f, 0.05f), smoothstep(0.2f, 0.6f, heat));
+                ember = lerp(ember, float3(1.0f, 0.68f, 0.20f), smoothstep(0.7f, 1.0f, heat));
+                float3 lc = lerp(crust, ember, smoothstep(0.08f, 0.5f, heat));
+                float glow = 0.55f + 0.9f * heat * (1.0f - 0.7f * cool) + 0.08f * sin(t * 1.3f + mottle * 9.0f);
+                float alpha = 1.0f - smoothstep(0.80f, 1.0f, cool);
+                return float4(ApplyEnv(lc * 0.25f, input.wpos) + lc * glow, alpha);
             }
             float3 shallow, deep;
             float full;

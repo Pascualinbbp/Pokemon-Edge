@@ -85,7 +85,7 @@ class HabitatMap {
         m_basins.clear();
         m_bandHabitat.clear();
         for (int& index : m_waterHabitat) index = -1;
-        m_peakHabitat = m_riverBank = m_lakeBank = m_ventHabitat = -1;
+        m_peakHabitat = m_riverBank = m_lakeBank = m_ventHabitat = m_rockHabitat = -1;
         m_overlays.clear();
         m_geysers.clear();
         m_springs.clear();
@@ -160,9 +160,9 @@ class HabitatMap {
     // ¿Está el punto en una isla del cielo? (allí no se recibe daño por caída)
     bool onSky(float x, float z) const { const Region* r = regionAt(x, z); return r && r->kind == HabitatPlacement::SKY; }
     // ¿Es suelo de nube (blando, rebota) y no una parcela de tierra elevada?
-    bool cloudFloor(float x, float z) const {
+    bool cloudFloor(float x, float z, bool strict = false) const {
         const Region* r = regionAt(x, z);
-        return r && r->kind == HabitatPlacement::SKY && ground(x, z) < r->floorY + CLOUD_FLOOR_HEIGHT;
+        return r && r->kind == HabitatPlacement::SKY && ground(x, z) < r->floorY + (strict ? 1.0f : CLOUD_FLOOR_HEIGHT);
     }
     static constexpr float CLOUD_FLOOR_HEIGHT = 2.5f;
 
@@ -200,6 +200,23 @@ class HabitatMap {
     uint8_t kindAtNode(int col, int row) const { return m_kind[static_cast<size_t>(row) * m_ground.count() + col]; }
     float riverDistance(float x, float z) const { return m_riverDist.sample(x, z); }
     float lakeDistance(float x, float z) const { return m_lakeDist.sample(x, z); }
+    // Punto de cascada más cercano a menos de 'range' metros (false si no hay).
+    bool nearestCascade(float x, float z, float range, float& outX, float& outZ) const {
+        const int reach = static_cast<int>(std::ceil(range / Physics::Heightfield::CELL));
+        const int c = nearestCol(x), r = nearestCol(z);
+        float best = range * range;
+        bool found = false;
+        for (int dr = -reach; dr <= reach; ++dr) {
+            for (int dc = -reach; dc <= reach; ++dc) {
+                const int cc = c + dc, rr = r + dr;
+                if (cc < 0 || rr < 0 || cc >= m_ground.count() || rr >= m_ground.count()) continue;
+                if (kindAtNode(cc, rr) != CASCADE) continue;
+                const float ex = m_ground.nodeCoord(cc) - x, ez = m_ground.nodeCoord(rr) - z, d2 = ex * ex + ez * ez;
+                if (d2 <= best) { best = d2; outX = m_ground.nodeCoord(cc); outZ = m_ground.nodeCoord(rr); found = true; }
+            }
+        }
+        return found;
+    }
     // ¿Hay una cascada a menos de 'range' metros? (para el Magikarp que la remonta)
     bool nearCascade(float x, float z, float range) const {
         const int reach = static_cast<int>(std::ceil(range / Physics::Heightfield::CELL));
@@ -260,6 +277,10 @@ class HabitatMap {
         const float rest = scale * (1.0f - bank[0]) * (1.0f - bank[1]);
         for (size_t i = 0; i < m_zones.size(); ++i) out[m_zones[i].habitat] += w[i] * rest;
         applyOverlays(x, z, out, false);
+        if (m_rockHabitat >= 0 && !m_rock.empty()) { // el basalto frío de las coladas es su propio hábitat
+            const float rock = smooth(0.3f, 0.75f, m_rock.sample(x, z));
+            if (rock > 0.0f) { for (float& value : out) value *= 1.0f - rock; out[m_rockHabitat] += rock; }
+        }
     }
 
     // Índice del hábitat que más pesa en (x, z) (-1 si no hay hábitats).
@@ -346,6 +367,7 @@ class HabitatMap {
                 case HabitatPlacement::LAVA: m_waterHabitat[LAVA] = h; break;
                 case HabitatPlacement::HOT_SPRING: m_waterHabitat[HOT] = h; break;
                 case HabitatPlacement::VENT: m_ventHabitat = h; break;
+                case HabitatPlacement::VOLCANIC_ROCK: m_rockHabitat = h; break;
                 case HabitatPlacement::HALL: m_hallHabitats.push_back(h); break;
                 case HabitatPlacement::UNDERGROUND_WATER: if (m_deepWater < 0) m_deepWater = h; break;
                 case HabitatPlacement::BESIDE: {
@@ -1051,7 +1073,7 @@ class HabitatMap {
     static constexpr float CRATER_DEPTH = 0.3f;   // hondura del cráter (fracción de la altura del cono)
     static constexpr float LAVA_FILL = 0.45f;     // fracción de la hondura del cráter que llena la lava
     static constexpr float VENT_SIZE = 0.28f;     // tamaño de las fumarolas respecto al volcán submarino
-    static constexpr int LAVA_STEPS = 60;         // pasos máximos de un río de lava
+    static constexpr int LAVA_STEPS = 90;         // pasos máximos de un río de lava
     static constexpr float GEYSER_PAD = 1.8f;     // la parcela del géiser se aplana hasta este múltiplo de su radio
 
     struct Overlay {
@@ -1106,10 +1128,14 @@ class HabitatMap {
 
     // Levanta los volcanes de tierra y llena sus cráteres de lava.
     void raiseVolcanoes() {
-        for (const Zone& zone : m_zones) {
+        m_craterLevel.assign(m_zones.size(), 0.0f);
+        m_lavaPool.assign(m_kind.size(), 0);
+        for (size_t zi = 0; zi < m_zones.size(); ++zi) {
+            const Zone& zone = m_zones[zi];
             if (zone.peak <= 0.0f) continue;
             const float base = averageHeight(zone.x, zone.z, zone.radius * 0.5f);
             const float lava = base + zone.peak * (volcanoProfile(0.0f) + CRATER_DEPTH * LAVA_FILL);
+            m_craterLevel[zi] = lava;
             const float seed = between(0.0f, 100.0f);
             forNodesAround(zone, 1.2f, [&](int col, int row, float x, float z) {
                 const float u = std::sqrt(distance2(zone, x, z));
@@ -1121,56 +1147,71 @@ class HabitatMap {
                     const size_t index = static_cast<size_t>(row) * m_ground.count() + col;
                     m_level[index] = lava;
                     m_kind[index] = LAVA;
+                    m_lavaPool[index] = 1;
                     m_lavaCool.at(col, row) = 0.0f; // la lava del cráter está al rojo
                 }
             });
         }
     }
 
-    // Ríos de lava: bajan por la máxima pendiente desde el borde del cráter, más lentos que el agua. Unos son largos y otros cortos; al final
-    // se estrechan, se hacen someros y pierden fuerza hasta enfriarse en roca volcánica (o donde topen con el agua).
+    // Ríos de lava: nacen DENTRO del cráter (de su lava) y salen cortando el borde; bajan por la máxima pendiente despacio, como un río: al principio el
+    // cauce es ancho y hondo y, al bajar, la lava se enfría poco a poco y el cauce se estrecha en anchura y en profundidad hasta que no queda lava y solo
+    // roca volcánica fría en el suelo (que forma el hábitat del pie del volcán).
     void carveLavaFlows() {
-        for (const Zone& zone : m_zones) {
-            if (zone.peak <= 0.0f) continue;
+        for (size_t zi = 0; zi < m_zones.size(); ++zi) {
+            const Zone& zone = m_zones[zi];
+            if (zone.peak <= 0.0f || zi >= m_craterLevel.size()) continue;
             const int flows = betweenInt(2, 4);
             for (int f = 0; f < flows; ++f) {
                 const float angle = between(0.0f, 6.2831853f), ca = std::cos(angle), sa = std::sin(angle);
-                float x = zone.x, z = zone.z, best = -1.0e9f;
-                for (float r = 0.0f; r < zone.radius * 0.5f; r += 1.5f) { // el punto más alto del radio: el borde del cráter
-                    const float h = ground(zone.x + ca * r, zone.z + sa * r);
-                    if (h > best) { best = h; x = zone.x + ca * r; z = zone.z + sa * r; }
-                }
-                const int length = betweenInt(LAVA_MIN_STEPS, LAVA_STEPS); // río corto o largo
-                float level = 1.0e9f, dx = ca, dz = sa;
+                const float craterR = zone.radius * CRATER;
+                float x = zone.x + ca * craterR * 0.45f, z = zone.z + sa * craterR * 0.45f;
+                float level = m_craterLevel[zi];                 // arranca al nivel de la lava del cráter: sin saltos ni lava que aparece de la nada
+                const int length = betweenInt(LAVA_MIN_STEPS, LAVA_STEPS);
+                float dx = ca, dz = sa, lastX = x, lastZ = z;
                 for (int step = 0; step < length; ++step) {
-                    float gx, gz;
-                    m_ground.gradient(x, z, gx, gz);
-                    const float norm0 = std::sqrt(gx * gx + gz * gz);
-                    if (norm0 > 1.0e-3f) { dx = 0.6f * dx - 0.4f * gx / norm0; dz = 0.6f * dz - 0.4f * gz / norm0; }
-                    const float norm = std::sqrt(dx * dx + dz * dz);
-                    dx /= norm; dz /= norm;
+                    const float fromCenter = std::hypot(x - zone.x, z - zone.z);
+                    if (fromCenter > craterR * 1.8f) { // fuera del borde del cráter sigue la máxima pendiente
+                        float gx, gz;
+                        m_ground.gradient(x, z, gx, gz);
+                        const float norm0 = std::sqrt(gx * gx + gz * gz);
+                        if (norm0 > 1.0e-3f) { dx = 0.7f * dx - 0.3f * gx / norm0; dz = 0.7f * dz - 0.3f * gz / norm0; }
+                        const float norm = std::sqrt(dx * dx + dz * dz);
+                        dx /= norm; dz /= norm;
+                    } else { dx = ca; dz = sa; }                  // dentro del cráter y al cruzar el borde, hacia fuera
                     const float terrain = ground(x, z);
-                    if (terrain < 1.6f || (step > 4 && m_kind[nearestNode(x, z)] != DRY && m_kind[nearestNode(x, z)] != LAVA)) break;
-                    const float life = 1.0f - static_cast<float>(step) / length;              // 1 en el cráter, 0 en la punta
-                    const float fade = smooth(0.0f, 0.45f, life);                                // el último tramo se apaga
-                    level = (std::min)(level, terrain - 0.4f * fade);
-                    const float half = (1.7f + 1.2f * (1.0f - life)) * (0.25f + 0.75f * fade);  // se ensancha al bajar y se afina al acabar
-                    if (half < 0.7f) break;
-                    carveLavaSection(x, z, dx, dz, half, level, fade);
+                    if (terrain < 1.6f || (step > 6 && m_kind[nearestNode(x, z)] != DRY && m_kind[nearestNode(x, z)] != LAVA)) break;
+                    const float life = 1.0f - static_cast<float>(step) / length;    // 1 en el cráter, 0 en la punta
+                    level = (std::min)(level, terrain - 0.25f);                      // el nivel solo baja: la lava corre cuesta abajo
+                    const float half = (0.9f + 3.8f * life) * (0.4f + 0.6f * std::sqrt(life)); // ancho al principio y cada vez más estrecho
+                    if (half < 0.6f) break;
+                    carveLavaSection(x, z, dx, dz, half, level, life);
+                    lastX = x; lastZ = z;
                     x += dx * Physics::Heightfield::CELL; z += dz * Physics::Heightfield::CELL;
                 }
+                stampRock(lastX, lastZ, between(7.0f, 13.0f)); // al final queda un montón de roca fría
             }
+        }
+    }
+
+    // Roca volcánica (basalto frío) en un círculo de suelo.
+    void stampRock(float x, float z, float radius) {
+        const int c0 = nearestCol(x - radius), c1 = nearestCol(x + radius), r0 = nearestCol(z - radius), r1 = nearestCol(z + radius);
+        for (int row = r0; row <= r1; ++row) for (int col = c0; col <= c1; ++col) {
+            const float d = std::hypot(m_ground.nodeCoord(col) - x, m_ground.nodeCoord(row) - z);
+            if (d > radius) continue;
+            m_rock.at(col, row) = (std::max)(m_rock.at(col, row), 1.0f - smooth(radius * 0.5f, radius, d));
         }
     }
 
     // 'strength' (0..1): la hondura de la colada y su velocidad; cerca de la punta casi no hay lava y la corriente es mínima.
     void carveLavaSection(float x, float z, float tx, float tz, float half, float level, float strength) {
-        const int c0 = nearestCol(x - half - 3.0f), c1 = nearestCol(x + half + 3.0f), r0 = nearestCol(z - half - 3.0f), r1 = nearestCol(z + half + 3.0f);
+        const int c0 = nearestCol(x - half - 5.0f), c1 = nearestCol(x + half + 5.0f), r0 = nearestCol(z - half - 5.0f), r1 = nearestCol(z + half + 5.0f);
         for (int row = r0; row <= r1; ++row) {
             for (int col = c0; col <= c1; ++col) {
                 const float nx = m_ground.nodeCoord(col), nz = m_ground.nodeCoord(row);
                 const float d = std::sqrt((nx - x) * (nx - x) + (nz - z) * (nz - z));
-                if (d > half + 3.0f) continue;
+                if (d > half + 5.0f) continue;
                 float& g = m_ground.at(col, row);
                 const size_t index = static_cast<size_t>(row) * m_ground.count() + col;
                 const float bed = level - (0.25f + 0.65f * strength);
@@ -1179,7 +1220,7 @@ class HabitatMap {
                     if (d < half) g = bed + (level + 0.3f - bed) * (d / half) * (d / half);
                     else g += (rim - g) * (1.0f - smooth(half, half + 3.0f, d));
                 }
-                const float rockWeight = (1.0f - smooth(half * 0.7f, half + 3.0f, d)) * (0.45f + 0.55f * (1.0f - strength)); // al enfriarse deja más roca
+                const float rockWeight = (1.0f - smooth(half * 0.7f, half + 5.0f, d)) * (0.6f + 0.4f * (1.0f - strength)); // al enfriarse deja más roca
                 m_rock.at(col, row) = (std::max)(m_rock.at(col, row), rockWeight);
                 if (d < half && g < level && (m_kind[index] == DRY || m_kind[index] == LAVA)) {
                     if (m_kind[index] != LAVA || level < m_level[index]) m_level[index] = level;
@@ -1193,7 +1234,7 @@ class HabitatMap {
         }
     }
     static constexpr float LAVA_SPEED = 0.55f; // m/s de la lava que baja por la ladera (el agua corre bastante más rápido)
-    static constexpr int LAVA_MIN_STEPS = 14;  // pasos del río de lava más corto
+    static constexpr int LAVA_MIN_STEPS = 30;  // pasos del río de lava más corto
 
     // Géiseres: parcelas dentro de las zonas del hábitat anfitrión (besideId) con varias charcas hirvientes de distinto tamaño y forma irregular, cada
     // una con su chorro intermitente, y alrededor las aguas termales (hábitat HOT_SPRING con ese mismo anfitrión).
@@ -1412,7 +1453,7 @@ class HabitatMap {
         for (size_t i = 0; i < m_kind.size(); ++i) { // la lava de las coladas nunca flota: su nivel no pasa de poco sobre el suelo que tiene debajo
             if (m_kind[i] != LAVA) continue;
             const int col = static_cast<int>(i % n), row = static_cast<int>(i / n);
-            const float cool = m_lavaCool.at(col, row), limit = cool > 0.05f ? 0.7f : 6.5f;
+            const float limit = (i < m_lavaPool.size() && m_lavaPool[i]) ? 6.5f : 1.1f; // el cráter es un estanque; la colada nunca sube más de poco sobre el suelo
             m_level[i] = (std::min)(m_level[i], m_ground.at(col, row) + limit);
         }
         m_lava.init(m_ground.half(), 0.0f);
@@ -1902,6 +1943,9 @@ class HabitatMap {
     std::vector<Overlay> m_overlays;
     std::vector<Physics::World::Geyser> m_geysers;
     Physics::Heightfield m_grip, m_caveGrip, m_lava, m_hot, m_lavaCool, m_rock;
+    std::vector<float> m_craterLevel;   // nivel de la lava de cada volcán (por zona)
+    std::vector<uint8_t> m_lavaPool;     // 1 = lava del estanque del cráter (no de una colada)
+    int m_rockHabitat = -1;              // hábitat del pie del volcán (roca volcánica)
     std::vector<Physics::World::Spring> m_springs;
     float m_bankWidth[2] = { 7.0f, 7.0f };
     float m_worldRadius = 200.0f;

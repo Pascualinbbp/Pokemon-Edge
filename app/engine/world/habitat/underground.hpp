@@ -419,6 +419,7 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
                 floor -= bowlDrop;
                 tall *= 1.0f + GROW_HEIGHT * progress(x, z);
                 tall = (away < DOOR + 6.0f) ? DOOR_HEIGHT + (tall - DOOR_HEIGHT) * open : tall;
+                tall = (std::min)(tall, DOOR_HEIGHT + 1.5f + 14.0f * smooth(MOUND - 6.0f, MOUND + 8.0f, away)); // cerca de la boca el techo es bajo y parejo: el montículo que lo cubre no hace picos
                 if (away > MOUND) { // bajo la ladera: techo limitado por la roca que hay encima
                     const float cap = original[i] - COVER - flat;
                     if (cap < CLEARANCE) { ok[i] = 0; changed = true; continue; }
@@ -470,6 +471,25 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
             }
         }
         raised = next;
+    }
+    { // el montículo se alisa (sin tocar lo que cubre la galería ni la boca): sube poco a poco desde la ladera, sin picos
+        std::vector<float> soft = raised;
+        for (int pass = 0; pass < 4; ++pass) {
+            std::vector<float> next = soft;
+            for (int r = r0 + 1; r < r1; ++r) for (int c = c0 + 1; c < c1; ++c) {
+                const size_t i = at(c, r);
+                if ((ok[i] && inSet[i]) || soft[i] < -INF * 0.5f) continue;
+                float sum = 0.0f; int count = 0;
+                for (int dr = -1; dr <= 1; ++dr) for (int dc = -1; dc <= 1; ++dc) {
+                    const float v = soft[at(c + dc, r + dr)];
+                    sum += v > -INF * 0.5f ? v : original[at(c + dc, r + dr)];
+                    ++count;
+                }
+                next[i] = (std::max)(original[i], sum / static_cast<float>(count));
+            }
+            soft = next;
+        }
+        raised = soft;
     }
     for (int r = r0; r <= r1; ++r) {
         for (int c = c0; c <= c1; ++c) {

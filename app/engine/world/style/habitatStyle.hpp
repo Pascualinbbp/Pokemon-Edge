@@ -34,7 +34,8 @@ namespace HabitatStyle {
         if (name == "Tierra del cielo") return { 0.52f, 0.78f, 0.38f };   // islotes de tierra
         if (name == "Mar de nubes") return { 0.78f, 0.86f, 1.0f };
         if (name == "Volcán") return { 0.20f, 0.17f, 0.17f };              // roca negra
-        if (name == "Lava") return { 1.00f, 0.45f, 0.08f };
+        if (name == "Río de lava") return { 0.62f, 0.14f, 0.04f };
+        if (name == "Roca volcánica") return { 0.14f, 0.13f, 0.14f };   // basalto frío
         if (name == "Aguas termales") return { 0.72f, 0.70f, 0.60f };
         if (name == "Géiser") return { 0.78f, 0.74f, 0.62f };               // costra de minerales
         if (name == "Arrecife de coral") return { 0.88f, 0.60f, 0.58f };

@@ -80,10 +80,71 @@ jobs:
           }
           Write-Host "[LOG] Dependencias listas."
 
-      - name: 🗄️ Comprobar Base de Datos (se incrusta tal cual en el .exe)
+      - name: 🗄️ Traducir la base de datos de Neon (PostgreSQL) a SQLite (se incrusta en el .exe)
         shell: pwsh
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
         run: |
-          if (-not (Test-Path "app/data/db/pokemonEdge.db")) { throw "No se encontró la base de datos en app/data/db/pokemonEdge.db" }
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = 'SilentlyContinue'
+          if (-not $env:NEON_DATABASE_URL) { throw "Falta el secret NEON_DATABASE_URL (Settings > Secrets and variables > Actions)." }
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PGCLIENTENCODING = "UTF8"
+
+          # psql viene en la imagen de Windows de GitHub; sqlite3 se descarga (herramientas oficiales).
+          $psql = (Get-Command psql -ErrorAction SilentlyContinue).Source
+          if (-not $psql) { $psql = (Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName }
+          if (-not $psql) { throw "No se encontró psql en el runner." }
+          Invoke-WebRequest -Uri "https://www.sqlite.org/2024/sqlite-tools-win-x64-3460000.zip" -OutFile "sqlite-tools.zip"
+          Expand-Archive -Path "sqlite-tools.zip" -DestinationPath "sqlite-tools" -Force
+          $sqlite = (Get-ChildItem "sqlite-tools" -Recurse -Filter sqlite3.exe | Select-Object -First 1).FullName
+
+          function Pg([string]$sql) {
+              $out = & $psql $env:NEON_DATABASE_URL -X -A -t -q -v ON_ERROR_STOP=1 -c $sql
+              if ($LASTEXITCODE -ne 0) { throw "psql falló." }
+              return $out
+          }
+
+          # 1) Esquema: cada tabla de public con sus columnas (INTEGER / REAL / TEXT), NOT NULL y clave primaria.
+          $schema = @"
+          SELECT format('CREATE TABLE %I (%s%s);', c.relname,
+            (SELECT string_agg(format('%I %s%s', a.attname,
+                CASE WHEN a.atttypid IN (20,21,23,16) THEN 'INTEGER' WHEN a.atttypid IN (700,701,1700) THEN 'REAL' ELSE 'TEXT' END,
+                CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END), ', ' ORDER BY a.attnum)
+             FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
+            coalesce((SELECT ', PRIMARY KEY (' || string_agg(quote_ident(a.attname), ', ' ORDER BY k.ord) || ')'
+                      FROM pg_index i CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+                      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
+                      WHERE i.indrelid = c.oid AND i.indisprimary), ''))
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname;
+          "@
+          $script = New-Object System.Collections.Generic.List[string]
+          $script.Add("BEGIN;")
+          foreach ($line in (Pg $schema)) { if ($line) { $script.Add($line) } }
+
+          # 2) Datos: un INSERT por fila, en el orden en que se insertaron (el juego lee algunas tablas por orden).
+          $tables = Pg "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname"
+          $count = 0
+          foreach ($t in $tables) {
+              if (-not $t) { continue }
+              $cols = Pg "SELECT string_agg(format('coalesce(chr(39) || replace(%I::text, chr(39), repeat(chr(39),2)) || chr(39), ''NULL'')', attname), ', ' ORDER BY attnum) FROM pg_attribute WHERE attrelid = 'public.""$t""'::regclass AND attnum > 0 AND NOT attisdropped"
+              $rows = Pg "SELECT 'INSERT INTO ""$t"" VALUES (' || concat_ws(',', $cols) || ');' FROM ""$t"" ORDER BY ctid"
+              foreach ($row in $rows) { if ($row) { $script.Add($row) } }
+              $count++
+          }
+          $script.Add("COMMIT;")
+          if ($count -eq 0) { throw "Neon no tiene tablas en el esquema public." }
+
+          New-Item -ItemType Directory -Force -Path "app/data/db" | Out-Null
+          if (Test-Path "app/data/db/pokemonEdge.db") { Remove-Item "app/data/db/pokemonEdge.db" -Force }
+          [System.IO.File]::WriteAllLines("$PWD/neon_to_sqlite.sql", $script, (New-Object System.Text.UTF8Encoding($false)))
+          & $sqlite "app/data/db/pokemonEdge.db" ".read neon_to_sqlite.sql"
+          if ($LASTEXITCODE -ne 0) { throw "sqlite3 no pudo crear la base de datos." }
+          $n = & $sqlite "app/data/db/pokemonEdge.db" "SELECT count(*) FROM sqlite_master WHERE type='table'"
+          Write-Host "[LOG] SQLite generado desde Neon: $n tablas."
+          Remove-Item "neon_to_sqlite.sql", "sqlite-tools.zip" -Force
+          Remove-Item "sqlite-tools" -Recurse -Force
 
       - name: 🎨 Incrustar assets (todo assets/ dentro del .exe)
         shell: pwsh

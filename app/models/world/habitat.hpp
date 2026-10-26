@@ -23,7 +23,7 @@ struct ResourceChance {
 // SEA_VOLCANO: volcán submarino; VENT: fumarolas en el cráter de un volcán submarino; REEF: arrecife de coral; KELP: campo de algas;
 // GLACIER: glaciar de hielo. CAVE / MINE con besideId = galerías cuya boca se abre en las laderas de ese hábitat (gruta volcánica, gruta de hielo).
 enum class HabitatPlacement { ANY, COAST, BESIDE, SEA, RIVER, UPPER_RIVER, LAKE, UPPER_LAKE, POND, PEAK, CAVE, MINE, HALL, UNDERGROUND_WATER, SKY, SKY_LAND, SKY_SEA, SKY_CAVE,
-                              VOLCANO, LAVA, GEYSER, HOT_SPRING, SEA_VOLCANO, VENT, REEF, KELP, GLACIER };
+                              VOLCANO, LAVA, GEYSER, HOT_SPRING, SEA_VOLCANO, VENT, REEF, KELP, GLACIER, VOLCANIC_ROCK };
 
 struct Habitat {
     int id = -1;

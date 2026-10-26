@@ -175,7 +175,7 @@ struct Scene {
             const PokemonSpecies* gills = lead ? m_data->speciesById(lead->speciesId) : nullptr;
             player.breathesUnderwater = gills && companion.active() && !companion.changing() && m_data->breathesUnderwater(*gills);
         }
-        player.onCloud = habitats.cloudFloor(player.body.position.x, player.body.position.z);
+        player.onCloud = habitats.cloudFloor(player.body.position.x, player.body.position.z, true);
         player.update(dt, moveInput, camera.yaw(), camera.lookAngle(), world);
         updateHealth(dt);
 
@@ -209,7 +209,6 @@ struct Scene {
             [&](int spot) { return GroundSpawn::make(*m_data, spot); });
         updateCompanion(dt);
         updateStrikes(dt);
-        updateWaterfall(dt);
         updateWeakTimer(dt);
         updateInteraction();
         m_holdClock = (std::max)(0.0f, m_holdClock - dt);
@@ -494,8 +493,8 @@ struct Scene {
         health.update(dt);
         const float impact = player.takeImpact();
         const DirectX::XMFLOAT3& at = player.body.position;
-        const bool cloud = habitats.cloudFloor(at.x, at.z);
-        if (cloud && impact >= HealthRules::CLOUD_BOUNCE_MIN) player.body.velocity.y = impact * HealthRules::CLOUD_BOUNCE; // la nube rebota según lo alto que se cayó y cada rebote es menor
+        const bool cloud = habitats.cloudFloor(at.x, at.z), bounce = habitats.cloudFloor(at.x, at.z, true); // rebota solo en el suelo de nube; en toda la isla no hay daño
+        if (bounce && impact >= HealthRules::CLOUD_BOUNCE_MIN) player.body.velocity.y = impact * HealthRules::CLOUD_BOUNCE; // la nube rebota según lo alto que se cayó y cada rebote es menor
         if (!cloud) health.hurt(HealthRules::fallDamage(impact)); // el suelo de nube no hace daño
         if (player.drowning()) health.hurt(HealthRules::DROWN_PER_SECOND * dt);
         updateBurn(dt);
@@ -689,21 +688,33 @@ struct Scene {
         return used;
     }
 
-    // Un pokémon que evoluciona al remontar una cascada (Magikarp) la remonta junto al jugador: pasado un rato en ella, evoluciona.
-    void updateWaterfall(float dt) {
-        const OwnedPokemon* lead = storage.active();
-        const PokemonSpecies* species = lead ? m_data->speciesById(lead->speciesId) : nullptr;
+    // Un pokémon que evoluciona al remontar una cascada (Magikarp) que pasa cerca de una va hacia ella para intentar subirla: cada intento
+    // tiene una probabilidad de éxito (si lo logra, evoluciona) y, si falla, descansa un rato antes de volver a intentarlo.
+    // Devuelve el punto de la cascada hacia el que va (nullptr si no hay intento en marcha).
+    const DirectX::XMFLOAT3* updateWaterfall(float dt, const PokemonSpecies* species) {
+        m_cascadeRest = (std::max)(0.0f, m_cascadeRest - dt);
         bool climbs = false;
         if (species) for (const Evolution& e : species->evolutions) climbs = climbs || e.method == Evolution::Method::WATERFALL;
-        const DirectX::XMFLOAT3& p = player.body.position;
-        const bool inFall = climbs && player.swimming() && habitats.nearCascade(p.x, p.z, CASCADE_RANGE);
-        m_cascadeTime = inFall ? m_cascadeTime + dt : (std::max)(0.0f, m_cascadeTime - dt);
-        if (m_cascadeTime < CASCADE_TIME) return;
-        m_cascadeTime = 0.0f;
-        const std::string before = species->name;
-        if (const PokemonSpecies* next = storage.evolveBy(storage.activeIndex(), Evolution::Method::WATERFALL)) {
-            showNotice(Notice::REWARD, "¡" + before + " ha evolucionado a " + next->name + "!");
+        float fx = 0.0f, fz = 0.0f;
+        if (!climbs || companionDown() || m_engaged || m_cascadeRest > 0.0f || companion.changing() ||
+            !habitats.nearestCascade(companion.body.position.x, companion.body.position.z, CASCADE_SEEK, fx, fz)) {
+            m_cascadeTime = 0.0f;
+            return nullptr;
         }
+        m_cascadeGoal = { fx, companion.body.position.y, fz };
+        const float dx = fx - companion.body.position.x, dz = fz - companion.body.position.z;
+        if (dx * dx + dz * dz > CASCADE_RANGE * CASCADE_RANGE) { m_cascadeTime = 0.0f; return &m_cascadeGoal; } // todavía va hacia allí
+        m_cascadeTime += dt;
+        if (m_cascadeTime < CASCADE_TIME) return &m_cascadeGoal;
+        m_cascadeTime = 0.0f;
+        m_cascadeRest = CASCADE_REST;
+        if (RandomUtil::range(0.0f, 1.0f) < CASCADE_SUCCESS) {
+            const std::string before = species->name;
+            if (const PokemonSpecies* next = storage.evolveBy(storage.activeIndex(), Evolution::Method::WATERFALL)) {
+                showNotice(Notice::REWARD, "¡" + before + " ha remontado la cascada y ha evolucionado a " + next->name + "!");
+            }
+        }
+        return nullptr;
     }
 
     // El líder del equipo acompaña al jugador y trabaja solo lo cercano: recoge plantas crecidas y objetos sueltos (cualquier
@@ -778,11 +789,12 @@ struct Scene {
             m_engaged = fightTarget;
         }
         if (fightTarget) best = distance2(fightTarget->body.position);
+        const DirectX::XMFLOAT3* fallGoal = (!nodeTarget && !groundTarget && !fightTarget) ? updateWaterfall(dt, species) : nullptr;
         const DirectX::XMFLOAT3* goal = nodeTarget ? &nodeTarget->body.position : groundTarget ? &groundTarget->body.position :
-                                        fightTarget ? &fightTarget->body.position : nullptr;
+                                        fightTarget ? &fightTarget->body.position : fallGoal;
         const bool ranged = species && DamageRules::styleOf(*species) == DamageRules::Style::RANGED;
         const float fightReach = ranged ? CompanionRules::RANGED_RANGE : CompanionRules::ATTACK_RANGE;
-        const float reach = nodeTarget ? Companion::WORK_RANGE + ResourceStyle::look(nodeTarget->typeId()).half :
+        const float reach = fallGoal ? CASCADE_RANGE : nodeTarget ? Companion::WORK_RANGE + ResourceStyle::look(nodeTarget->typeId()).half :
                             fightTarget ? fightReach : Companion::WORK_RANGE;
         const float approach = fightTarget && ranged ? fightReach * CompanionRules::RANGED_APPROACH : Companion::APPROACH;
         bool arrived = goal && best <= reach * reach;
@@ -1330,7 +1342,12 @@ struct Scene {
     std::vector<float> m_flowerWeights;
     float m_clock = 0.0f;       // segundos de partida (marea)
     float m_cascadeTime = 0.0f; // segundos que lleva el jugador en una cascada con un pokémon que la remonta
-    static constexpr float CASCADE_RANGE = 5.0f;
+    static constexpr float CASCADE_RANGE = 5.0f;     // a esta distancia de la cascada está en ella
+    static constexpr float CASCADE_SEEK = 30.0f;     // si pasan por una a menos de esto, va a intentar subirla
+    static constexpr float CASCADE_SUCCESS = 0.4f;   // probabilidad de que un intento lo logre
+    static constexpr float CASCADE_REST = 45.0f;     // segundos de descanso tras un fallo
+    DirectX::XMFLOAT3 m_cascadeGoal = { 0.0f, 0.0f, 0.0f };
+    float m_cascadeRest = 0.0f;
     static constexpr float CASCADE_TIME = 3.0f;
     float m_throwDelay = -1.0f; // >= 0: lanzando (la bola sale al llegar a 0)
     int m_fishSkill = -1;       // habilidad de pesca (la de la animación FISH)

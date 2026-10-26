@@ -17,7 +17,7 @@ class HabitatDao {
             { "SKY_LAND", HabitatPlacement::SKY_LAND }, { "SKY_SEA", HabitatPlacement::SKY_SEA }, { "SKY_CAVE", HabitatPlacement::SKY_CAVE },
             { "VOLCANO", HabitatPlacement::VOLCANO }, { "LAVA", HabitatPlacement::LAVA }, { "GEYSER", HabitatPlacement::GEYSER }, { "HOT_SPRING", HabitatPlacement::HOT_SPRING },
             { "SEA_VOLCANO", HabitatPlacement::SEA_VOLCANO }, { "VENT", HabitatPlacement::VENT }, { "REEF", HabitatPlacement::REEF }, { "KELP", HabitatPlacement::KELP },
-            { "GLACIER", HabitatPlacement::GLACIER } };
+            { "GLACIER", HabitatPlacement::GLACIER }, { "VOLCANIC_ROCK", HabitatPlacement::VOLCANIC_ROCK } };
         for (const auto& entry : NAMES) if (name == entry.first) return entry.second;
         return HabitatPlacement::ANY;
     }

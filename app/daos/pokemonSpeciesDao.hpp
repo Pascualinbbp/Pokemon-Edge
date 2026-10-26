@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <vector>
 #include "../models/pokemon/pokemonSpecies.hpp"
 #include "../utils/core/loggerUtil.hpp"
@@ -73,8 +74,18 @@ class PokemonSpeciesDao {
             const SpawnCondition::Kind type = kind == "day" ? SpawnCondition::Kind::DAY : kind == "night" ? SpawnCondition::Kind::NIGHT : SpawnCondition::Kind::WEATHER;
             entry->spawn.conditions.push_back({ type, DaoRow::integer(row, "weather_id"), DaoRow::real(row, "multiplier") });
         }
+        // Los que solo se consiguen evolucionando con un objeto (mineral) no viven salvajes en el mundo.
+        std::vector<int> byItem;
+        for (const PokemonSpecies& entry : species) for (const Evolution& evolution : entry.evolutions) if (evolution.method == Evolution::Method::STONE) byItem.push_back(evolution.toId);
+        const auto isByItem = [&](int id) { return std::find(byItem.begin(), byItem.end(), id) != byItem.end(); };
+        for (PokemonSpecies& entry : species) {
+            if (!isByItem(entry.id)) continue;
+            entry.spawn.habitats.clear();
+            entry.spawn.ecotones.clear();
+            entry.spawnWeight = 0.0f;
+        }
         // Sin tablas de hábitats (base de datos antigua) todos aparecen con la misma frecuencia.
-        for (PokemonSpecies& entry : species) if (entry.spawnWeight <= 0.0f) entry.spawnWeight = 1.0f;
+        for (PokemonSpecies& entry : species) if (entry.spawnWeight <= 0.0f && !isByItem(entry.id)) entry.spawnWeight = 1.0f;
     }
 
     static constexpr const char* SELECT_POKEMON =
