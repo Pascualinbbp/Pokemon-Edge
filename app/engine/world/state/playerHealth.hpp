@@ -38,7 +38,7 @@ class PlayerHealth {
         m_flash = (std::max)(0.0f, m_flash - dt);
         m_glow = (std::max)(0.0f, m_glow - dt);
         m_quiet += dt;
-        if (!dead() && m_quiet >= HealthRules::REGEN_DELAY && !full()) heal(HealthRules::REGEN_PER_SECOND * dt, false);
+        // Sin regeneración natural: la vida solo se recupera en las aguas termales.
     }
     void restore() { m_health = HealthRules::MAX_HEALTH; m_quiet = 0.0f; m_flash = 0.0f; m_burn = 0.0f; m_glow = 0.0f; }
 

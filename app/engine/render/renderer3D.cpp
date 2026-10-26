@@ -568,6 +568,7 @@ std::vector<Renderer3D::Chunk> Renderer3D::createWater(ID3D11Device* device, con
                 }
             }
             if (count > 0) y = sum / static_cast<float>(count);
+            if (kind > 6.5f && kind < 7.5f) y = (std::min)(y, ground.at(col, row) - 0.08f); // la lava nunca se extiende por encima del terreno de la orilla: solo ocupa el surco
             depth = 0.0f;
         }
         return Vertex{ { ground.nodeCoord(col), y, ground.nodeCoord(row) }, { depth, world.flowX.at(col, row), world.flowZ.at(col, row) }, { 1.0f, 1.0f, 1.0f, kind } };
@@ -1052,12 +1053,22 @@ void Renderer3D::collect(const Scene& scene) {
         if (const CaptureSequence* sequence = target.sequence()) addCapture(*sequence);
     }
 
-    if (scene.companion.active()) {
+    bool petInTheWay = false; // apuntando, el acompañante no tapa la cámara
+    if (scene.companion.active() && scene.camera.aimBlend() > 0.3f) {
+        const XMFLOAT3 eye = scene.camera.eye(scene.player.body.position), at = scene.companion.center();
+        const float dx = at.x - eye.x, dy = at.y - eye.y, dz = at.z - eye.z;
+        petInTheWay = dx * dx + dy * dy + dz * dz < 5.0f * 5.0f;
+    }
+    if (scene.companion.active() && !petInTheWay) {
         const Companion& pet = scene.companion;
-        const float size = Companion::SIZE * pet.scale();
+        const float size = Companion::SIZE * pet.scale() * pet.evolveScale();
         if (size > 0.001f) {
             const XMFLOAT3 at = pet.drawCenter();
             addCreature({ at.x, at.y + pet.bob(), at.z }, size, pet.yaw(), pet.speciesId(), pet.shiny());
+            if (pet.glow() > 0.01f) { // evolución: un resplandor blanco que crece y envuelve al pokémon
+                const float k = size * (1.2f + 0.8f * pet.glow());
+                add(m_sphere, XMMatrixScaling(k, k, k) * XMMatrixTranslation(at.x, at.y, at.z), { 1.0f, 1.0f, 1.0f, 0.85f * pet.glow() }, false, DrawKind::GLOW);
+            }
         }
         if (const BallTransfer* transfer = pet.transfer()) addTransfer(*transfer, pet.drawCenter(), Companion::SIZE * pet.scale());
     }

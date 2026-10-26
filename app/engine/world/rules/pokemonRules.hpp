@@ -5,6 +5,7 @@
 
 // Reglas de los pokémon individuales (nivel y variocolor).
 namespace PokemonRules {
+    inline constexpr float STARTER_SHINY_CHANCE = 0.1f; // % de que el inicial elegido sea variocolor (mínimo)
     inline constexpr float SHINY_CHANCE = 0.2f; // % de pokémon salvajes variocolor
     inline constexpr int STARTER_LEVEL = 5;
 

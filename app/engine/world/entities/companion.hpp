@@ -82,6 +82,28 @@ class Companion {
         body.onGround = false;
     }
 
+    // --- Intento de remontar una cascada (Magikarp) ---
+    // Sube desde donde está hasta la cima ('top'); con éxito evoluciona allí (destello) y sin él llega hasta una parte del camino y cae.
+    static constexpr float CLIMB_TIME = 3.2f, EVOLVE_TIME = 2.6f, CLIMB_FAIL_FRACTION = 0.62f;
+    void beginClimb(const DirectX::XMFLOAT3& top, bool success) {
+        m_trip = Trip::CLIMB;
+        m_tripTime = 0.0f;
+        m_tripFrom = body.position;
+        m_tripTo = top;
+        m_tripSuccess = success;
+        m_evolveReady = false;
+        body.velocity = { 0.0f, 0.0f, 0.0f };
+        body.onGround = false;
+    }
+    bool tripActive() const { return m_trip != Trip::NONE; }
+    // true una vez, en el punto álgido del destello: es cuando cambia de especie.
+    bool takeEvolveReady() { const bool ready = m_evolveReady; m_evolveReady = false; return ready; }
+    // Cambia de especie sin animación de bola (la evolución ya tiene la suya).
+    void morph(int speciesId, bool floats) { m_speciesId = speciesId; m_floats = floats; body.gravityScale = floats ? 0.0f : 1.0f; }
+    // Destello blanco de la evolución (0..1) y cuánto crece el pokémon mientras evoluciona.
+    float glow() const { return m_trip == Trip::EVOLVE ? std::sin((std::min)(m_tripTime / EVOLVE_TIME, 1.0f) * 3.1415927f) : 0.0f; }
+    float evolveScale() const { return 1.0f + 0.35f * glow(); }
+
     // Avanza el seguimiento. 'power' > 0 = trabajando este frame (el multiplicador del pokémon); devuelve true cuando
     // completa un golpe. Con 'goal' va hacia ese punto (aunque se separe del jugador) en vez de seguirlo y se detiene a 'approach' de él.
     bool update(float dt, const Physics::World& world, const DirectX::XMFLOAT3& playerPosition, float cameraYaw, float power,
@@ -91,6 +113,10 @@ class Companion {
         m_cameraYaw = cameraYaw;
         if (m_phase != Phase::NONE) {
             animate(dt, world, playerPosition, cameraYaw);
+            return false;
+        }
+        if (m_trip != Trip::NONE) {
+            animateTrip(dt, world);
             return false;
         }
 
@@ -131,6 +157,7 @@ class Companion {
 
     private:
     enum class Phase { NONE, RECALL, SEND };
+    enum class Trip { NONE, CLIMB, EVOLVE };
     struct Next { int speciesId; bool floats; int ballType; bool shiny; };
 
     static DirectX::XMFLOAT3 hand(const DirectX::XMFLOAT3& player) { return { player.x, player.y + HAND_HEIGHT, player.z }; }
@@ -140,6 +167,28 @@ class Companion {
         m_ballType = m_next.ballType;
         m_phase = Phase::SEND;
         m_transfer.start(BallTransfer::Mode::RELEASE, cameraYaw, hand(playerPosition), m_ballType);
+    }
+
+    void animateTrip(float dt, const Physics::World& world) {
+        m_tripTime += dt;
+        body.velocity = { 0.0f, 0.0f, 0.0f };
+        body.onGround = false;
+        if (m_trip == Trip::CLIMB) {
+            const float limit = m_tripSuccess ? 1.0f : CLIMB_FAIL_FRACTION;
+            const float t = (std::min)(m_tripTime / CLIMB_TIME, 1.0f) * limit;
+            const float ease = t * t * (3.0f - 2.0f * t);
+            body.position = { m_tripFrom.x + (m_tripTo.x - m_tripFrom.x) * ease, m_tripFrom.y + (m_tripTo.y - m_tripFrom.y) * ease + 0.25f * std::sin(m_tripTime * 11.0f) * (1.0f - ease), m_tripFrom.z + (m_tripTo.z - m_tripFrom.z) * ease };
+            m_yaw = std::atan2(m_tripTo.x - m_tripFrom.x, m_tripTo.z - m_tripFrom.z);
+            if (m_tripTime < CLIMB_TIME) return;
+            if (m_tripSuccess) { m_trip = Trip::EVOLVE; m_tripTime = 0.0f; return; }
+            m_trip = Trip::NONE; // sin éxito: se suelta y cae al río (la física hace el resto)
+            body.velocity = { -std::sin(m_yaw) * 1.5f, 0.0f, -std::cos(m_yaw) * 1.5f };
+            return;
+        }
+        m_yaw += dt * 6.0f;
+        if (!m_evolveReady && m_tripTime >= EVOLVE_TIME * 0.5f && !m_evolved) { m_evolveReady = true; m_evolved = true; }
+        if (m_tripTime >= EVOLVE_TIME) { m_trip = Trip::NONE; m_evolved = false; }
+        (void)world;
     }
 
     // Avanza el cambio: la bola queda suspendida sobre el pokémon (que no se mueve mientras tanto).
@@ -191,6 +240,10 @@ class Companion {
     float m_workTimer = 0.0f;
     bool m_working = false;
     Phase m_phase = Phase::NONE;
+    Trip m_trip = Trip::NONE;
+    float m_tripTime = 0.0f;
+    DirectX::XMFLOAT3 m_tripFrom = { 0.0f, 0.0f, 0.0f }, m_tripTo = { 0.0f, 0.0f, 0.0f };
+    bool m_tripSuccess = false, m_evolveReady = false, m_evolved = false;
     float m_cameraYaw = 0.0f;
     BallTransfer m_transfer;
     int m_ballType = 1;                       // tipo de la pokéball del pokémon que está fuera

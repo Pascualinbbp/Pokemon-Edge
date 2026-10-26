@@ -65,7 +65,8 @@ class Camera {
         const float target = aiming ? 1.0f : 0.0f;
         const float step = BLEND_SPEED * dt;
         m_aim = m_aim < target ? (std::min)(m_aim + step, target) : (std::max)(m_aim - step, target);
-        m_pitch = (std::max)(m_pitch, minPitch());
+        const float low = minPitch();
+        if (m_pitch < low) m_pitch += (low - m_pitch) * (std::min)(1.0f, 8.0f * dt); // al salir del agua el límite sube poco a poco: la vista no da un tirón
     }
 
     // Ángulo horizontal hacia el que mira la cámara (0 = hacia +Z).

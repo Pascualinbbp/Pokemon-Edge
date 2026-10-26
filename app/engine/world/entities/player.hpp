@@ -20,6 +20,10 @@ class Player {
     static constexpr float SLIDE_DURATION = 0.9f;  // segundos
     static constexpr float SLIDE_EASE_OUT = 0.2f;  // al final baja hasta la velocidad de correr
     static constexpr float JUMP_SPEED     = 7.0f;
+    static constexpr float PLUNGE_MIN = 5.5f, PLUNGE_MIN_DEPTH = 0.8f, PLUNGE_KEEP = 0.7f, PLUNGE_MAX = 16.0f; // caída (m/s) a partir de la que se hunde, y cuánta velocidad conserva
+    static constexpr float PLUNGE_TIME = 1.1f, PLUNGE_RISE = 3.5f, PLUNGE_HURT = 0.45f; // frenada, flotación y daño reducido al tocar el fondo
+    float m_plungeTime = 0.0f, m_plungeSpeed = 0.0f;
+    bool m_plunging = false;
     static constexpr float CLOUD_JUMP     = 1.45f; // el suelo de nube es blando: saltar en él rebota más
     bool onCloud = false;                          // lo fija la escena antes de cada actualización
     static constexpr float SWIM_SPEED     = 3.4f;  // nadar en la superficie
@@ -46,7 +50,7 @@ class Player {
 
     // Aire que aguanta el personaje bajo el agua (s). Es el punto de extensión del equipo de buceo: un equipamiento lo sube, y
     // con 'breathesUnderwater' no se gasta nunca.
-    float oxygenCapacity = 30.0f;
+    float oxygenCapacity = 14.0f;
     bool breathesUnderwater = false;
 
     Player() {
@@ -87,12 +91,16 @@ class Player {
         }
 
         trackFall(streaming);
+        const float plungeBefore = body.velocity.y;
         if (!streaming) world.step(body, dt);
         if (!streaming && !inWater && !wasGrounded && body.onGround) { // al tocar el suelo: el agua poco profunda también amortigua
             m_impact = HealthRules::impactInWater(m_fallSpeed, columnDepth(world));
             land(input);
         }
-        if (inWater && m_fallSpeed > 0.0f) { // cae al agua: lo profunda que sea la columna de agua amortigua la caída
+        if (m_plunging && body.onGround && plungeBefore < -3.0f) { // la zambullida llega al fondo: solo ahí se hace daño, y reducido
+            m_impact = -plungeBefore * PLUNGE_HURT;
+            m_plungeTime = PLUNGE_TIME; // y a partir de ahí flota hacia arriba
+        } else if (inWater && m_fallSpeed > 0.0f && !m_plunging && !m_diving) { // agua poco profunda: amortigua según lo que tiene
             m_impact = HealthRules::impactInWater(m_fallSpeed, columnDepth(world));
         }
         if (body.onGround || streaming || inWater) m_fallSpeed = 0.0f;
@@ -185,7 +193,7 @@ class Player {
 
     void leaveWater() {
         m_drowning = false;
-        m_swimming = m_diving = m_exhausted = false;
+        m_swimming = m_diving = m_exhausted = m_plunging = false;
         body.underwater = false;
         m_oxygen = oxygenCapacity;
     }
@@ -204,7 +212,7 @@ class Player {
             body.underwater = true;
             body.velocity.y = 0.0f;
         }
-        m_swimming = m_diving = m_climbing = m_sprinting = m_sliding = m_crouching = m_crouchQueued = m_exhausted = m_drowning = false;
+        m_swimming = m_diving = m_climbing = m_sprinting = m_sliding = m_crouching = m_crouchQueued = m_exhausted = m_drowning = m_plunging = false;
         m_oxygen = oxygenCapacity;
         body.velocity.y = (std::min)(STREAM_SPEED, body.velocity.y + STREAM_ACCEL * dt);
         body.position.y += body.velocity.y * dt;
@@ -242,6 +250,14 @@ class Player {
         const float surfaceY = level - body.collisionHeight * Physics::World::SUBMERGED;
         if (m_oxygen > oxygenCapacity) m_oxygen = oxygenCapacity;
         const bool lookingDown = forward && look > DIVE_LOOK && m_oxygen > DIVE_START_AIR * oxygenCapacity;
+        if (m_fallSpeed > PLUNGE_MIN && !m_diving && depth >= PLUNGE_MIN_DEPTH) { // cae al agua desde alto: se hunde tanto más cuanto más rápido llegó
+            m_plunging = true;
+            m_plungeTime = 0.0f;
+            m_plungeSpeed = -(std::min)(m_fallSpeed * PLUNGE_KEEP, PLUNGE_MAX);
+            m_diving = true;
+            body.onGround = false;
+            body.velocity.y = m_plungeSpeed;
+        }
         if (!m_diving && lookingDown && depth >= DIVE_MIN_DEPTH && !m_exhausted) {
             m_diving = true;
             body.onGround = false;
@@ -253,11 +269,17 @@ class Player {
             body.underwater = true;
             body.onGround = false;
             const float push = (std::clamp)(input.moveY, -1.0f, 1.0f);
-            const float vy = -std::sin(look) * base * push; // sin aire el jugador decide: solo recibe daño y el aviso
+            float vy = -std::sin(look) * base * push; // sin aire el jugador decide: solo recibe daño y el aviso
+            if (m_plunging) { // zambullida: el impulso de la caída se frena en el agua y después flota hacia arriba
+                m_plungeTime += dt;
+                vy = m_plungeTime < PLUNGE_TIME ? m_plungeSpeed * (1.0f - m_plungeTime / PLUNGE_TIME) : PLUNGE_RISE;
+                horizontal *= 0.4f;
+            }
             horizontal *= 1.0f - std::fabs(push) * (1.0f - std::cos(look));
             body.velocity.y = vy;
             if (body.position.y >= surfaceY && vy >= 0.0f) { // volvió a la superficie
                 m_diving = false;
+                m_plunging = false;
                 m_exhausted = false;
                 body.underwater = false;
                 body.position.y = surfaceY;
@@ -480,7 +502,7 @@ class Player {
     float m_facing = 0.0f;
     PlayerAction m_holding = PlayerAction::NONE;
     float m_actionTime = 0.0f, m_actionDuration = 0.0f;
-    float m_oxygen = 30.0f;
+    float m_oxygen = 14.0f;
     float m_fallSpeed = 0.0f, m_impact = 0.0f, m_grip = 1.0f;
     bool m_drowning = false;
     float m_phase = 0.0f, m_speed = 0.0f, m_climbSlope = 0.0f, m_climbSteep = 0.0f;

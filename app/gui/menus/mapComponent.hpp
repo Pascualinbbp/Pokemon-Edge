@@ -87,6 +87,7 @@ namespace MapComponent {
 
         inline int g_selected = -1; // hábitat elegido en la lista
         inline int g_layer = -1;    // capa que se ve (-1 = la del jugador)
+        inline int g_lastFrame = -100;
         inline int g_playerLayer = -1; // capa en la que estaba el jugador la última vez: al cambiar, el mapa la sigue
     }
 
@@ -102,7 +103,10 @@ namespace MapComponent {
         if (GuiInput::backPressed()) state = back;
         if (!status.habitatMap || !status.data || !status.exploration) return;
 
-        if (g_layer < 0 || status.layer != g_playerLayer) g_layer = status.layer;
+        const int frame = ImGui::GetFrameCount();
+        const bool justOpened = frame - g_lastFrame > 3; // el mapa estuvo cerrado: se abre en la capa del jugador, sea cual fuera la última que se vio
+        g_lastFrame = frame;
+        if (justOpened || g_layer < 0 || status.layer != g_playerLayer) g_layer = status.layer;
         g_playerLayer = status.layer;
         const MapTerrain::Data& terrain = MapTerrain::get(status);
         const Exploration& explored = *status.exploration;

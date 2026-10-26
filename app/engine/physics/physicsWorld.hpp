@@ -286,6 +286,21 @@ namespace Physics {
                 }
             }
             if (body.stickToGround && body.onGround && !body.underwater && body.velocity.y <= 0.0f && body.position.y - floorY < STICK_DISTANCE) body.position.y = floorY;
+            if (body.rolls && !body.underwater && body.velocity.y > 0.0f && body.position.y < floorY - 0.02f) { // un proyectil que sube contra una ladera la golpea: rebota por la normal del terreno (no la atraviesa)
+                float gx, gz;
+                gradient(body.position.x, body.position.z, previousLow, gx, gz);
+                const float inv = 1.0f / std::sqrt(gx * gx + gz * gz + 1.0f);
+                const float nx = -gx * inv, ny = inv, nz = -gz * inv;
+                const float vn = body.velocity.x * nx + body.velocity.y * ny + body.velocity.z * nz;
+                if (vn < 0.0f) {
+                    const float k = -(1.0f + (std::max)(body.restitution, 0.3f)) * vn;
+                    body.velocity.x += nx * k; body.velocity.y += ny * k; body.velocity.z += nz * k;
+                    body.velocity.x *= BOUNCE_FRICTION; body.velocity.z *= BOUNCE_FRICTION;
+                }
+                body.position.y = floorY;
+                body.onGround = false;
+                return;
+            }
             const bool touching = body.position.y <= floorY && body.velocity.y <= 0.0f;
             body.onGround = touching;
             if (!touching) return;

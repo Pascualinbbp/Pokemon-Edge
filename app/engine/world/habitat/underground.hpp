@@ -24,6 +24,7 @@ class Underground {
     static constexpr float DEFINED = -5.0e3f;    // por encima de esto el nodo existe
     static constexpr float CLEARANCE = 2.2f;     // altura mínima libre para poder estar dentro
     static constexpr float MOUND_SLOPE = 0.36f;   // pendiente del montículo que cubre la entrada (sube poco a poco desde el terreno)
+    static constexpr float MOUND_FRONT_SLOPE = 1.2f; // pendiente del frente del montículo, a la altura de la boca
     static constexpr float MOUND_REACH = 34.0f;  // margen que se reserva alrededor de la galería para el montículo
     static constexpr int MOUND_PASSES = 22;      // pasadas para extender ese montículo (cada una alcanza una casilla más)
     static constexpr float COVER = 1.4f;         // roca mínima entre el techo y la superficie
@@ -467,7 +468,11 @@ inline bool Underground::carve(const Plan& plan, const Mouth& mouth, Terrain ter
             for (int dr = -1; dr <= 1; ++dr) for (int dc = -1; dc <= 1; ++dc) {
                 if (!inBox(c + dc, r + dr) || (!dc && !dr)) continue;
                 const float v = raised[at(c + dc, r + dr)];
-                if (v > -INF * 0.5f) next[i] = (std::max)(next[i], v - MOUND_SLOPE * ((dc && dr) ? 2.83f : 2.0f));
+                if (v > -INF * 0.5f) {
+                    const float ahead = (height.nodeCoord(c) - mouth.x) * mouth.dirX + (height.nodeCoord(r) - mouth.z) * mouth.dirZ; // >0: del lado de la galería
+                    const float slope = ahead < 0.5f ? MOUND_FRONT_SLOPE : MOUND_SLOPE; // ante la boca la roca baja de golpe a la ladera: es una pared con la entrada, no un embudo
+                    next[i] = (std::max)(next[i], v - slope * ((dc && dr) ? 2.83f : 2.0f));
+                }
             }
         }
         raised = next;

@@ -136,7 +136,7 @@ namespace HudComponent {
             dl->PathArcTo(ImVec2(c.x, c.y + 20.0f), 16.0f, 3.1415927f * 1.08f, 3.1415927f * 1.92f, 20);
             dl->PathFillConvex(body);
             const bool pad = isGamepad(device);
-            GuiDraw::keycap(dl, ImVec2(c.x - (pad ? 18.0f : 9.0f), c.y + AIR_R + 7.0f), pad ? "View" : "I", pad ? 36.0f : 18.0f, 20.0f);
+            GuiDraw::keycap(dl, ImVec2(c.x - AIR_R - (pad ? 46.0f : 28.0f), c.y - 10.0f), pad ? "View" : "I", pad ? 36.0f : 18.0f, 20.0f); // a la izquierda del círculo: no tapa el nivel ni la temperatura
 
             // Temperatura y altura debajo; el aviso de región y los estados a su lado.
             char text[64];
@@ -336,7 +336,7 @@ namespace HudComponent {
             char text[32];
             std::snprintf(text, sizeof(text), "Nv. %d", status.playerLevel);
             const ImVec2 size = ImGui::CalcTextSize(text);
-            dl->AddText(ImVec2(screen.x - 74.0f - size.x * 0.5f, 74.0f + 53.0f + 14.0f), IM_COL32(255, 255, 255, 235), text);
+            dl->AddText(ImVec2(screen.x - 74.0f - size.x * 0.5f, 74.0f + 53.0f + 6.0f), IM_COL32(255, 255, 255, 235), text);
         }
 
         // Equipo en círculos verticales a la derecha, siempre en el mismo orden (el del menú de pokémon). El que acompaña
