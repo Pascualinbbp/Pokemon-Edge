@@ -871,6 +871,7 @@ class HabitatMap {
         m_basins.push_back({ cx, cz, radius, level, UPPER_LAKE });
     }
 
+    static constexpr float UPPER_LAKE_MIN_RADIUS = 20.0f; // el lago del que baja un río de montaña: grande, para que quepan los pokémon de agua dulce
     static constexpr float SPRING_RADIUS = 4.5f;  // charca de la que nace un río de montaña
     static constexpr int POOL_STEPS = 6;          // pasos de cauce que ocupa la poza al pie de una cascada
     static constexpr int MOUTH_STEPS = 7;         // pasos con los que el río se abre al mar
@@ -926,7 +927,7 @@ class HabitatMap {
         float level = startLevel > -1.0e8f ? startLevel : path.front().terrain - 0.35f;
         // Lago de montaña antes de la primera cascada: el nivel se mantiene plano a lo largo del lago.
         const bool lake = !falls.empty() && falls.front().lip >= 14;
-        const float lakeRadius = between(10.0f, 15.0f);
+        const float lakeRadius = between(UPPER_LAKE_MIN_RADIUS, UPPER_LAKE_MIN_RADIUS + 8.0f);
         const int lakeSteps = static_cast<int>(std::ceil(lakeRadius / Physics::Heightfield::CELL));
         const int lakeFrom = lake ? (std::max)(2, falls.front().lip - 2 * lakeSteps) : -1;
         float lakeLevel = 0.0f;
@@ -1124,9 +1125,10 @@ class HabitatMap {
     // cuando, ríos de lava que bajan por la ladera. Los géiseres son parcelas pequeñas de un hábitat anfitrión con una charca hirviente y un chorro
     // que erupciona a intervalos. El fondo marino tiene arrecifes de coral, campos de algas y volcanes submarinos (con fumarolas en el cráter):
     // son 'capas' que se superponen al mar y a la tierra con un peso que baja hacia el borde.
-    static constexpr float CRATER = 0.2f;         // radio del cráter (fracción del radio del volcán)
-    static constexpr float CRATER_DEPTH = 0.3f;   // hondura del cráter (fracción de la altura del cono)
-    static constexpr float LAVA_FILL = 0.8f;      // fracción de la hondura del cráter que llena la lava
+    static constexpr float CRATER = 0.24f;        // radio del borde del cráter (fracción del radio del volcán)
+    static constexpr float CRATER_FLOOR = 0.12f;  // radio del fondo llano del cráter, donde está el lago de lava
+    static constexpr float CRATER_DEPTH = 0.26f;  // hondura del cráter bajo el borde (fracción de la altura del cono)
+    static constexpr float LAVA_FILL = 0.6f;      // fracción de la hondura del cráter que llena la lava
     static constexpr float VENT_SIZE = 0.28f;     // tamaño de las fumarolas respecto al volcán submarino
     static constexpr int LAVA_STEPS = 90;         // pasos máximos de un río de lava
     static constexpr float GEYSER_PAD = 1.8f;     // la parcela del géiser se aplana hasta este múltiplo de su radio
@@ -1138,12 +1140,12 @@ class HabitatMap {
         bool sea() const { return kind == HabitatPlacement::SEA_VOLCANO || kind == HabitatPlacement::REEF || kind == HabitatPlacement::KELP || kind == HabitatPlacement::VENT; }
     };
 
-    static float coneProfile(float u) { return std::pow((std::max)(1.0f - u, 0.0f), 1.6f); }
-    // Perfil del volcán: cono con cráter (1 = la altura de 'peak').
+    // Perfil del volcán (1 = la altura de 'peak', que es la del borde del cráter): ladera de cono que sube hasta el borde y, dentro, una caldera de
+    // pared suave y fondo llano (ahí queda la lava).
     static float volcanoProfile(float u) {
-        if (u >= CRATER) return coneProfile(u);
-        const float k = u / CRATER;
-        return coneProfile(CRATER) - CRATER_DEPTH * (1.0f - k * k);
+        if (u >= CRATER) return std::pow((std::max)(1.0f - u, 0.0f) / (1.0f - CRATER), 1.45f);
+        const float wall = smooth(CRATER_FLOOR, CRATER, u); // 0 en el fondo, 1 en el borde
+        return 1.0f - CRATER_DEPTH * (1.0f - wall * wall * (3.0f - 2.0f * wall));
     }
 
     void addOverlay(const Zone& zone, HabitatPlacement kind) {
@@ -1195,7 +1197,7 @@ class HabitatMap {
             forNodesAround(zone, 1.2f, [&](int col, int row, float x, float z) {
                 const float u = std::sqrt(distance2(zone, x, z));
                 if (u >= 1.0f) return;
-                const float rough = 1.0f + 0.12f * m_noise.fbm(x * 0.05f + seed, z * 0.05f - seed, 3); // barrancos y coladas en la ladera
+                const float rough = 1.0f + 0.12f * m_noise.fbm(x * 0.05f + seed, z * 0.05f - seed, 3) * smooth(CRATER * 1.05f, CRATER * 1.7f, u); // barrancos y coladas en la ladera; el cráter queda liso
                 float& g = m_ground.at(col, row);
                 g += zone.peak * volcanoProfile(u) * rough;
                 m_rock.at(col, row) = (std::max)(m_rock.at(col, row), smooth(0.5f, 0.75f, u) * (1.0f - smooth(1.0f, 1.3f, u))); // todo el pie del volcán es roca volcánica
@@ -1217,7 +1219,7 @@ class HabitatMap {
         for (size_t zi = 0; zi < m_zones.size(); ++zi) {
             const Zone& zone = m_zones[zi];
             if (zone.peak <= 0.0f || zi >= m_craterLevel.size()) continue;
-            const int flows = betweenInt(2, 4);
+            const int flows = betweenInt(1, 3);
             for (int f = 0; f < flows; ++f) {
                 const float angle = between(0.0f, 6.2831853f), ca = std::cos(angle), sa = std::sin(angle);
                 const float craterR = zone.radius * CRATER;
@@ -1274,7 +1276,7 @@ class HabitatMap {
                 if (m_kind[index] != LAVA || d < half) { // cauce con orillas: en el lado cuesta abajo se levanta un reborde que contiene la lava (nunca flota)
                     const float rim = level + 0.3f + (d > half ? (d - half) * 0.4f : 0.0f);
                     if (d < half) g = bed + (level + 0.3f - bed) * (d / half) * (d / half);
-                    else g += (rim - g) * (1.0f - smooth(half, half + 3.0f, d));
+                    else g += (rim - g) * (1.0f - smooth(half, half + 3.0f + 1.1f * (std::max)(g - level, 0.0f), d)); // las paredes del cauce son suaves aunque corte el borde del cráter
                 }
                 const float spread = half + 3.0f + 16.0f * (1.0f - strength);                // cuanta menos lava, más ancha la roca a su alrededor
                 const float rockWeight = (1.0f - smooth(half * 0.7f, spread, d)) * (0.5f + 0.5f * (1.0f - strength));
@@ -1456,7 +1458,7 @@ class HabitatMap {
                 if (overlay.kind == HabitatPlacement::SEA_VOLCANO) {
                     if (u >= 1.0f) return;
                     const float summit = zone.altitude;
-                    const float t = u >= CRATER ? coneProfile(u) / coneProfile(CRATER) : 1.0f - 0.5f * CRATER_DEPTH * (1.0f - (u / CRATER) * (u / CRATER)) / coneProfile(CRATER);
+                    const float t = volcanoProfile(u);
                     g = (std::max)(g, g + (summit - g) * (std::max)(t, 0.0f) * (1.0f - smooth(0.85f, 1.0f, u)) + bumps * 0.3f);
                 } else {
                     const float w = 1.0f - smooth(0.55f, 1.4f, u);

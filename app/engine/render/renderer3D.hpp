@@ -124,6 +124,8 @@ class Renderer3D {
     void addChest(const Chest& chest);
     void addNode(const ResourceNode& node);
     void addGroundItem(const GroundItem& item);
+    void addFruit(const Fruit& fruit);
+    void addFootprints(const Scene& scene);
     void addMachine();
     void addProfessor(const Scene& scene);
     void addCreature(const DirectX::XMFLOAT3& position, float size, float yaw, int speciesId, bool shiny);

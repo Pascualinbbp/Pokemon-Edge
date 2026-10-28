@@ -67,6 +67,7 @@ struct Pokeball {
         body.gravityScale = GRAVITY_SCALE;
         body.groundOffset = RADIUS; // 'position' es el centro de la esfera
         body.rolls = true;
+        body.sinks = true;  // en el agua se frena y se hunde, no la trata como suelo
         body.groundDrag = DRAG;
         body.collisionRadius = RADIUS;
         body.collisionHeight = RADIUS * 2.0f;

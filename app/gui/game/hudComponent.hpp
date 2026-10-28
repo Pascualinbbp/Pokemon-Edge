@@ -91,6 +91,8 @@ namespace HudComponent {
 
         // Círculo del jugador (arriba a la derecha, se abre con la tecla del inventario): alrededor, anillos de vida, experiencia y aire.
         // Sin números: la vida pierde un tramo blanco que se va apagando al recibir daño y brilla en verde, con cruces que suben, al curarse.
+        inline float g_vitalsBottom = 0.0f; // borde inferior de todo lo que cuelga del círculo del jugador (nivel, temperatura, avisos): el equipo empieza debajo
+
         inline void drawVitals(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
             const float dt = ImGui::GetIO().DeltaTime, time = static_cast<float>(ImGui::GetTime());
@@ -155,6 +157,7 @@ namespace HudComponent {
             else if (status.spring == 2) line("¡Demasiado tiempo en el agua!", IM_COL32(255, 110, 90, 255));
             if (status.exhausted) line("¡Sin aire!", IM_COL32(255, 90, 80, 255));
             if (status.regionName) line(status.regionName->c_str(), IM_COL32(255, 215, 90, 235));
+            g_vitalsBottom = y;
         }
 
         // Tinte de pantalla: azul bajo el agua, oscuridad en cuevas y minas.
@@ -330,6 +333,24 @@ namespace HudComponent {
             }
         }
 
+        // Pantalla de carga al desmayarse: negro con una pokéball que gira y "Cargando...".
+        inline void drawLoading(ImDrawList* dl, float fade) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            const int alpha = static_cast<int>(255.0f * (std::clamp)(fade, 0.0f, 1.0f));
+            dl->AddRectFilled(ImVec2(0.0f, 0.0f), screen, IM_COL32(6, 8, 14, alpha));
+            const float time = static_cast<float>(ImGui::GetTime());
+            const ImVec2 c(screen.x * 0.5f, screen.y * 0.5f - 10.0f);
+            const float r = 26.0f;
+            const int a = static_cast<int>(235.0f * fade);
+            ringArc(dl, c, r, 0.0f, 1.0f, IM_COL32(255, 255, 255, a / 6), 4.0f);
+            const float from = std::fmod(time * 0.9f, 1.0f);
+            ringArc(dl, c, r, from, from + 0.28f, IM_COL32(255, 255, 255, a), 4.0f);
+            char text[32];
+            std::snprintf(text, sizeof(text), "Cargando%.*s", static_cast<int>(std::fmod(time * 2.0f, 4.0f)), "...");
+            const ImVec2 size = ImGui::CalcTextSize("Cargando...");
+            dl->AddText(ImVec2(c.x - size.x * 0.5f, c.y + r + 18.0f), IM_COL32(255, 255, 255, a), text);
+        }
+
         // Nivel del jugador, justo debajo del círculo.
         inline void drawLevel(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
@@ -344,11 +365,16 @@ namespace HudComponent {
         // abajo a la izquierda, la pokéball con la que se capturó abajo a la derecha y la tecla para sacarlo.
         inline void drawTeam(ImDrawList* dl, const GameStatus& status) {
             if (status.team.empty() || !status.data) return;
-            constexpr float RADIUS = 30.0f, GAP = 20.0f;
+            constexpr float BASE_RADIUS = 30.0f, BASE_GAP = 20.0f, EDGE = 20.0f;
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
-            const float total = static_cast<float>(status.team.size()) * (RADIUS * 2.0f + GAP) - GAP;
-            const float x = screen.x - RADIUS - 28.0f;
-            float y = screen.y * 0.5f - total * 0.5f + RADIUS;
+            const float count = static_cast<float>(status.team.size());
+            const float top = (std::max)(g_vitalsBottom + 10.0f, 0.0f); // nunca bajo el nivel, la temperatura ni los avisos del jugador
+            const float available = (std::max)(screen.y - EDGE - top, 60.0f);
+            const float fit = (std::clamp)((available + BASE_GAP) / (count * (BASE_RADIUS * 2.0f + BASE_GAP)), 0.55f, 1.0f); // si no cabe, los círculos se encogen
+            const float RADIUS = BASE_RADIUS * fit, GAP = BASE_GAP * fit;
+            const float total = count * (RADIUS * 2.0f + GAP) - GAP;
+            const float x = screen.x - BASE_RADIUS - 28.0f;
+            float y = (std::max)(screen.y * 0.5f - total * 0.5f, top) + RADIUS;
             int number = 1;
             for (const TeamEntry& entry : status.team) {
                 TeamCircle::draw(dl, ImVec2(x, y), RADIUS, *status.data, *entry.species, entry.level, entry.shiny, entry.ballId, entry.active, number++);
@@ -418,7 +444,9 @@ namespace HudComponent {
         detail::drawWorldPrompts(dl, status, device);
         detail::drawPrompts(dl, status, device);
 
-        if (status.notice != Notice::NONE) {
+        if (status.loading > 0.0f) detail::drawLoading(dl, status.loading);
+
+        if (status.notice != Notice::NONE && status.loading <= 0.0f) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
             const detail::NoticeStyle& style = detail::NOTICES[static_cast<int>(status.notice)];
             detail::centered(dl, ImVec2(size.x * 0.5f, size.y * 0.2f), style.text, 1.8f, style.color);

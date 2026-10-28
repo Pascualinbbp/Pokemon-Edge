@@ -1048,7 +1048,11 @@ void Renderer3D::collect(const Scene& scene) {
     for (const CaptureTarget* wild : scene.wild.loaded()) {
         const CaptureTarget& target = *wild;
         const float size = target.scale();
-        if (size > 0.001f) addCreature(target.drawCenter(), size, target.yaw(), target.speciesId(), target.shiny());
+        if (size > 0.001f) {
+            XMFLOAT3 at = target.drawCenter();
+            if (target.eating()) at.y -= size * 0.18f * (0.5f + 0.5f * std::sin(target.eatPhase() * 6.2831853f * 4.0f)); // picotea: la cabeza sube y baja
+            addCreature(at, size, target.yaw(), target.speciesId(), target.shiny());
+        }
 
         if (const CaptureSequence* sequence = target.sequence()) addCapture(*sequence);
     }
@@ -1089,6 +1093,8 @@ void Renderer3D::collect(const Scene& scene) {
         if (!node.gone() && dx * dx + dz * dz <= kNodeDrawRange * kNodeDrawRange) addNode(node);
     }
     for (const GroundItem& item : scene.groundItems.entities) addGroundItem(item);
+    for (const Fruit& fruit : scene.fruits) addFruit(fruit);
+    addFootprints(scene);
     addMachine();
     addProfessor(scene);
 
@@ -1508,6 +1514,49 @@ void Renderer3D::addNode(const ResourceNode& node) {
 }
 
 // Objeto suelto: semiesfera blanca que brilla y late. No proyecta sombra.
+// Fruto caído: coco (esfera marrón con tres "ojos") o plátano (media luna amarilla); gira al rodar.
+void Renderer3D::addFruit(const Fruit& fruit) {
+    const float k = fruit.scale();
+    if (k <= 0.001f) return;
+    const XMFLOAT3& p = fruit.body.position;
+    const float r = Fruit::RADIUS * k;
+    if (fruit.kind() == Fruit::Kind::COCONUT) {
+        const XMMATRIX at = XMMatrixRotationX(fruit.spin()) * XMMatrixTranslation(p.x, p.y, p.z);
+        add(m_sphere, XMMatrixScaling(r, r, r) * at, { 0.36f, 0.24f, 0.12f, 0.0f });
+        add(m_cube, XMMatrixScaling(r * 0.35f, r * 0.35f, r * 0.2f) * XMMatrixTranslation(0.0f, r * 0.55f, r * 0.8f) * at, { 0.12f, 0.08f, 0.05f, 0.0f }, false);
+    } else {
+        const XMMATRIX at = XMMatrixRotationY(static_cast<float>(fruit.id()) * 1.7f) * XMMatrixTranslation(p.x, p.y - Fruit::RADIUS * 0.4f * k, p.z);
+        add(m_cube, XMMatrixScaling(r * 0.7f, r * 0.7f, r * 2.2f) * at, { 0.97f, 0.84f, 0.18f, 0.0f });
+        add(m_cube, XMMatrixScaling(r * 0.4f, r * 0.4f, r * 0.5f) * XMMatrixTranslation(0.0f, r * 0.1f, r * 1.2f) * at, { 0.35f, 0.25f, 0.10f, 0.0f }, false);
+    }
+}
+
+// Huellas en la arena: pocos cubos planos por huella, solo las cercanas; se encogen y se hunden al borrarse.
+void Renderer3D::addFootprints(const Scene& scene) {
+    using Shape = Footprints::Shape;
+    const XMFLOAT3& you = scene.player.body.position;
+    static const XMFLOAT4 dent = { 0.52f, 0.43f, 0.28f, 0.0f };
+    for (const Footprints::Print& print : scene.footprints.prints()) {
+        if (!Footprints::alive(print)) continue;
+        const float dx = print.x - you.x, dz = print.z - you.z;
+        if (dx * dx + dz * dz > 80.0f * 80.0f) continue;
+        const float k = Footprints::strength(print);
+        if (k <= 0.01f) continue;
+        const float s = print.size * (0.7f + 0.3f * k), h = 0.012f;
+        const XMMATRIX at = XMMatrixRotationY(print.yaw) * XMMatrixTranslation(print.x, print.y, print.z);
+        const auto part = [&](float w, float l, float x, float z, float yaw = 0.0f) {
+            add(m_cube, XMMatrixScaling(w, h, l) * XMMatrixRotationY(yaw) * XMMatrixTranslation(x, 0.0f, z) * at, dent, false);
+        };
+        switch (print.shape) {
+            case Shape::BOOT: part(0.16f * s, 0.30f * s, 0.0f, 0.0f); part(0.14f * s, 0.10f * s, 0.0f, -0.22f * s); break;
+            case Shape::PAW:  part(0.34f * s, 0.30f * s, 0.0f, -0.05f * s); part(0.10f * s, 0.12f * s, -0.16f * s, 0.20f * s); part(0.10f * s, 0.12f * s, 0.0f, 0.26f * s); part(0.10f * s, 0.12f * s, 0.16f * s, 0.20f * s); break;
+            case Shape::BIRD: part(0.07f * s, 0.34f * s, 0.0f, 0.12f * s); part(0.07f * s, 0.30f * s, -0.12f * s, 0.08f * s, 0.6f); part(0.07f * s, 0.30f * s, 0.12f * s, 0.08f * s, -0.6f); part(0.06f * s, 0.14f * s, 0.0f, -0.12f * s); break;
+            case Shape::HOOF: part(0.14f * s, 0.30f * s, -0.09f * s, 0.0f); part(0.14f * s, 0.30f * s, 0.09f * s, 0.0f); break;
+            case Shape::ROUND: part(0.20f * s, 0.20f * s, 0.0f, 0.0f); break;
+        }
+    }
+}
+
 void Renderer3D::addGroundItem(const GroundItem& item) {
     const XMFLOAT3& p = item.body.position;
     const float k = item.scale();

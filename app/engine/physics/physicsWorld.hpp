@@ -76,6 +76,7 @@ namespace Physics {
         float ceiling(float x, float z) const { return caveCeil.sample(x, z); }
 
         static constexpr float VOID_LIMIT = -50.0f;   // por debajo de esto el relieve "no existe" (alrededor de las islas del cielo): debajo está el mar
+        static constexpr float SEA_REACH = 0.5f;      // a más altura que esto sobre el mar de debajo de una isla del cielo no se está en el agua
         static constexpr float SEA_FLOOR = -17.0f;    // fondo del mar bajo las islas del cielo
         static constexpr float FREE_FALL_Y = 6.0f;    // por encima de esto, fuera del archipiélago, se cae libremente
 
@@ -90,7 +91,10 @@ namespace Physics {
             if (under(x, z, y)) return (std::max)(caveWater.sample(x, z), caveFloor.sample(x, z));
             if (water.empty()) return 0.0f;
             const float w = water.sample(x, z);
-            return w < VOID_LIMIT ? tide : w + tide * seaMask.sample(x, z); // bajo una isla del cielo, el mar
+            if (w < VOID_LIMIT) { // bajo una isla del cielo, el mar: solo cuenta como agua cuando quien pregunta está a su altura (en el aire se cae hasta él)
+                return (y < ABOVE * 0.5f && y > tide + SEA_REACH) ? SEA_FLOOR : tide;
+            }
+            return w + tide * seaMask.sample(x, z);
         }
         // Altura de lo que se ve: el terreno o la superficie del agua.
         float surfaceHeight(float x, float z, float y = ABOVE) const { return (std::max)(groundHeight(x, z, y), waterLevel(x, z, y)); }
@@ -189,7 +193,8 @@ namespace Physics {
 
         // Deja un punto dentro de la zona jugable: la región en la que está o, si no, el archipiélago.
         // y = altura de los pies: quien cae de una isla del cielo (por debajo de su minY) no queda atado a ella y cae libre hasta el mar.
-        void clampToWorld(float& x, float& z, float y = ABOVE, float margin = 2.0f) const {
+        // free: quien ya estaba fuera del archipiélago (cayó de una isla del cielo al mar) se mueve libre por la malla en vez de ser devuelto al borde.
+        void clampToWorld(float& x, float& z, float y = ABOVE, float margin = 2.0f, bool free = false) const {
             for (const Disc& region : regions) {
                 const float dx = x - region.x, dz = z - region.z;
                 const float reach = region.trigger > 0.0f ? region.trigger : region.radius + 40.0f;
@@ -197,7 +202,7 @@ namespace Physics {
                 if (y >= region.minY) { limit(x, z, region, margin); return; }
             }
             const float dx = x - archipelago.x, dz = z - archipelago.z, edge = archipelago.radius - margin;
-            if (y > FREE_FALL_Y && y < ABOVE * 0.5f && dx * dx + dz * dz > edge * edge && !regions.empty()) { // en el aire sobre el mar: solo el límite de la malla
+            if ((free || (y > FREE_FALL_Y && y < ABOVE * 0.5f)) && dx * dx + dz * dz > edge * edge && !regions.empty()) { // en el aire sobre el mar: solo el límite de la malla
                 const float box = HALF_SIZE - margin;
                 x = std::clamp(x, -box, box);
                 z = std::clamp(z, -box, box);
@@ -253,7 +258,14 @@ namespace Physics {
             const float previousLow = body.position.y - body.groundOffset; // altura de los pies al empezar el paso
             const float startX = body.position.x, startZ = body.position.z;
             const bool wasUnder = body.underground;
-            if (!body.onGround && !body.underwater) body.velocity.y -= GRAVITY * body.gravityScale * dt;
+            const bool sunk = body.sinks && !body.underwater && body.position.y < waterLevel(body.position.x, body.position.z, previousLow) && waterDepth(body.position.x, body.position.z, previousLow) > 0.05f;
+            if (!body.onGround && !body.underwater) body.velocity.y -= GRAVITY * body.gravityScale * (sunk ? SINK_GRAVITY : 1.0f) * dt;
+            if (sunk) { // dentro del agua pierde la fuerza enseguida y se hunde despacio
+                const float horizontal = std::exp(-SINK_DRAG * dt), vertical = std::exp(-SINK_DRAG_VERTICAL * dt);
+                body.velocity.x *= horizontal;
+                body.velocity.z *= horizontal;
+                body.velocity.y *= vertical;
+            }
             if (body.rolls && body.onGround && !body.underwater && waterDepth(body.position.x, body.position.z, previousLow) <= 0.05f) { // rueda cuesta abajo
                 float gx, gz;
                 gradient(body.position.x, body.position.z, previousLow, gx, gz);
@@ -273,7 +285,8 @@ namespace Physics {
                 body.position.x += fx * dt;
                 body.position.z += fz * dt;
             }
-            clampToWorld(body.position.x, body.position.z, previousLow);
+            const float fromX = startX - archipelago.x, fromZ = startZ - archipelago.z, outer = archipelago.radius + 1.0f;
+            clampToWorld(body.position.x, body.position.z, previousLow, 2.0f, fromX * fromX + fromZ * fromZ > outer * outer);
             if (body.collisionRadius > 0.0f) pushOutAll(body, previousLow);
             body.underground = under(body.position.x, body.position.z, previousLow);
 
@@ -308,7 +321,7 @@ namespace Physics {
             body.position.y = floorY;
 
             // Sobre el agua no hay bote: el cuerpo se posa y flota.
-            const bool onWater = waterDepth(body.position.x, body.position.z, previousLow) > 0.05f;
+            const bool onWater = !body.sinks && waterDepth(body.position.x, body.position.z, previousLow) > 0.05f;
             if (onWater) {
                 body.velocity.y = 0.0f;
                 const float keep = (std::max)(0.0f, 1.0f - WATER_DRAG * dt);
@@ -383,7 +396,7 @@ namespace Physics {
         float supportHeight(Body& body, float previousLow, float dt) const {
             // Sobre el agua los cuerpos flotan, algo hundidos según su altura.
             float height = groundHeight(body.position.x, body.position.z, previousLow);
-            if (!body.underwater) height = (std::max)(height, waterLevel(body.position.x, body.position.z, previousLow) - body.collisionHeight * SUBMERGED);
+            if (!body.underwater && !body.sinks) height = (std::max)(height, waterLevel(body.position.x, body.position.z, previousLow) - body.collisionHeight * SUBMERGED);
             if (body.collisionRadius <= 0.0f) return height;
 
             forEachSolid(body, [&](const Box& box) {
@@ -449,6 +462,9 @@ namespace Physics {
         static constexpr float ROLL_FACTOR = 0.6f;      // fracción de la gravedad que empuja a lo que rueda por una cuesta
         static constexpr float BOUNCE_MIN_SPEED = 1.5f; // por debajo de esta velocidad de caída ya no bota
         static constexpr float STICK_DISTANCE = 0.9f;  // cuánto puede bajar el suelo de un paso a otro sin que el personaje se despegue
+        static constexpr float SINK_GRAVITY = 0.35f;        // fracción de la gravedad que actúa sobre lo que se hunde (el agua sostiene)
+        static constexpr float SINK_DRAG = 4.5f;            // frenado horizontal por segundo de lo que se hunde
+        static constexpr float SINK_DRAG_VERTICAL = 1.6f;   // frenado vertical (velocidad de hundimiento limitada)
         static constexpr float WATER_DRAG = 3.0f;       // frenado horizontal por segundo de lo que flota
         static constexpr float BOUNCE_FRICTION = 0.8f;  // fracción de velocidad horizontal que se conserva en cada bote
     };

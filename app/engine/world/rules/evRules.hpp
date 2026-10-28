@@ -33,10 +33,13 @@ namespace EvRules {
     }
 
     // Máximos del pokémon inicial: sus 3 mejores estadísticas base (las de su evolución final) al máximo; el resto al azar.
-    inline Evs starterCaps(const BaseStats& finalBase) {
+    // Las de la forma actual también: así es S+ ahora y lo sigue siendo al evolucionar.
+    inline Evs starterCaps(const BaseStats& finalBase, const BaseStats& currentBase) {
         Evs caps = rollCaps();
-        const auto order = byBase(finalBase);
-        for (int i = 0; i < TOP_STATS; ++i) caps[order[i]] = MAX_EV;
+        for (const BaseStats* base : { &finalBase, &currentBase }) {
+            const auto order = byBase(*base);
+            for (int i = 0; i < TOP_STATS; ++i) caps[order[i]] = MAX_EV;
+        }
         return caps;
     }
 

@@ -15,6 +15,7 @@ namespace Physics {
         bool hitsCreatures = false;   // también choca con los pokémon sólidos (el jugador sí; las pokéballs los capturan)
         bool onGround = true;
         bool stickToGround = false; // al bajar una cuesta se queda pegado al suelo en vez de caer (personajes)
+        bool sinks = false;         // se hunde en el agua (pokéballs): la frena mucho, cae despacio hasta el fondo y no flota
         bool rolls = false;         // rueda: en una cuesta gana velocidad cuesta abajo (pokéballs)
         float feet() const { return position.y - groundOffset; } // altura de la parte baja del cuerpo
         bool underground = false;   // dentro de una galería (cueva o mina): la física la fija en cada paso y las consultas usan el suelo de la galería

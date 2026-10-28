@@ -191,7 +191,7 @@ namespace PokedexComponent {
                 std::string how;
                 switch (evolution.method) {
                     case Evolution::Method::LEVEL:     how = "nivel " + std::to_string(evolution.level); break;
-                    case Evolution::Method::STONE:     how = "mineral"; break;
+                    case Evolution::Method::STONE:     how = "piedra"; break;
                     case Evolution::Method::FAINT:     how = "derrotado en combate (nivel " + std::to_string(evolution.level) + ")"; break;
                     case Evolution::Method::WATERFALL: how = "remontando una cascada"; break;
                 }

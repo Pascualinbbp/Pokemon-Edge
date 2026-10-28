@@ -67,6 +67,7 @@ struct GameStatus {
     float springLeft = 0.0f;                     // segundos de curación que quedan en la charca
     float altitude = 0.0f;                       // m sobre el mar
     float health = 1.0f;                         // vida (0..1)
+    float loading = 0.0f;                        // 0..1: pantalla de carga tras desmayarse
     float hurt = 0.0f;                           // 0..1: destello de dolor
     float heal = 0.0f;                           // 0..1: brillo de curación
     float oxygen = 1.0f;                         // aire restante (0..1)

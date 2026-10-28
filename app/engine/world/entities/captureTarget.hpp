@@ -58,6 +58,7 @@ class CaptureTarget {
         m_speciesIndex = m_speciesId = -1;
         m_shiny = false;
         m_hp = 1.0f;
+        m_eatClock = 0.0f;
         m_leaving = false;
         m_leash = LEASH;
         m_surface = false;
@@ -80,6 +81,11 @@ class CaptureTarget {
     bool underwater() const { return body.underwater; }
 
     // Pelea: el salvaje se coloca frente a su rival (se acerca si ataca de cerca; mantiene la distancia 'keep' si ataca de lejos).
+    // Comiendo (tras coger un fruto o una baya): se queda quieto agachando la cabeza.
+    void eat(float seconds) { m_eatClock = m_eatTotal = seconds; m_fightClock = 0.0f; }
+    bool eating() const { return m_eatClock > 0.0f; }
+    float eatPhase() const { return m_eatClock > 0.0f ? 1.0f - m_eatClock / (std::max)(m_eatTotal, 0.01f) : 0.0f; } // 0..1 durante la comida
+    bool foraging() const { return m_fightClock > 0.0f; }
     void fightToward(const DirectX::XMFLOAT3& foe, float keep) { m_foe = { foe.x, foe.z }; m_keep = keep; m_fightClock = FIGHT_HOLD; }
     void stopFight() { m_fightClock = 0.0f; }
     bool fighting() const { return m_fightClock > 0.0f; }
@@ -214,7 +220,10 @@ class CaptureTarget {
         Event event = Event::NONE;
         switch (m_state) {
             case State::IDLE:
-                wander(dt, world);
+                if (m_eatClock > 0.0f) {
+                    m_eatClock -= dt;
+                    body.velocity.x = body.velocity.z = 0.0f;
+                } else wander(dt, world);
                 break;
             case State::CAPTURING:
                 body.velocity.x = body.velocity.z = 0.0f;
@@ -317,6 +326,7 @@ class CaptureTarget {
     DirectX::XMFLOAT2 m_foe = {};   // dónde está su rival (x, z)
     float m_keep = 1.5f;            // distancia a la que pelea
     float m_fightClock = 0.0f;
+    float m_eatClock = 0.0f, m_eatTotal = 1.0f;
     int m_speciesIndex = -1;
     int m_speciesId = -1;
     int m_level = 1;

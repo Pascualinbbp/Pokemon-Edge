@@ -84,8 +84,9 @@ class Companion {
 
     // --- Intento de remontar una cascada (Magikarp) ---
     // Sube desde donde está hasta la cima ('top'); con éxito evoluciona allí (destello) y sin él llega hasta una parte del camino y cae.
-    static constexpr float CLIMB_TIME = 3.2f, EVOLVE_TIME = 2.6f, CLIMB_FAIL_FRACTION = 0.62f;
-    void beginClimb(const DirectX::XMFLOAT3& top, bool success) {
+    static constexpr float CLIMB_TIME = 3.2f, EVOLVE_TIME = 2.6f, FALL_TIME = 1.7f;
+    void beginClimb(const DirectX::XMFLOAT3& top, bool success, float failFraction = 0.6f) {
+        m_failFraction = failFraction; // hasta dónde llega antes de resbalar
         m_trip = Trip::CLIMB;
         m_tripTime = 0.0f;
         m_tripFrom = body.position;
@@ -94,6 +95,14 @@ class Companion {
         m_evolveReady = false;
         body.velocity = { 0.0f, 0.0f, 0.0f };
         body.onGround = false;
+    }
+    // Evoluciona aquí mismo (el jugador remontó una cascada con él): destello sin intento de subida.
+    void beginEvolve() {
+        m_trip = Trip::EVOLVE;
+        m_tripTime = 0.0f;
+        m_evolveReady = false;
+        m_evolved = false;
+        body.velocity = { 0.0f, 0.0f, 0.0f };
     }
     bool tripActive() const { return m_trip != Trip::NONE; }
     // true una vez, en el punto álgido del destello: es cuando cambia de especie.
@@ -157,7 +166,7 @@ class Companion {
 
     private:
     enum class Phase { NONE, RECALL, SEND };
-    enum class Trip { NONE, CLIMB, EVOLVE };
+    enum class Trip { NONE, CLIMB, FALL, EVOLVE };
     struct Next { int speciesId; bool floats; int ballType; bool shiny; };
 
     static DirectX::XMFLOAT3 hand(const DirectX::XMFLOAT3& player) { return { player.x, player.y + HAND_HEIGHT, player.z }; }
@@ -174,15 +183,24 @@ class Companion {
         body.velocity = { 0.0f, 0.0f, 0.0f };
         body.onGround = false;
         if (m_trip == Trip::CLIMB) {
-            const float limit = m_tripSuccess ? 1.0f : CLIMB_FAIL_FRACTION;
+            const float limit = m_tripSuccess ? 1.0f : m_failFraction;
             const float t = (std::min)(m_tripTime / CLIMB_TIME, 1.0f) * limit;
             const float ease = t * t * (3.0f - 2.0f * t);
             body.position = { m_tripFrom.x + (m_tripTo.x - m_tripFrom.x) * ease, m_tripFrom.y + (m_tripTo.y - m_tripFrom.y) * ease + 0.25f * std::sin(m_tripTime * 11.0f) * (1.0f - ease), m_tripFrom.z + (m_tripTo.z - m_tripFrom.z) * ease };
             m_yaw = std::atan2(m_tripTo.x - m_tripFrom.x, m_tripTo.z - m_tripFrom.z);
             if (m_tripTime < CLIMB_TIME) return;
             if (m_tripSuccess) { m_trip = Trip::EVOLVE; m_tripTime = 0.0f; return; }
-            m_trip = Trip::NONE; // sin éxito: se suelta y cae al río (la física hace el resto)
-            body.velocity = { -std::sin(m_yaw) * 1.5f, 0.0f, -std::cos(m_yaw) * 1.5f };
+            m_trip = Trip::FALL; // sin éxito: a medio camino pierde agarre y se despeña por la cascada hasta el río
+            m_tripTime = 0.0f;
+            m_tripFail = body.position;
+            return;
+        }
+        if (m_trip == Trip::FALL) {
+            const float t = (std::min)(m_tripTime / FALL_TIME, 1.0f);
+            const float e = t * t; // cada vez más rápido, como una caída
+            body.position = { m_tripFail.x + (m_tripFrom.x - m_tripFail.x) * e, m_tripFail.y + (m_tripFrom.y - m_tripFail.y) * e, m_tripFail.z + (m_tripFrom.z - m_tripFail.z) * e };
+            m_yaw += dt * 9.0f; // da vueltas al caer
+            if (t >= 1.0f) { m_trip = Trip::NONE; body.velocity = { 0.0f, 0.0f, 0.0f }; }
             return;
         }
         m_yaw += dt * 6.0f;
@@ -241,6 +259,8 @@ class Companion {
     bool m_working = false;
     Phase m_phase = Phase::NONE;
     Trip m_trip = Trip::NONE;
+    float m_failFraction = 0.6f;
+    DirectX::XMFLOAT3 m_tripFail = { 0.0f, 0.0f, 0.0f };
     float m_tripTime = 0.0f;
     DirectX::XMFLOAT3 m_tripFrom = { 0.0f, 0.0f, 0.0f }, m_tripTo = { 0.0f, 0.0f, 0.0f };
     bool m_tripSuccess = false, m_evolveReady = false, m_evolved = false;

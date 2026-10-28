@@ -71,6 +71,8 @@ class Camera {
 
     // Ángulo horizontal hacia el que mira la cámara (0 = hacia +Z).
     float yaw() const { return m_yaw; }
+    float pitch() const { return m_pitch; }
+    float lowestPitch() const { return minPitch(); }
 
     // Hacia dónde mira respecto a "al frente" (rad): positivo hacia abajo, negativo hacia arriba.
     float lookAngle() const { return m_pitch - LEVEL_PITCH; }

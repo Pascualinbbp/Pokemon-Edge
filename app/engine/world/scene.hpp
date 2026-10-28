@@ -12,6 +12,8 @@
 #include "../physics/physicsWorld.hpp"
 #include "../../models/gameData.hpp"
 #include "../../utils/core/randomUtil.hpp"
+#include "../../utils/core/loggerUtil.hpp"
+#include <cstdio>
 #include "camera.hpp"
 #include "entities/companion.hpp"
 #include "spawn/chestField.hpp"
@@ -31,6 +33,8 @@
 #include "habitat/weatherSystem.hpp"
 #include "spawn/wildSpawn.hpp"
 #include "spawn/wildField.hpp"
+#include "entities/fruit.hpp"
+#include "footprints.hpp"
 #include "state/exploration.hpp"
 #include "state/fishing.hpp"
 #include "state/inventory.hpp"
@@ -80,6 +84,8 @@ struct Scene {
     Exploration exploration;  // lo que el jugador ha explorado (el mapa grande lo muestra)
     Fishing fishing;          // pesca: corcho, picada y pokémon enganchado
     SpawnField<GroundItem> groundItems;
+    std::vector<Fruit> fruits; // cocos y plátanos caídos de los árboles (pocos a la vez)
+    Footprints footprints;     // huellas en la arena de todo lo que se mueve
     PokemonStorage storage;   // equipo (6) y PC
     PlayerProgress progress;  // nivel, experiencia y medallas del jugador
     PlayerHealth health;      // vida del jugador (caídas, ahogamiento)
@@ -115,7 +121,9 @@ struct Scene {
     }
 
     // Devuelve true si hay que pausar el juego (ESC fuera del modo lanzamiento).
-    bool update(float dt, const InputState& input) {
+    bool update(float dt, const InputState& rawInput) {
+        const InputState blank;
+        const InputState& input = m_respawn > 0.0f ? blank : rawInput; // mientras carga tras desmayarse no se controla nada
         bool pause = false;
         if (input.escape) {
             if (aimMode) aimMode = false;
@@ -152,6 +160,7 @@ struct Scene {
         camera.update(dt, m_aiming);
         if (lockedTarget) camera.trackToward(player.body.position, lockedTarget->center(), dt);
         else camera.rotate(input.lookX, input.lookY);
+        logSwimCamera(dt, input);
 
         // Los pokémon son sólidos para quien los pisa: el jugador los rodea igual que a las paredes.
         world.creatures.clear();
@@ -183,7 +192,10 @@ struct Scene {
         weather.update(dt);
         throwCooldown = (std::max)(0.0f, throwCooldown - dt);
         noticeTime = (std::max)(0.0f, noticeTime - dt);
-        if (m_aiming && input.throwBall && throwCooldown <= 0.0f && m_throwDelay < 0.0f) startThrow();
+        if (m_aiming && input.throwBall) m_throwQueued = THROW_BUFFER; // el clic se recuerda unos instantes: lanzar no depende de si caminamos, corremos o nadamos
+        m_throwQueued = (std::max)(0.0f, m_throwQueued - dt);
+        if (!m_aiming) m_throwQueued = 0.0f;
+        if (m_throwQueued > 0.0f && throwCooldown <= 0.0f && m_throwDelay < 0.0f) { m_throwQueued = 0.0f; startThrow(); }
         if (m_throwDelay >= 0.0f && (m_throwDelay -= dt) < 0.0f) throwBall();
 
         for (CaptureTarget* target : wild.loaded()) {
@@ -208,7 +220,10 @@ struct Scene {
         groundItems.update(dt, GroundSpawn::DELAY,
             [&](GroundItem& item) { world.step(item.body, dt); item.update(dt); },
             [&](int spot) { return GroundSpawn::make(*m_data, spot); });
+        updateFruits(dt);
         updateCompanion(dt);
+        updateForage(dt);
+        updateFootprints(dt);
         updateStrikes(dt);
         updateWeakTimer(dt);
         updateInteraction();
@@ -252,25 +267,56 @@ struct Scene {
         owned.ballId = ball ? ball->id : -1;
         owned.analyzed = true;
         owned.shiny = RandomUtil::roll(PokemonRules::STARTER_SHINY_CHANCE);
-        owned.evCaps = EvRules::starterCaps(m_data->finalForm(*species)->stats);
+        owned.evCaps = EvRules::starterCaps(m_data->finalForm(*species)->stats, species->stats);
         bool sentToPc = false;
         storage.add(owned, sentToPc);
     }
 
     DirectX::XMMATRIX getViewMatrix() const {
         const DirectX::XMFLOAT3 at = camera.focus(player.body.position), full = camera.eye(player.body.position);
-        const float pull = (std::max)(world.clearFraction(at, full, 0.5f), Camera::MIN_PULL); // una pared (galerías) acerca la cámara
-        const DirectX::XMFLOAT3 eye = { at.x + (full.x - at.x) * pull, at.y + (full.y - at.y) * pull, at.z + (full.z - at.z) * pull };
         const float feet = player.body.feet();
-        const float floor = player.swimming() ? world.groundHeight(eye.x, eye.z, feet) : world.surfaceHeight(eye.x, eye.z, feet);
+        const bool inWater = m_swimLatch > 0.0f;
+        float pull = (std::max)(world.clearFraction(at, full, 0.5f), Camera::MIN_PULL); // una pared (galerías) acerca la cámara
+        if (inWater) pull = (std::min)(pull, swimPull(at, full, feet)); // en el agua el fondo acerca la cámara, nunca la obliga a mirar en otra dirección
+        const DirectX::XMFLOAT3 eye = { at.x + (full.x - at.x) * pull, at.y + (full.y - at.y) * pull, at.z + (full.z - at.z) * pull };
         const float ceiling = world.under(eye.x, eye.z, feet) ? world.ceiling(eye.x, eye.z) - 0.3f : Physics::World::ABOVE;
-        const float minEye = player.swimming() ? (std::min)(floor + 0.35f, at.y - 0.15f) : floor + 0.35f; // nadando el suelo nunca fuerza la cámara por encima de lo que mira: girar sigue libre
+        const float minEye = inWater ? -1.0e9f : world.surfaceHeight(eye.x, eye.z, feet) + 0.35f;
+        m_viewPull = pull;
+        m_viewEyeY = eye.y;
         return camera.viewMatrix(player.body.position, minEye, ceiling, pull); // la cámara no se hunde en el terreno (bajo el agua sí se sumerge)
+    }
+
+    // Fracción (0..1) del trayecto del punto de mira a la cámara que queda libre de fondo marino.
+    float swimPull(const DirectX::XMFLOAT3& at, const DirectX::XMFLOAT3& full, float feet) const {
+        constexpr int STEPS = 24;
+        float last = 1.0f;
+        for (int i = 1; i <= STEPS; ++i) {
+            const float t = static_cast<float>(i) / STEPS;
+            const float x = at.x + (full.x - at.x) * t, y = at.y + (full.y - at.y) * t, z = at.z + (full.z - at.z) * t;
+            if (y < world.groundHeight(x, z, feet) + 0.25f) { last = static_cast<float>(i - 1) / STEPS; break; }
+        }
+        return (std::max)(last, Camera::MIN_PULL);
+    }
+
+    // Traza de la cámara en el agua: una línea cada medio segundo (y siempre que se mueva el ratón) en el log.
+    void logSwimCamera(float dt, const InputState& input) {
+        if (m_swimLatch <= 0.0f) { m_swimLogTime = 0.0f; return; }
+        m_swimLogTime += dt;
+        const bool looking = std::fabs(input.lookX) + std::fabs(input.lookY) > 0.0f;
+        if (m_swimLogTime < 0.5f && !(looking && m_swimLogTime > 0.1f)) return;
+        m_swimLogTime = 0.0f;
+        char text[512];
+        std::snprintf(text, sizeof(text),
+            "swim=%d dive=%d latch=%.2f lock=%d aim=%d look=(%.1f,%.1f) yaw=%.3f pitch=%.3f minPitch=%.3f pull=%.2f eyeY=%.2f feetY=%.2f move=(%.1f,%.1f) vy=%.2f",
+            player.swimming(), player.diving(), m_swimLatch, lockedTarget != nullptr, m_aiming, input.lookX, input.lookY,
+            camera.yaw(), camera.pitch(), camera.lowestPitch(), m_viewPull, m_viewEyeY, player.body.feet(), input.moveX, input.moveY, player.body.velocity.y);
+        Logger::logInfo("CAMERA_WATER", text);
     }
 
     GameStatus status() const {
         GameStatus s;
         s.aimBlend = camera.aimBlend();
+        s.loading = loadingFade();
         s.playerLevel = progress.level();
         s.playerXp = progress.xpFraction();
         s.levelCap = progress.levelCap();
@@ -329,6 +375,9 @@ struct Scene {
             if (const GroundItemType* reward = item.reward() >= 0 ? &m_data->groundItems[item.reward()] : nullptr) {
                 if (const Item* found = m_data->item(reward->itemId)) s.interactTarget = &m_data->itemName(*found);
             }
+        } else if (m_interaction.kind == Interaction::FRUIT) {
+            s.interactVerb = PICK_VERB;
+            s.interactTarget = &fruitName(fruits[m_interaction.index].kind());
         } else if (m_interaction.kind == Interaction::PROFESSOR) {
             s.interactVerb = TALK_VERB;
             s.interactTarget = &PROFESSOR_NAME;
@@ -476,6 +525,7 @@ struct Scene {
             case Interaction::CHEST:   return above(chests.entities[m_interaction.index].body, Chest::HEIGHT + 0.5f);
             case Interaction::NODE:    return nodeAnchor(nodes[m_interaction.index]);
             case Interaction::GROUND:  return above(groundItems.entities[m_interaction.index].body, 0.9f);
+            case Interaction::FRUIT:   return above(fruits[m_interaction.index].body, 0.7f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
             case Interaction::PROFESSOR: return above(oak.body, Professor::HEIGHT + 0.5f);
             case Interaction::WEAKENED: return m_weak ? DirectX::XMFLOAT3{ m_weak->body.position.x, m_weak->body.position.y + CaptureTarget::SIZE + 0.9f, m_weak->body.position.z } : DirectX::XMFLOAT3{};
@@ -501,11 +551,25 @@ struct Scene {
         if (player.drowning()) health.hurt(HealthRules::DROWN_PER_SECOND * dt);
         updateBurn(dt);
         updateSpring(dt);
-        if (!health.dead()) return;
-        player.body.position = m_home;
-        player.body.velocity = { 0.0f, 0.0f, 0.0f };
-        health.restore();
-        showNotice(Notice::FAINTED);
+        if (m_respawn <= 0.0f && health.dead()) { // desmayado: pantalla de carga y, ya a oscuras, vuelta al inicio
+            m_respawn = RESPAWN_TIME;
+            m_respawnMoved = false;
+            showNotice(Notice::FAINTED);
+        }
+        if (m_respawn <= 0.0f) return;
+        m_respawn = (std::max)(0.0f, m_respawn - dt);
+        if (!m_respawnMoved && m_respawn <= RESPAWN_TIME * 0.5f) {
+            m_respawnMoved = true;
+            player.body.position = m_home;
+            player.body.velocity = { 0.0f, 0.0f, 0.0f };
+            health.restore();
+        }
+    }
+
+    // 0 = sin pantalla de carga; 1 = pantalla completa (se funde a negro, espera y vuelve).
+    float loadingFade() const {
+        if (m_respawn <= 0.0f) return 0.0f;
+        return (std::min)((RESPAWN_TIME - m_respawn) / 0.7f, 1.0f) * (std::min)(m_respawn / 0.9f, 1.0f);
     }
 
     // Lava: daño y quemadura. La quemadura se apaga con agua o deslizándose por el suelo.
@@ -706,6 +770,18 @@ struct Scene {
         if (companion.tripActive()) return nullptr;
         bool climbs = false;
         if (species) for (const Evolution& e : species->evolutions) climbs = climbs || e.method == Evolution::Method::WATERFALL;
+        {   // el jugador remonta una cascada nadando con él al lado: tras unos segundos evoluciona
+            float px = 0.0f, pz = 0.0f;
+            const DirectX::XMFLOAT3& p = player.body.position;
+            const float cx = companion.body.position.x - p.x, cz = companion.body.position.z - p.z;
+            const bool together = cx * cx + cz * cz <= CASCADE_TOGETHER * CASCADE_TOGETHER;
+            if (climbs && !companionDown() && !companion.changing() && together && (player.swimming() || player.diving()) && habitats.nearestCascade(p.x, p.z, CASCADE_PLAYER_RANGE, px, pz)) {
+                m_cascadeTime += dt;
+                if (m_cascadeTime >= CASCADE_TIME) { m_cascadeTime = 0.0f; companion.beginEvolve(); return nullptr; }
+            } else {
+                m_cascadeTime = (std::max)(0.0f, m_cascadeTime - dt);
+            }
+        }
         float fx = 0.0f, fz = 0.0f;
         if (!climbs || companionDown() || m_engaged || m_cascadeRest > 0.0f || companion.changing() ||
             !habitats.nearestCascade(companion.body.position.x, companion.body.position.z, CASCADE_SEEK, fx, fz)) return nullptr;
@@ -715,7 +791,7 @@ struct Scene {
         float tx = fx, ty = 0.0f, tz = fz;
         if (!habitats.cascadeTop(fx, fz, CASCADE_TOP_REACH, tx, ty, tz)) { m_cascadeRest = CASCADE_REST_MIN; return nullptr; }
         m_cascadeRest = RandomUtil::range(CASCADE_REST_MIN, CASCADE_REST_MAX);
-        companion.beginClimb({ tx, ty + 0.1f, tz }, RandomUtil::range(0.0f, 1.0f) < CASCADE_SUCCESS);
+        companion.beginClimb({ tx, ty + 0.1f, tz }, RandomUtil::range(0.0f, 1.0f) < CASCADE_SUCCESS, RandomUtil::range(0.35f, 0.75f));
         return nullptr;
     }
 
@@ -738,6 +814,7 @@ struct Scene {
         // del jugador) y, al llegar, lo trabaja. Sin nada que hacer vuelve a seguir al jugador.
         ResourceNode* nodeTarget = nullptr;
         GroundItem* groundTarget = nullptr;
+        Fruit* fruitTarget = nullptr;
         int level = 1;
         float best = 1.0e9f;
         const auto distance2 = [&](const DirectX::XMFLOAT3& at) {
@@ -772,6 +849,18 @@ struct Scene {
                 if (d2 < best) {
                     best = d2;
                     groundTarget = &item;
+                    fruitTarget = nullptr;
+                    nodeTarget = nullptr;
+                    level = 1;
+                }
+            }
+            for (Fruit& fruit : fruits) { // también recoge los frutos caídos (el jugador tiene prioridad: si los coge antes, ya no están)
+                if (!fruit.available() || !fruit.body.onGround || !inRange(fruit.body.position)) continue;
+                const float d2 = distance2(fruit.body.position);
+                if (d2 < best) {
+                    best = d2;
+                    fruitTarget = &fruit;
+                    groundTarget = nullptr;
                     nodeTarget = nullptr;
                     level = 1;
                 }
@@ -791,8 +880,8 @@ struct Scene {
             m_engaged = fightTarget;
         }
         if (fightTarget) best = distance2(fightTarget->body.position);
-        const DirectX::XMFLOAT3* fallGoal = (!nodeTarget && !groundTarget && !fightTarget) ? updateWaterfall(dt, species) : nullptr;
-        const DirectX::XMFLOAT3* goal = nodeTarget ? &nodeTarget->body.position : groundTarget ? &groundTarget->body.position :
+        const DirectX::XMFLOAT3* fallGoal = (!nodeTarget && !groundTarget && !fruitTarget && !fightTarget) ? updateWaterfall(dt, species) : nullptr;
+        const DirectX::XMFLOAT3* goal = nodeTarget ? &nodeTarget->body.position : groundTarget ? &groundTarget->body.position : fruitTarget ? &fruitTarget->body.position :
                                         fightTarget ? &fightTarget->body.position : fallGoal;
         const bool ranged = species && DamageRules::styleOf(*species) == DamageRules::Style::RANGED;
         const float fightReach = ranged ? CompanionRules::RANGED_RANGE : CompanionRules::ATTACK_RANGE;
@@ -808,6 +897,7 @@ struct Scene {
         if (!companion.update(dt, world, player.body.position, camera.yaw(), power, goal, approach)) return;
         if (nodeTarget) workNode(*nodeTarget, false);
         else if (groundTarget) collect(*groundTarget);
+        else if (fruitTarget) collectFruit(*fruitTarget);
         else if (fightTarget) {
             if (m_duelTurn == DuelTurn::COMPANION) { // combate por turnos: pega uno y luego el otro, así ninguno se pasa la pelea huyendo del otro
                 strike(*fightTarget);
@@ -989,6 +1079,7 @@ struct Scene {
         m_weak = m_weakExpired ? nullptr : weakenedTarget();
         if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
         if (const int i = nearestIn(groundItems.entities, [](const GroundItem& g) { return g.available(); }, best); i >= 0) m_interaction = { Interaction::GROUND, i };
+        if (const int i = nearestIn(fruits, [](const Fruit& f) { return f.available(); }, best); i >= 0) m_interaction = { Interaction::FRUIT, i };
         const float mx = machine.body.position.x - player.body.position.x, mz = machine.body.position.z - player.body.position.z;
         if (const float d2 = mx * mx + mz * mz; d2 <= machine.reach() * machine.reach() && d2 < best) {
             best = d2;
@@ -1041,6 +1132,9 @@ struct Scene {
         } else if (m_interaction.kind == Interaction::GROUND) {
             player.act(PlayerAction::PICK);
             collect(groundItems.entities[m_interaction.index]);
+        } else if (m_interaction.kind == Interaction::FRUIT) {
+            player.act(PlayerAction::PICK);
+            collectFruit(fruits[m_interaction.index]);
         } else if (m_interaction.kind == Interaction::MACHINE) researchRequested = true;
         else if (m_interaction.kind == Interaction::PROFESSOR) {
             if (needsStarter()) starterRequested = true;
@@ -1078,6 +1172,161 @@ struct Scene {
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
         if (const Item* item = m_data->materialItem(type.materialId)) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
         gainXp(Xp::GATHER);
+    }
+
+    // --- Frutos: cocos de palmera y plátanos del árbol de jungla ---
+    static constexpr int   MAX_FRUITS = 10;          // como mucho en el suelo a la vez
+    static constexpr float FRUIT_DROP_MIN = 7.0f, FRUIT_DROP_MAX = 16.0f; // segundos entre caídas
+    static constexpr float FRUIT_RANGE = 55.0f;      // solo caen en árboles cercanos al jugador
+    static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13;
+
+    inline static const std::string COCONUT_NAME = "Coco", BANANA_NAME = "Plátano";
+    static const std::string& fruitName(Fruit::Kind kind) { return kind == Fruit::Kind::COCONUT ? COCONUT_NAME : BANANA_NAME; }
+
+    const Item* fruitItem(Fruit::Kind kind) const {
+        for (const Material& material : m_data->materials) {
+            if (material.name == fruitName(kind)) return m_data->materialItem(material.id);
+        }
+        return nullptr;
+    }
+
+    // El jugador o su pokémon cogen un fruto: va al inventario.
+    void collectFruit(Fruit& fruit) {
+        if (!fruit.available()) return;
+        if (const Item* item = fruitItem(fruit.kind())) giveReward(item->id, 1);
+        gainXp(Xp::PICK_UP);
+        fruit.take();
+    }
+
+    // De vez en cuando cae un fruto de un árbol maduro cercano (si no hay ya demasiados en el suelo) y rueda con su inercia.
+    void updateFruits(float dt) {
+        for (Fruit& fruit : fruits) { world.step(fruit.body, dt); fruit.update(dt); }
+        fruits.erase(std::remove_if(fruits.begin(), fruits.end(), [](const Fruit& f) { return f.finished(); }), fruits.end());
+        if ((m_fruitTimer -= dt) > 0.0f) return;
+        m_fruitTimer = RandomUtil::range(FRUIT_DROP_MIN, FRUIT_DROP_MAX);
+        if (static_cast<int>(fruits.size()) >= MAX_FRUITS || player.body.underground) return;
+        std::vector<const ResourceNode*> trees;
+        for (const ResourceNode& node : nodes) {
+            if ((node.typeId() != PALM_TYPE && node.typeId() != JUNGLE_TYPE) || node.growing() || node.body.underground) continue;
+            const float dx = node.body.position.x - player.body.position.x, dz = node.body.position.z - player.body.position.z;
+            if (dx * dx + dz * dz <= FRUIT_RANGE * FRUIT_RANGE) trees.push_back(&node);
+        }
+        if (trees.empty()) return;
+        const ResourceNode& tree = *trees[static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(trees.size()) - 1))];
+        float half, height;
+        ResourceStyle::hitbox(ResourceStyle::look(tree.typeId()), tree.growth(), half, height);
+        const float angle = RandomUtil::range(0.0f, 6.2831853f), out = RandomUtil::range(0.8f, 1.8f);
+        const DirectX::XMFLOAT3& at = tree.body.position;
+        const Fruit::Kind kind = tree.typeId() == PALM_TYPE ? Fruit::Kind::COCONUT : Fruit::Kind::BANANA;
+        fruits.emplace_back(kind, ++m_fruitId, DirectX::XMFLOAT3{ at.x + std::sin(angle) * 0.5f, at.y + height * 0.9f, at.z + std::cos(angle) * 0.5f },
+                            std::sin(angle) * out, std::cos(angle) * out);
+    }
+
+    // Los salvajes cercanos se acercan a comer un fruto caído o una baya madura de un arbusto y se quedan comiendo un momento.
+    // El jugador tiene prioridad: si se acerca al objetivo, el pokémon lo deja.
+    struct Forager { CaptureTarget* wild; int fruitId; int node; float time; };
+
+    void updateForage(float dt) {
+        constexpr float EAT_REACH = 0.9f, SEARCH = 14.0f, PLAYER_PRIORITY = 2.4f, GIVE_UP = 12.0f, EAT_TIME = 2.4f;
+        // Los que ya van a por algo.
+        for (size_t i = 0; i < m_foragers.size();) {
+            Forager& f = m_foragers[i];
+            bool keep = f.wild->shown() && f.wild->hittable() && f.wild != m_engaged && !f.wild->eating() && (f.time += dt) < GIVE_UP;
+            DirectX::XMFLOAT3 goal{};
+            Fruit* fruit = nullptr;
+            ResourceNode* bush = nullptr;
+            if (keep) {
+                if (f.fruitId >= 0) {
+                    for (Fruit& candidate : fruits) if (candidate.id() == f.fruitId && candidate.available()) fruit = &candidate;
+                    keep = fruit != nullptr;
+                    if (fruit) goal = fruit->body.position;
+                } else {
+                    bush = &nodes[f.node];
+                    keep = bush->workable() && !bush->growing();
+                    goal = bush->body.position;
+                }
+            }
+            if (keep && nearPlayer(goal, PLAYER_PRIORITY)) keep = false;
+            if (!keep) { if (f.wild->foraging() && !f.wild->eating()) f.wild->stopFight(); m_foragers.erase(m_foragers.begin() + static_cast<long>(i)); continue; }
+            const float dx = goal.x - f.wild->body.position.x, dz = goal.z - f.wild->body.position.z;
+            const float reach = EAT_REACH + (bush ? ResourceStyle::look(bush->typeId()).half : 0.0f);
+            if (dx * dx + dz * dz <= reach * reach) {
+                if (fruit) fruit->take();
+                else { bush->work(false, 1.0f); bush->takeHarvest(); }
+                f.wild->eat(EAT_TIME);
+                m_foragers.erase(m_foragers.begin() + static_cast<long>(i));
+                continue;
+            }
+            f.wild->fightToward(goal, 0.2f);
+            ++i;
+        }
+        // Nuevos: cada cierto tiempo, algunos salvajes deciden ir a por algo.
+        if ((m_forageTimer -= dt) > 0.0f) return;
+        m_forageTimer = 1.5f;
+        if (player.body.underground) return;
+        const auto claimedFruit = [&](int id) { for (const Forager& f : m_foragers) if (f.fruitId == id) return true; return false; };
+        const auto claimedNode = [&](int index) { for (const Forager& f : m_foragers) if (f.fruitId < 0 && f.node == index) return true; return false; };
+        for (CaptureTarget* wild : this->wild.loaded()) {
+            if (!wild->shown() || !wild->hittable() || wild == m_engaged || wild->eating() || wild->foraging() || wild->body.underground) continue;
+            if (!RandomUtil::roll(14.0f)) continue;
+            const float px = wild->body.position.x, pz = wild->body.position.z;
+            float best = SEARCH * SEARCH;
+            int fruitId = -1, node = -1;
+            for (const Fruit& fruit : fruits) {
+                if (!fruit.available() || !fruit.body.onGround || claimedFruit(fruit.id()) || nearPlayer(fruit.body.position, PLAYER_PRIORITY)) continue;
+                const float dx = fruit.body.position.x - px, dz = fruit.body.position.z - pz, d2 = dx * dx + dz * dz;
+                if (d2 < best) { best = d2; fruitId = fruit.id(); node = -1; }
+            }
+            if (fruitId < 0) {
+                for (size_t n = 0; n < nodes.size(); ++n) {
+                    const ResourceNode& bush = nodes[n];
+                    if (ResourceStyle::look(bush.typeId()).shape != ResourceStyle::Shape::BUSH || bush.growing() || !bush.workable() || bush.body.underground) continue;
+                    if (claimedNode(static_cast<int>(n)) || nearPlayer(bush.body.position, PLAYER_PRIORITY)) continue;
+                    const float dx = bush.body.position.x - px, dz = bush.body.position.z - pz, d2 = dx * dx + dz * dz;
+                    if (d2 < best) { best = d2; node = static_cast<int>(n); }
+                }
+            }
+            if (fruitId >= 0 || node >= 0) m_foragers.push_back({ wild, fruitId, node, 0.0f });
+        }
+    }
+
+    // Huellas: botas del jugador, la forma de cada especie para su acompañante y los salvajes, y una marca redonda en lo que rueda.
+    bool sandAt(float x, float z) {
+        if (m_sandHabitats.empty()) {
+            m_sandHabitats.assign(m_data->habitats.size(), 0);
+            for (size_t i = 0; i < m_data->habitats.size(); ++i) m_sandHabitats[i] = (m_data->habitats[i].name == "Playa" || m_data->habitats[i].name == "Desierto") ? 1 : 0;
+        }
+        if (world.waterDepth(x, z) > 0.05f) return false;
+        const int h = habitats.dominant(x, z);
+        return h >= 0 && h < static_cast<int>(m_sandHabitats.size()) && m_sandHabitats[h];
+    }
+
+    void updateFootprints(float dt) {
+        const auto sand = [&](float x, float z) { return sandAt(x, z); };
+        if (!player.body.underground) {
+            const DirectX::XMFLOAT3& p = player.body.position;
+            footprints.step(&player, p.x, p.y + 0.01f, p.z, player.facing(), 1.0f, Footprints::Shape::BOOT, player.body.onGround && !player.body.underwater, sand);
+            if (companion.active() && !companion.body.underground) {
+                const DirectX::XMFLOAT3& c = companion.body.position;
+                footprints.step(&companion, c.x, c.y + 0.01f, c.z, companion.yaw(), Companion::SIZE, Footprints::shapeOf(companion.speciesId()), companion.body.onGround && !companion.changing(), sand);
+            }
+            for (const CaptureTarget* creature : wild.loaded()) {
+                if (!creature->shown() || creature->body.underground || creature->body.underwater) continue;
+                const DirectX::XMFLOAT3& c = creature->body.position;
+                const float dx = c.x - p.x, dz = c.z - p.z;
+                if (dx * dx + dz * dz > 70.0f * 70.0f) continue; // solo las cercanas se dibujan: no vale la pena marcar las lejanas
+                footprints.step(creature, c.x, c.y + 0.01f, c.z, creature->yaw(), CaptureTarget::SIZE, Footprints::shapeOf(creature->speciesId()), creature->body.onGround, sand);
+            }
+            for (const Fruit& fruit : fruits) {
+                if (std::hypot(fruit.body.velocity.x, fruit.body.velocity.z) < 0.4f) continue; // solo deja marca mientras rueda
+                footprints.step(&fruit, fruit.body.position.x, fruit.body.position.y - Fruit::RADIUS + 0.01f, fruit.body.position.z, 0.0f, 0.2f, Footprints::Shape::ROUND, fruit.body.onGround, sand);
+            }
+            for (const Pokeball& ball : balls) {
+                if (std::hypot(ball.body.velocity.x, ball.body.velocity.z) < 0.4f) continue;
+                footprints.step(&ball, ball.body.position.x, ball.body.position.y - ball.body.groundOffset + 0.01f, ball.body.position.z, 0.0f, 0.2f, Footprints::Shape::ROUND, ball.body.onGround, sand);
+            }
+        }
+        footprints.update(dt);
     }
 
     // Recoge un objeto suelto del mundo.
@@ -1199,9 +1448,10 @@ struct Scene {
 
     // Distancia a la que el rayo toca el relieve o la superficie del agua (maxDistance si no toca nada).
     float rayToSurface(const DirectX::XMFLOAT3& eye, const DirectX::XMFLOAT3& dir, float maxDistance) const {
+        const bool submerged = eye.y < world.waterLevel(eye.x, eye.z, eye.y) && world.waterDepth(eye.x, eye.z, eye.y) > 0.3f; // buceando se apunta al fondo, no a la superficie
         const auto below = [&](float t) {
             const float x = eye.x + dir.x * t, y = eye.y + dir.y * t, z = eye.z + dir.z * t;
-            return y <= world.surfaceHeight(x, z, y) || world.solid(x, y, z);
+            return y <= (submerged ? world.groundHeight(x, z, y) : world.surfaceHeight(x, z, y)) || world.solid(x, y, z);
         };
         float previous = 0.0f;
         for (float t = AIM_STEP; t <= maxDistance; t += AIM_STEP) {
@@ -1317,7 +1567,7 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PROFESSOR, WEAKENED } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PROFESSOR, WEAKENED, FRUIT } kind = NONE;
         int index = -1;
     };
 
@@ -1343,7 +1593,12 @@ struct Scene {
     float m_flowerTimer = 0.0f;
     std::vector<float> m_flowerWeights;
     float m_clock = 0.0f;       // segundos de partida (marea)
+    static constexpr float RESPAWN_TIME = 3.4f; // duración de la pantalla de carga tras desmayarse (s)
+    float m_respawn = 0.0f;
+    bool m_respawnMoved = false;
     float m_swimLatch = 0.0f;
+    float m_swimLogTime = 0.0f;
+    mutable float m_viewPull = 1.0f, m_viewEyeY = 0.0f;
     float m_cascadeTime = 0.0f; // segundos que lleva el jugador en una cascada con un pokémon que la remonta
     static constexpr float CASCADE_RANGE = 5.0f;     // a esta distancia de la cascada está en ella
     static constexpr float CASCADE_SEEK = 30.0f;     // si pasan por una a menos de esto, va a intentar subirla
@@ -1352,7 +1607,11 @@ struct Scene {
     static constexpr float CASCADE_TOP_REACH = 16.0f; // hasta dónde busca la cima de la cascada
     DirectX::XMFLOAT3 m_cascadeGoal = { 0.0f, 0.0f, 0.0f };
     float m_cascadeRest = 0.0f;
-    static constexpr float CASCADE_TIME = 3.0f;
+    static constexpr float CASCADE_TIME = 3.0f;          // segundos que el jugador pasa en la cascada con el pokémon al lado para que evolucione
+    static constexpr float CASCADE_PLAYER_RANGE = 3.5f; // a esta distancia de una cascada el jugador está en ella
+    static constexpr float CASCADE_TOGETHER = 9.0f;     // el pokémon debe estar así de cerca del jugador
+    static constexpr float THROW_BUFFER = 0.35f;      // segundos que se recuerda un clic de lanzar que no pudo salir al instante
+    float m_throwQueued = 0.0f;
     float m_throwDelay = -1.0f; // >= 0: lanzando (la bola sale al llegar a 0)
     int m_fishSkill = -1;       // habilidad de pesca (la de la animación FISH)
     bool m_castHint = false;    // se puede lanzar la caña aquí
@@ -1387,6 +1646,11 @@ struct Scene {
     const CaptureTarget* m_weakSeen = nullptr;
     float m_weakAge = 0.0f;
     bool m_weakExpired = false;
+    float m_fruitTimer = 6.0f;
+    int m_fruitId = 0;
+    float m_forageTimer = 2.0f;
+    std::vector<Forager> m_foragers;
+    std::vector<char> m_sandHabitats;
     const CaptureTarget* m_weak = nullptr; // salvaje debilitado por el acompañante que se puede capturar ahora (Interaction::WEAKENED)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
     float m_lockHidden = 0.0f; // segundos que lleva tapado el pokémon fijado
