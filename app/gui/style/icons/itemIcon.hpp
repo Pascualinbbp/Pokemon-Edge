@@ -71,6 +71,12 @@ namespace ItemIcon {
     // Caramelo (sube de nivel) o vitamina (sube EVs).
     inline void training(ImDrawList* dl, const ImVec2& c, float r, TrainingItem::Effect effect, float alpha = 1.0f, int amount = 0) {
         const int a = static_cast<int>(255.0f * alpha);
+        if (effect == TrainingItem::Effect::HEAL) { // sprite del modelo de la poción (assets/hud/item/potions/potion.png)
+            if (const ImTextureID sprite = HudIcons::sprite("potions/potion")) {
+                dl->AddImage(sprite, ImVec2(c.x - r * 1.1f, c.y - r * 1.1f), ImVec2(c.x + r * 1.1f, c.y + r * 1.1f), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, a));
+                return;
+            }
+        }
         if (effect == TrainingItem::Effect::HEAL || effect == TrainingItem::Effect::REVIVE) { // frasco de poción (revivir: cristal con una chispa dorada)
             const bool revive = effect == TrainingItem::Effect::REVIVE;
             const ImU32 liquid = revive ? IM_COL32(255, 215, 80, a) : amount <= 20 ? IM_COL32(200, 110, 230, a) : amount <= 60 ? IM_COL32(240, 110, 120, a) : amount <= 120 ? IM_COL32(250, 170, 60, a) : IM_COL32(80, 200, 140, a);
