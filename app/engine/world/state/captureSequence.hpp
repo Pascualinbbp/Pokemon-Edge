@@ -8,6 +8,7 @@
 #include "../../physics/physicsWorld.hpp"
 #include "../rules/captureRules.hpp"
 #include "../entities/pokeball.hpp"
+#include "../../audio/sounds.hpp"
 
 // Todos los tiempos y distancias de la animación de captura (nada de esto está repartido por el código).
 struct CaptureAnimConfig {
@@ -95,6 +96,8 @@ class CaptureSequence {
         m_ball.body.velocity = { m_drift.x, rise, m_drift.y };
         m_ball.body.onGround = false;
         m_machine.reset(Phase::REBOUND);
+        m_lastWobble = -1;
+        Sound::emit(Sound::Sfx::BALL_HIT, m_ball.body.position); // la bola golpea al pokémon
     }
 
     // La cámara puede girar durante la animación: la bola acaba mirándola.
@@ -305,6 +308,10 @@ class CaptureSequence {
             case Phase::CLOSE:   if (m_machine.elapsed(c.closeTime)) m_machine.enter(Phase::SETTLE); break;
             case Phase::SETTLE:  if (m_ball.body.onGround || m_machine.elapsed(c.settleTimeout)) m_machine.enter(Phase::WOBBLE); break;
             case Phase::WOBBLE:
+                if (const int shake = wobbleIndex(); shake > m_lastWobble) { // suena cada balanceo
+                    m_lastWobble = shake;
+                    Sound::emit(Sound::Sfx::BALL_WOBBLE, m_ball.body.position);
+                }
                 if (m_machine.elapsed(wobbleDuration())) {
                     m_machine.enter(m_result.captured ? Phase::CLICK : Phase::BREAK);
                     reveal = true;
@@ -317,8 +324,21 @@ class CaptureSequence {
     }
 
     // Lo que ocurre al entrar en una fase: impulsos, destellos y ráfagas de partículas.
+    // Sonido de entrar en cada fase (los balanceos suenan aparte, uno a uno).
+    static bool phaseSound(Phase phase, Sound::Sfx& sfx) {
+        switch (phase) {
+            case Phase::ABSORB: sfx = Sound::Sfx::BALL_OPEN; return true;
+            case Phase::CLOSE:  sfx = Sound::Sfx::BALL_CLOSE; return true;
+            case Phase::WOBBLE: sfx = Sound::Sfx::BALL_LAND; return true;
+            case Phase::CLICK:  sfx = Sound::Sfx::CAPTURE_CLICK; return true;
+            case Phase::BREAK:  sfx = Sound::Sfx::CAPTURE_BREAK; return true;
+            default: return false;
+        }
+    }
+
     void onEnter(Phase to) {
         const CaptureAnimConfig& c = kCaptureAnim;
+        if (Sound::Sfx sfx; phaseSound(to, sfx)) Sound::emit(sfx, m_ball.body.position);
         switch (to) {
             case Phase::OPEN:
                 m_hoverY = m_ball.body.position.y;
@@ -434,6 +454,15 @@ class CaptureSequence {
         return c.wobbleTilt * std::sin(6.2831853f * local / c.wobbleTime);
     }
 
+    // Número del balanceo en curso (0, 1, 2...) o -1 si aún no empieza el primero.
+    int wobbleIndex() const {
+        const CaptureAnimConfig& c = kCaptureAnim;
+        const float t = m_machine.time() - c.leadPause;
+        if (t < 0.0f) return -1;
+        const int index = static_cast<int>(t / (c.wobbleTime + c.wobblePause));
+        return index < m_result.wobbles ? index : -1;
+    }
+
     float wobbleDuration() const {
         const CaptureAnimConfig& c = kCaptureAnim;
         return c.leadPause + static_cast<float>(m_result.wobbles) * (c.wobbleTime + c.wobblePause);
@@ -455,6 +484,7 @@ class CaptureSequence {
     float m_reboundTime = 0.5f, m_hoverY = 0.0f;
     float m_yaw = 0.0f, m_startYaw = 0.0f, m_spin = 0.0f, m_startSpin = 0.0f;
     float m_twist = 0.0f, m_startTwist = 0.0f, m_endTwist = 0.0f;
+    int m_lastWobble = -1;
     DirectX::XMFLOAT3 m_flashPosition = {}, m_flashColor = { 1.0f, 1.0f, 1.0f };
     float m_flashRadius = 0.5f, m_flashTime = 0.0f, m_flashDuration = 0.0f;
 };

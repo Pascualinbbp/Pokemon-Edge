@@ -28,6 +28,7 @@ struct InputState {
     bool inventory = false;   // I / Select (View en Xbox): abrir el inventario
     bool map = false;         // M / cruceta arriba: abrir el mapa
     bool pokedex = false;     // P / cruceta derecha: abrir la Pokédex
+    bool radio = false;       // T / cruceta abajo: abrir el menú rápido de la radio (con él abierto, Q / E / rueda cambian de emisora)
     bool modeSwitch = false;  // R / triángulo (Y en Xbox): cambiar el modo del pokémon que acompaña
     bool interact = false;    // F / cuadrado (X en Xbox): abrir un cofre cercano
     bool release = false;     // G / ○ (B en Xbox): liberar (al pescar o capturar un pokémon se elige entre capturar y liberar)

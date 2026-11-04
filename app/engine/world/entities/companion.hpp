@@ -4,6 +4,7 @@
 #include <DirectXMath.h>
 #include "../../physics/physicsWorld.hpp"
 #include "ballTransfer.hpp"
+#include "../../audio/sounds.hpp"
 
 // El pokémon líder del equipo, que acompaña al jugador por el mundo (física común, como cualquier otro cuerpo).
 // Sigue al jugador por detrás y, si pasa cerca de un recurso que sabe trabajar, lo trabaja solo.
@@ -62,6 +63,7 @@ class Companion {
         if (m_phase == Phase::RECALL) return; // ya se está guardando: saldrá el último elegido
         if (active()) {
             m_phase = Phase::RECALL;
+            Sound::emit(Sound::Sfx::BALL_RECALL, hand(playerPosition));
             m_transfer.start(BallTransfer::Mode::ABSORB, cameraYaw, hand(playerPosition), m_ballType);
         } else beginSend(playerPosition, cameraYaw);
     }
@@ -102,6 +104,7 @@ class Companion {
         m_tripTime = 0.0f;
         m_evolveReady = false;
         m_evolved = false;
+        Sound::emit(Sound::Sfx::EVOLVE, center());
         body.velocity = { 0.0f, 0.0f, 0.0f };
     }
     bool tripActive() const { return m_trip != Trip::NONE; }
@@ -175,6 +178,7 @@ class Companion {
         set(m_next.speciesId, m_next.floats, m_next.shiny, playerPosition, cameraYaw);
         m_ballType = m_next.ballType;
         m_phase = Phase::SEND;
+        Sound::emit(Sound::Sfx::BALL_RELEASE, hand(playerPosition));
         m_transfer.start(BallTransfer::Mode::RELEASE, cameraYaw, hand(playerPosition), m_ballType);
     }
 
@@ -189,7 +193,7 @@ class Companion {
             body.position = { m_tripFrom.x + (m_tripTo.x - m_tripFrom.x) * ease, m_tripFrom.y + (m_tripTo.y - m_tripFrom.y) * ease + 0.25f * std::sin(m_tripTime * 11.0f) * (1.0f - ease), m_tripFrom.z + (m_tripTo.z - m_tripFrom.z) * ease };
             m_yaw = std::atan2(m_tripTo.x - m_tripFrom.x, m_tripTo.z - m_tripFrom.z);
             if (m_tripTime < CLIMB_TIME) return;
-            if (m_tripSuccess) { m_trip = Trip::EVOLVE; m_tripTime = 0.0f; return; }
+            if (m_tripSuccess) { m_trip = Trip::EVOLVE; m_tripTime = 0.0f; Sound::emit(Sound::Sfx::EVOLVE, center()); return; }
             m_trip = Trip::FALL; // sin éxito: a medio camino pierde agarre y se despeña por la cascada hasta el río
             m_tripTime = 0.0f;
             m_tripFail = body.position;

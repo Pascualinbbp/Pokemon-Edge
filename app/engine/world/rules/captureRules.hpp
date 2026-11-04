@@ -9,6 +9,7 @@
 namespace CaptureRules {
     inline constexpr float BACK_MULTIPLIER = 1.15f;    // el jugador está por detrás del pokémon
     inline constexpr float STEALTH_MULTIPLIER = 1.25f; // el jugador está oculto entre matorrales: el pokémon no lo ha detectado
+    inline constexpr float EATING_MULTIPLIER = 1.30f;  // el pokémon está comiendo: indefenso y despistado
     inline constexpr float MAX_PERCENT = 99.0f;
     inline constexpr float BEHIND_DOT = -0.25f;       // por debajo de este valor se considera "por la espalda"
 
@@ -73,10 +74,11 @@ namespace CaptureRules {
         return static_cast<float>(catchRate) / 255.0f * 100.0f * RATE_SCALE * factor;
     }
 
-    inline float percent(float base, bool behind, bool hidden, float ballMultiplier = 1.0f) {
+    inline float percent(float base, bool behind, bool hidden, float ballMultiplier = 1.0f, bool eating = false) {
         float value = base * ballMultiplier;
         if (behind) value *= BACK_MULTIPLIER;
         if (hidden) value *= STEALTH_MULTIPLIER;
+        if (eating) value *= EATING_MULTIPLIER;
         return (std::min)(value, MAX_PERCENT);
     }
 }

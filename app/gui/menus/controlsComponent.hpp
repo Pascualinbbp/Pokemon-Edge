@@ -72,6 +72,8 @@ namespace ControlsComponent {
             y += ROW;
             keyRow(dl, offset(o, RIGHT, y), { "P" }, "Pokédex");
             y += ROW;
+            keyRow(dl, offset(o, RIGHT, y), { "T" }, "Radio (Q / E: emisora)");
+            y += ROW;
             mouse(dl, offset(o, RIGHT + 14.0f, y - 6.0f));
             label(dl, o.x + RIGHT + 76.0f, o.y + y + 8.0f, "Mover la cámara");
             label(dl, o.x + RIGHT + 76.0f, o.y + y + 30.0f, "Der.: apuntar · Izq.: lanzar");
@@ -161,7 +163,7 @@ namespace ControlsComponent {
             callout(fx, fy - 17.0f, fy - 17.0f, 550.0f, "Modo del pokémon");
             callout(350.0f, xbox ? 102.0f : 98.0f, 22.0f, 210.0f, "Inventario");
             callout(pauseX, pauseY, 14.0f, 550.0f, "Pausa");
-            callout(layout.dpadX, layout.dpadY, xbox ? 200.0f : 150.0f, 210.0f, "Mapa (arriba) / Pokédex (der.)");
+            callout(layout.dpadX, layout.dpadY, xbox ? 200.0f : 150.0f, 210.0f, "Mapa (arriba) / Pokédex (der.) / Radio (abajo)");
         }
     }
 

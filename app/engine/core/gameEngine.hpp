@@ -4,6 +4,9 @@
 #include <utility>
 #include "../../utils/core/loggerUtil.hpp"
 #include <vector>
+#include "../audio/audioEngine.hpp"
+#include "../audio/wav.hpp"
+#include "../../utils/core/resourceUtil.hpp"
 #include "../world/scene.hpp"
 #include "../render/renderer3D.hpp"
 #include "../../models/gameData.hpp"
@@ -18,7 +21,14 @@ class GameEngine {
 
     void init(ID3D11Device* device) {
         m_renderer.init(device);
+        m_audio.init([](const std::string& path) -> Audio::ClipPtr { // los sonidos están incrustados en el exe (assets/audio/...)
+            const ResourceUtil::Blob blob = ResourceUtil::loadAsset(path);
+            return blob ? Audio::Wav::parse(blob.data, blob.size) : nullptr;
+        });
     }
+
+    // Al salir de la partida deja de sonar la radio.
+    void silence() { m_audio.silence(); }
 
     // Datos de juego de la base de datos (pokéballs, objetos, cofres...): con ellos se crea cada partida.
     // El mundo no se genera aquí sino al empezar o cargar una partida (buildNew / buildSaved).
@@ -74,6 +84,8 @@ class GameEngine {
         CrashUtil::stage("juego: actualizar");
         m_scene.dayCycle.update(dt); // el tiempo del mundo corre siempre mientras se juega, haga lo que haga el jugador
         const bool pause = m_scene.update(dt, input);
+        const DirectX::XMFLOAT3& head = m_scene.player.body.position;
+        m_audio.update(dt, { head.x, head.y + 1.5f, head.z, m_scene.camera.yaw() }, m_scene.radioStation); // el oyente es el jugador, mirando donde la cámara
         logLayer();
         return pause;
     }
@@ -115,6 +127,7 @@ class GameEngine {
     }
 
     void cleanup() {
+        m_audio.shutdown();
         m_renderer.cleanup();
     }
 
@@ -135,4 +148,5 @@ class GameEngine {
     GameData m_data;
     Scene m_scene;
     Renderer3D m_renderer;
+    Audio::AudioEngine m_audio;
 };

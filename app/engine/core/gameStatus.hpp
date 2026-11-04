@@ -90,4 +90,9 @@ struct GameStatus {
     int chancePercent = 0;      // porcentaje de captura (ya con bonificaciones)
     bool behind = false;        // bonificación por la espalda
     bool hidden = false;        // bonificación por sigilo (oculto entre matorrales)
+    bool eating = false;        // bonificación: el pokémon está comiendo
+
+    // Radio: emisora sintonizada (0 = apagada) y segundos que le quedan abierto al menú rápido (0 = cerrado).
+    int radioStation = 0;
+    float radioMenu = 0.0f;
 };

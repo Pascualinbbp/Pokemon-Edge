@@ -66,6 +66,10 @@
 | `physics/physicsWorld.hpp` | Reglas físicas y colisiones |
 | `render/renderer3D.hpp` / `.cpp` | Render 3D: mallas, shaders, sombras, cielo |
 | `world/scene.hpp` | Escena: lógica de cada frame |
+| `audio/sounds.hpp` | Catálogo de efectos (`Sfx`) y cola de eventos: las entidades solo llaman a `Sound::emit` |
+| `audio/audioEngine.hpp` | Traduce eventos y emisora en voces; carga los sonidos solo cuando suenan cerca y los descarga sin uso |
+| `audio/mixer.hpp` | Mezclador estéreo con atenuación por distancia y balance según hacia dónde mira el jugador |
+| `audio/radio.hpp` | Las 10 emisoras (ficheros de `assets/audio/radio/`) |
 | `world/player.hpp` | Controlador del personaje |
 | `world/camera.hpp` | Cámara orbital y de apuntado |
 | `world/pokeball.hpp` | Pokéball lanzada y su aspecto |

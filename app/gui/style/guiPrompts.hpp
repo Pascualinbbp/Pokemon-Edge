@@ -42,6 +42,7 @@ namespace GuiPrompts {
                     case Action::MODE:        return "R";
                     case Action::MAP:         return "M";
                     case Action::RELEASE:     return "G";
+                    case Action::RADIO:       return "T";
                 }
             }
             switch (action) {
@@ -53,6 +54,7 @@ namespace GuiPrompts {
                 case Action::BALL_SWITCH: return "L1 / R1";
                 case Action::INVENTORY:   return device == InputDevice::XBOX ? "VER" : "SELECT";
                 case Action::MAP:         return "CRUZ ARRIBA";
+                case Action::RADIO:       return "CRUZ ABAJO";
                 default:                  return "";
             }
         }

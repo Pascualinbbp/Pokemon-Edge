@@ -3,7 +3,7 @@
 
 // Botones que el juego puede pedir al jugador en una ayuda en pantalla ("pulsa F para...").
 // El motor solo dice cuál; la interfaz decide el icono según el dispositivo (teclado, Xbox, PlayStation...).
-enum class PromptAction { JUMP, CROUCH, SPRINT, PAUSE, AIM, THROW, LOCK, BALL_SWITCH, INTERACT, INVENTORY, MODE, MAP, RELEASE };
+enum class PromptAction { JUMP, CROUCH, SPRINT, PAUSE, AIM, THROW, LOCK, BALL_SWITCH, INTERACT, INVENTORY, MODE, MAP, RELEASE, RADIO };
 
 // Una ayuda que la escena pide dibujar (pila inferior): qué botón y qué hace.
 struct Prompt {

@@ -34,6 +34,9 @@
 #include "spawn/wildSpawn.hpp"
 #include "spawn/wildField.hpp"
 #include "entities/fruit.hpp"
+#include "geometry.hpp"
+#include "../audio/radio.hpp"
+#include "../audio/sounds.hpp"
 #include "footprints.hpp"
 #include "state/exploration.hpp"
 #include "state/fishing.hpp"
@@ -86,6 +89,8 @@ struct Scene {
     SpawnField<GroundItem> groundItems;
     std::vector<Fruit> fruits; // cocos y plátanos caídos de los árboles (pocos a la vez)
     Footprints footprints;     // huellas en la arena de todo lo que se mueve
+    int radioStation = 0;      // emisora sintonizada (0 = radio apagada)
+    float radioMenu = 0.0f;    // segundos que le quedan abierto al menú rápido de la radio
     PokemonStorage storage;   // equipo (6) y PC
     PlayerProgress progress;  // nivel, experiencia y medallas del jugador
     PlayerHealth health;      // vida del jugador (caídas, ahogamiento)
@@ -134,8 +139,11 @@ struct Scene {
         world.tide = TIDE_AMPLITUDE * std::sin(m_clock * 6.2831853f / TIDE_PERIOD);
         if (input.aimToggle) aimMode = !aimMode;
         m_aiming = aimMode || input.aimHold;
+        if (input.radio) radioMenu = radioMenu > 0.0f ? 0.0f : RADIO_MENU_TIME;
+        radioMenu = (std::max)(0.0f, radioMenu - dt);
         if (input.ballSwitch != 0) {
-            if (m_aiming) inventory.cycle(input.ballSwitch);
+            if (radioMenu > 0.0f) tuneRadio(input.ballSwitch); // con el menú de la radio abierto, Q / E / rueda cambian de emisora
+            else if (m_aiming) inventory.cycle(input.ballSwitch);
             else storage.cycleActive(input.ballSwitch); // fuera del modo captura cambia el pokémon que acompaña
         }
         if (input.modeSwitch) {
@@ -385,11 +393,14 @@ struct Scene {
             s.interactVerb = USE_VERB;
             s.interactTarget = &MACHINE_NAME;
         }
+        s.radioStation = radioStation;
+        s.radioMenu = radioMenu;
         if (m_aimTarget) {
             const CaptureTarget& t = *m_aimTarget;
             s.hasAimTarget = true;
             s.behind = isBehind(t);
             s.hidden = m_concealed;
+            s.eating = t.eating();
             s.chancePercent = static_cast<int>(std::lround(chancePercent(t, inventory.captureMultiplier(t.shiny()))));
         }
         return s;
@@ -498,8 +509,7 @@ struct Scene {
         constexpr float TAG_LIFT = 0.35f;
         const auto add = [&](int speciesId, int level, bool shiny, const DirectX::XMFLOAT3& head, float hp = 1.0f) {
             const PokemonSpecies* species = m_data->speciesById(speciesId);
-            const float dx = head.x - player.body.position.x, dz = head.z - player.body.position.z;
-            if (species && dx * dx + dz * dz <= TAG_RANGE * TAG_RANGE) {
+            if (species && Geometry::within(head, player.body.position, TAG_RANGE)) {
                 s.nameTags.push_back({ { head.x, head.y + TAG_LIFT, head.z }, (shiny ? "* " : "") + species->name + "  Nv. " + std::to_string(level) +
                     (hp < 1.0f ? "  PS " + std::to_string(static_cast<int>(std::ceil(hp * 100.0f))) + "%" : std::string()), shiny });
             }
@@ -514,8 +524,7 @@ struct Scene {
     }
 
     bool nearPlayer(const DirectX::XMFLOAT3& at, float range) const {
-        const float dx = at.x - player.body.position.x, dz = at.z - player.body.position.z;
-        return dx * dx + dz * dz <= range * range;
+        return Geometry::within(at, player.body.position, range);
     }
 
     // Punto del mundo sobre lo que se interactúa, donde se dibuja la ayuda de cómo hacerlo.
@@ -599,8 +608,7 @@ struct Scene {
 
     bool concealsPlayer(const ResourceNode& node) const {
         if (ResourceStyle::look(node.typeId()).shape != ResourceStyle::Shape::BUSH) return false;
-        const float dx = node.body.position.x - player.body.position.x, dz = node.body.position.z - player.body.position.z;
-        return dx * dx + dz * dz <= CONCEAL_RADIUS * CONCEAL_RADIUS && std::fabs(node.body.position.y - player.body.position.y) < 1.5f;
+        return Geometry::within(node.body.position, player.body.position, CONCEAL_RADIUS) && std::fabs(node.body.position.y - player.body.position.y) < 1.5f;
     }
 
     bool isBehind(const CaptureTarget& t) const {
@@ -610,7 +618,14 @@ struct Scene {
     float chancePercent(const CaptureTarget& t, float ballMultiplier) const {
         const PokemonSpecies* species = m_data->speciesById(t.speciesId());
         const float base = species ? CaptureRules::basePercent(species->catchRate, t.level(), progress.level()) * CaptureRules::hpFactor(t.hpFraction()) : 0.0f;
-        return CaptureRules::percent(base, isBehind(t), m_concealed, ballMultiplier);
+        return CaptureRules::percent(base, isBehind(t), m_concealed, ballMultiplier, t.eating());
+    }
+
+    // Emisora siguiente (+1) o anterior (-1); con interferencia al cambiar.
+    void tuneRadio(int step) {
+        radioStation = Radio::cycle(radioStation, step);
+        radioMenu = RADIO_MENU_TIME;
+        Sound::emitGlobal(Sound::Sfx::RADIO_TUNE);
     }
 
     void showNotice(Notice kind, std::string text = {}) {
@@ -786,8 +801,7 @@ struct Scene {
         if (!climbs || companionDown() || m_engaged || m_cascadeRest > 0.0f || companion.changing() ||
             !habitats.nearestCascade(companion.body.position.x, companion.body.position.z, CASCADE_SEEK, fx, fz)) return nullptr;
         m_cascadeGoal = { fx, companion.body.position.y, fz };
-        const float dx = fx - companion.body.position.x, dz = fz - companion.body.position.z;
-        if (dx * dx + dz * dz > CASCADE_RANGE * CASCADE_RANGE) return &m_cascadeGoal; // todavía va hacia allí
+        if (!Geometry::within(m_cascadeGoal, companion.body.position, CASCADE_RANGE)) return &m_cascadeGoal; // todavía va hacia allí
         float tx = fx, ty = 0.0f, tz = fz;
         if (!habitats.cascadeTop(fx, fz, CASCADE_TOP_REACH, tx, ty, tz)) { m_cascadeRest = CASCADE_REST_MIN; return nullptr; }
         m_cascadeRest = RandomUtil::range(CASCADE_REST_MIN, CASCADE_REST_MAX);
@@ -817,14 +831,8 @@ struct Scene {
         Fruit* fruitTarget = nullptr;
         int level = 1;
         float best = 1.0e9f;
-        const auto distance2 = [&](const DirectX::XMFLOAT3& at) {
-            const float dx = at.x - companion.body.position.x, dz = at.z - companion.body.position.z;
-            return dx * dx + dz * dz;
-        };
-        const auto inRange = [&](const DirectX::XMFLOAT3& at) {
-            const float dx = at.x - player.body.position.x, dz = at.z - player.body.position.z;
-            return dx * dx + dz * dz <= Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
-        };
+        const auto distance2 = [&](const DirectX::XMFLOAT3& at) { return Geometry::distance2XZ(at, companion.body.position); };
+        const auto inRange = [&](const DirectX::XMFLOAT3& at) { return nearPlayer(at, Companion::SEARCH_RANGE); };
         const CompanionRules::Mode mode = storage.mode;
         tickCollectWindow(dt);
         if (species && mode == CompanionRules::Mode::COLLECT && m_collecting) {
@@ -938,7 +946,7 @@ struct Scene {
         if (m_duelTurn != DuelTurn::WILD) { foe.fightToward(companion.center(), keep); return; } // espera su turno encarándolo
         m_turnClock += dt;
         foe.fightToward(companion.center(), keep);
-        const float dx = foe.body.position.x - companion.body.position.x, dz = foe.body.position.z - companion.body.position.z, d2 = dx * dx + dz * dz;
+        const float d2 = Geometry::distance2XZ(foe.body.position, companion.body.position);
         const float reach = ranged ? CompanionRules::RANGED_RANGE : CompanionRules::ATTACK_RANGE;
         const bool inReach = d2 <= reach * reach && (!ranged || !world.blocked(foe.center(), companion.center()));
         if (m_turnClock >= WILD_TURN_DELAY && inReach) {
@@ -970,15 +978,23 @@ struct Scene {
     // El salvaje más cercano al jugador (dentro del radio de búsqueda) al que el acompañante debe atacar según su modo: en captura
     // solo mientras le quede más vida que el límite; en combate, cualquiera.
     CaptureTarget* fightTargetFor(CompanionRules::Mode mode) {
+        return nearestWild(Companion::SEARCH_RANGE, [&](const CaptureTarget& target) {
+            if (mode == CompanionRules::Mode::CAPTURE && target.hpFraction() <= CompanionRules::CAPTURE_STOP_HP) return false;
+            return hitOn(target).lands(); // inmune a sus tipos: no lo ataca
+        });
+    }
+
+    // El salvaje cargado más cercano al jugador, dentro de 'range', en su misma capa (suelo o galería), con especie y que no sea el pescado
+    // (ese es del jugador), que además cumpla 'accept'.
+    template <typename Accept>
+    CaptureTarget* nearestWild(float range, Accept accept) const {
         CaptureTarget* best = nullptr;
-        float bestDistance = Companion::SEARCH_RANGE * Companion::SEARCH_RANGE;
+        float bestDistance = range * range;
         for (CaptureTarget* target : wild.loaded()) {
-            if (!target->hittable() || target->speciesIndex() < 0 || wild.isHooked(target) || target->body.underground != player.body.underground) continue; // el pescado es del jugador
-            if (mode == CompanionRules::Mode::CAPTURE && target->hpFraction() <= CompanionRules::CAPTURE_STOP_HP) continue;
-            if (!hitOn(*target).lands()) continue; // inmune a sus tipos: no lo ataca
-            const float dx = target->body.position.x - player.body.position.x, dz = target->body.position.z - player.body.position.z;
-            if (dx * dx + dz * dz < bestDistance) {
-                bestDistance = dx * dx + dz * dz;
+            if (!target->hittable() || target->speciesIndex() < 0 || wild.isHooked(target) || target->body.underground != player.body.underground || !accept(*target)) continue;
+            const float d2 = Geometry::distance2XZ(target->body.position, player.body.position);
+            if (d2 < bestDistance) {
+                bestDistance = d2;
                 best = target;
             }
         }
@@ -1037,6 +1053,7 @@ struct Scene {
         const PokemonStorage::XpResult result = storage.addXp(storage.activeIndex(), xp, progress.levelCap());
         std::string text = name + "  +" + std::to_string(xp) + " PX";
         if (result.levels > 0) text += "   ¡Nivel " + std::to_string(storage.active()->level) + "!";
+        if (result.evolved) Sound::emit(Sound::Sfx::EVOLVE, companion.center());
         showNotice(Notice::REWARD, std::move(text));
     }
 
@@ -1047,9 +1064,7 @@ struct Scene {
         int index = -1;
         for (size_t i = 0; i < list.size(); ++i) {
             if (!usable(list[i]) || list[i].body.underground != player.body.underground) continue; // bajo tierra y en la superficie no se alcanzan
-            const float dx = list[i].body.position.x - player.body.position.x;
-            const float dz = list[i].body.position.z - player.body.position.z;
-            const float d2 = dx * dx + dz * dz;
+            const float d2 = Geometry::distance2XZ(list[i].body.position, player.body.position);
             if (d2 <= list[i].reach() * list[i].reach() && d2 < best) {
                 best = d2;
                 index = static_cast<int>(i);
@@ -1107,18 +1122,7 @@ struct Scene {
     // puede capturar ya: aparece la ayuda de interacción "Capturar" sobre él.
     const CaptureTarget* weakenedTarget() const {
         if (storage.mode != CompanionRules::Mode::CAPTURE || !storage.active() || fishing.active() || m_aiming) return nullptr;
-        const CaptureTarget* best = nullptr;
-        float bestDistance = CompanionRules::WEAK_REACH * CompanionRules::WEAK_REACH;
-        for (const CaptureTarget* target : wild.loaded()) {
-            if (!target->hittable() || target->speciesIndex() < 0 || wild.isHooked(target) || target->body.underground != player.body.underground) continue;
-            if (target->hpFraction() > CompanionRules::CAPTURE_STOP_HP) continue;
-            const float dx = target->body.position.x - player.body.position.x, dz = target->body.position.z - player.body.position.z;
-            if (dx * dx + dz * dz < bestDistance) {
-                bestDistance = dx * dx + dz * dz;
-                best = target;
-            }
-        }
-        return best;
+        return nearestWild(CompanionRules::WEAK_REACH, [](const CaptureTarget& target) { return target.hpFraction() <= CompanionRules::CAPTURE_STOP_HP; });
     }
 
     void interact() {
@@ -1162,13 +1166,24 @@ struct Scene {
     void openChest(Chest& chest) {
         const ChestReward* reward = ChestRules::pickReward(m_data->chests[chest.typeIndex()]);
         chest.open();
+        Sound::emit(Sound::Sfx::CHEST_OPEN, chest.body.position);
         if (reward) giveReward(reward->itemId, RandomUtil::integer(reward->minQuantity, reward->maxQuantity));
         gainXp(Xp::CHEST);
     }
 
     // Un paso de trabajo en el nodo (riego o golpe); al agotarlo da su material.
+    // Sonido de trabajar un nodo: depende de lo que es (roca: picar; árbol: talar; planta: recoger), no de quién lo trabaja.
+    static void nodeSound(const ResourceNode& node) {
+        using Shape = ResourceStyle::Shape;
+        const Shape shape = ResourceStyle::look(node.typeId()).shape;
+        const Sound::Sfx sfx = shape == Shape::ROCK ? Sound::Sfx::MINE : ResourceStyle::isTree(shape) ? Sound::Sfx::CHOP : Sound::Sfx::PICK;
+        Sound::emit(sfx, node.body.position);
+    }
+
     void workNode(ResourceNode& node, bool byPlayer, float speed = 1.0f) {
-        if (!node.work(byPlayer, speed) || !node.takeHarvest()) return;
+        if (!node.work(byPlayer, speed)) return;
+        nodeSound(node);
+        if (!node.takeHarvest()) return;
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
         if (const Item* item = m_data->materialItem(type.materialId)) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
         gainXp(Xp::GATHER);
@@ -1196,11 +1211,23 @@ struct Scene {
         if (const Item* item = fruitItem(fruit.kind())) giveReward(item->id, 1);
         gainXp(Xp::PICK_UP);
         fruit.take();
+        Sound::emit(Sound::Sfx::PICK, fruit.body.position); // el sonido es del fruto: el mismo para quien lo coja
+    }
+
+    // Un salvaje se come el fruto: suena como cogerlo y, además, como comerlo (cosas del fruto, no del pokémon).
+    void eatFruit(Fruit& fruit) {
+        fruit.take();
+        Sound::emit(Sound::Sfx::PICK, fruit.body.position);
+        Sound::emit(Sound::Sfx::EAT, fruit.body.position);
     }
 
     // De vez en cuando cae un fruto de un árbol maduro cercano (si no hay ya demasiados en el suelo) y rueda con su inercia.
     void updateFruits(float dt) {
-        for (Fruit& fruit : fruits) { world.step(fruit.body, dt); fruit.update(dt); }
+        for (Fruit& fruit : fruits) {
+            world.step(fruit.body, dt);
+            fruit.update(dt);
+            if (const float landing = fruit.takeLanding(); landing > 0.0f) Sound::emit(Sound::Sfx::FRUIT_DROP, fruit.body.position, landing);
+        }
         fruits.erase(std::remove_if(fruits.begin(), fruits.end(), [](const Fruit& f) { return f.finished(); }), fruits.end());
         if ((m_fruitTimer -= dt) > 0.0f) return;
         m_fruitTimer = RandomUtil::range(FRUIT_DROP_MIN, FRUIT_DROP_MAX);
@@ -1208,8 +1235,7 @@ struct Scene {
         std::vector<const ResourceNode*> trees;
         for (const ResourceNode& node : nodes) {
             if ((node.typeId() != PALM_TYPE && node.typeId() != JUNGLE_TYPE) || node.growing() || node.body.underground) continue;
-            const float dx = node.body.position.x - player.body.position.x, dz = node.body.position.z - player.body.position.z;
-            if (dx * dx + dz * dz <= FRUIT_RANGE * FRUIT_RANGE) trees.push_back(&node);
+            if (nearPlayer(node.body.position, FRUIT_RANGE)) trees.push_back(&node);
         }
         if (trees.empty()) return;
         const ResourceNode& tree = *trees[static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(trees.size()) - 1))];
@@ -1248,11 +1274,10 @@ struct Scene {
             }
             if (keep && nearPlayer(goal, PLAYER_PRIORITY)) keep = false;
             if (!keep) { if (f.wild->foraging() && !f.wild->eating()) f.wild->stopFight(); m_foragers.erase(m_foragers.begin() + static_cast<long>(i)); continue; }
-            const float dx = goal.x - f.wild->body.position.x, dz = goal.z - f.wild->body.position.z;
             const float reach = EAT_REACH + (bush ? ResourceStyle::look(bush->typeId()).half : 0.0f);
-            if (dx * dx + dz * dz <= reach * reach) {
-                if (fruit) fruit->take();
-                else { bush->work(false, 1.0f); bush->takeHarvest(); }
+            if (Geometry::within(goal, f.wild->body.position, reach)) {
+                if (fruit) eatFruit(*fruit);
+                else if (bush->work(false, 1.0f)) { bush->takeHarvest(); nodeSound(*bush); Sound::emit(Sound::Sfx::EAT, bush->body.position); }
                 f.wild->eat(EAT_TIME);
                 m_foragers.erase(m_foragers.begin() + static_cast<long>(i));
                 continue;
@@ -1269,12 +1294,11 @@ struct Scene {
         for (CaptureTarget* wild : this->wild.loaded()) {
             if (!wild->shown() || !wild->hittable() || wild == m_engaged || wild->eating() || wild->foraging() || wild->body.underground) continue;
             if (!RandomUtil::roll(14.0f)) continue;
-            const float px = wild->body.position.x, pz = wild->body.position.z;
             float best = SEARCH * SEARCH;
             int fruitId = -1, node = -1;
             for (const Fruit& fruit : fruits) {
                 if (!fruit.available() || !fruit.body.onGround || claimedFruit(fruit.id()) || nearPlayer(fruit.body.position, PLAYER_PRIORITY)) continue;
-                const float dx = fruit.body.position.x - px, dz = fruit.body.position.z - pz, d2 = dx * dx + dz * dz;
+                const float d2 = Geometry::distance2XZ(fruit.body.position, wild->body.position);
                 if (d2 < best) { best = d2; fruitId = fruit.id(); node = -1; }
             }
             if (fruitId < 0) {
@@ -1282,7 +1306,7 @@ struct Scene {
                     const ResourceNode& bush = nodes[n];
                     if (ResourceStyle::look(bush.typeId()).shape != ResourceStyle::Shape::BUSH || bush.growing() || !bush.workable() || bush.body.underground) continue;
                     if (claimedNode(static_cast<int>(n)) || nearPlayer(bush.body.position, PLAYER_PRIORITY)) continue;
-                    const float dx = bush.body.position.x - px, dz = bush.body.position.z - pz, d2 = dx * dx + dz * dz;
+                    const float d2 = Geometry::distance2XZ(bush.body.position, wild->body.position);
                     if (d2 < best) { best = d2; node = static_cast<int>(n); }
                 }
             }
@@ -1313,8 +1337,7 @@ struct Scene {
             for (const CaptureTarget* creature : wild.loaded()) {
                 if (!creature->shown() || creature->body.underground || creature->body.underwater) continue;
                 const DirectX::XMFLOAT3& c = creature->body.position;
-                const float dx = c.x - p.x, dz = c.z - p.z;
-                if (dx * dx + dz * dz > 70.0f * 70.0f) continue; // solo las cercanas se dibujan: no vale la pena marcar las lejanas
+                if (!Geometry::within(c, p, FOOTPRINT_RANGE)) continue; // solo las cercanas se dibujan: no vale la pena marcar las lejanas
                 footprints.step(creature, c.x, c.y + 0.01f, c.z, creature->yaw(), CaptureTarget::SIZE, Footprints::shapeOf(creature->speciesId()), creature->body.onGround, sand);
             }
             for (const Fruit& fruit : fruits) {
@@ -1338,6 +1361,7 @@ struct Scene {
             gainXp(Xp::PICK_UP);
         }
         item.take();
+        Sound::emit(Sound::Sfx::PICK, item.body.position);
     }
 
     // Experiencia del jugador por una acción en el mundo. Si sube de nivel lo avisa (salvo que ya haya un aviso de recompensa).
@@ -1509,6 +1533,7 @@ struct Scene {
         }
         balls.push_back(ball);
         inventory.consume(ballIndex);
+        Sound::emit(Sound::Sfx::THROW, ball.body.position);
     }
 
     // Velocidad inicial (módulo THROW_SPEED) para que la parábola pase por 'aim' (trayectoria baja).
@@ -1543,6 +1568,7 @@ struct Scene {
                 if (ball.expired()) continue;
 
                 world.step(ball.body, h);
+                noteBallContact(ball);
                 ball.roll(h);
                 ball.age += h;
                 for (CaptureTarget* target : wild.loaded()) {
@@ -1556,6 +1582,16 @@ struct Scene {
         }
         for (const Pokeball& ball : balls) if (ball.expired()) returnBall(ball);
         balls.erase(std::remove_if(balls.begin(), balls.end(), [](const Pokeball& b) { return b.expired(); }), balls.end());
+    }
+
+    // Suena al tocar el suelo o caer al agua (una sola vez por contacto).
+    void noteBallContact(Pokeball& ball) {
+        const DirectX::XMFLOAT3& p = ball.body.position;
+        const bool wet = p.y - ball.body.groundOffset < world.waterLevel(p.x, p.z, p.y) && world.waterDepth(p.x, p.z, p.y) > 0.1f;
+        if (wet && !ball.wet) Sound::emit(Sound::Sfx::BALL_SPLASH, p);
+        else if (!wet && ball.body.onGround && !ball.wasGround) Sound::emit(Sound::Sfx::BALL_HIT, p);
+        ball.wet = wet;
+        ball.wasGround = ball.body.onGround;
     }
 
     // Una bola que no tocó a ningún pokémon vuelve al inventario al desaparecer (la que alcanzó a uno se gasta).
@@ -1578,6 +1614,8 @@ struct Scene {
 
     static constexpr const char* CHEST_VERB = "Abrir";
     static constexpr const char* CAPTURE_VERB = "Capturar";
+    static constexpr float FOOTPRINT_RANGE = 70.0f; // solo las criaturas cercanas dejan huellas
+    static constexpr float RADIO_MENU_TIME = 4.0f; // el menú rápido de la radio se cierra solo tras este tiempo sin tocarlo
     static constexpr const char* PICK_VERB = "Recoger";
     static constexpr const char* USE_VERB = "Usar";
     static constexpr const char* TALK_VERB = "Hablar con";

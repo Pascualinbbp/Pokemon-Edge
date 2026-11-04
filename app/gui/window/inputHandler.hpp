@@ -30,6 +30,7 @@ namespace InputHandler {
             bool inventory = false;                                     // I (solo mientras se juega)
             bool map = false;                                           // M (solo mientras se juega)
             bool pokedex = false;                                       // P (solo mientras se juega)
+            bool radio = false;                                         // T (solo mientras se juega)
             bool throwBall = false;                                     // clic izquierdo
             bool aimToggle = false;                                     // clic derecho
             bool escape = false;                                        // ESC (solo mientras se juega)
@@ -61,7 +62,7 @@ namespace InputHandler {
         // Descarta lo que no debe arrastrarse entre frames o entre estados (pausa, carga...).
         inline void clearEvents() {
             mouseDX = mouseDY = 0.0f;
-            keys.jump = keys.crouch = keys.sprint = keys.throwBall = keys.interact = keys.inventory = keys.map = keys.pokedex = keys.modeSwitch = false;
+            keys.jump = keys.crouch = keys.sprint = keys.throwBall = keys.interact = keys.inventory = keys.map = keys.pokedex = keys.radio = keys.modeSwitch = false;
             keys.aimToggle = keys.escape = keys.lockTap = keys.release = keys.interactHeld = keys.jumpHeld = keys.crouchHeld = false;
             keys.ballSwitch = 0;
             keys.teamSelect = 0;
@@ -165,6 +166,9 @@ namespace InputHandler {
                 break;
             case 'P':
                 if (newPress && detail::captured) k.pokedex = true;
+                break;
+            case 'T':
+                if (newPress && detail::captured) k.radio = true;
                 break;
             case '1': case '2': case '3': case '4': case '5': case '6':
                 if (newPress && detail::captured) k.teamSelect = static_cast<int>(key - '0');
@@ -320,6 +324,7 @@ namespace InputHandler {
             input.inventory = (pressed & InputBindings::PAD_INVENTORY) != 0;
             input.map = (pressed & InputBindings::PAD_MAP) != 0;
             input.pokedex = (pressed & InputBindings::PAD_POKEDEX) != 0;
+            input.radio = (pressed & InputBindings::PAD_RADIO) != 0;
             input.modeSwitch = (pressed & InputBindings::PAD_MODE) != 0;
             input.aimHold = pad.lt > InputBindings::TRIGGER_THRESHOLD;
             input.throwBall = triggerDown && !detail::padPrevTriggerDown;
@@ -359,6 +364,7 @@ namespace InputHandler {
             input.inventory = k.inventory;
             input.map = k.map;
             input.pokedex = k.pokedex;
+            input.radio = k.radio;
             input.modeSwitch = k.modeSwitch;
             input.throwBall = k.throwBall;
             input.aimToggle = k.aimToggle;

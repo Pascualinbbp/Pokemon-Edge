@@ -7,6 +7,7 @@
 #include "../style/guiPrompts.hpp"
 #include "../style/icons/itemIcon.hpp"
 #include "../style/icons/teamCircle.hpp"
+#include "../../engine/audio/radio.hpp"
 #include "../../engine/core/gameStatus.hpp"
 #include "../../engine/core/inputDevice.hpp"
 #include "../../engine/world/rules/captureRules.hpp"
@@ -284,7 +285,7 @@ namespace HudComponent {
                 Action action;
                 char text[64];
             };
-            Hint hints[9];
+            Hint hints[10];
             int count = 0;
             const auto add = [&](Action action, const char* text) {
                 hints[count].action = action;
@@ -304,6 +305,7 @@ namespace HudComponent {
                 add(Action::AIM, "Modo captura");
                 if (status.team.size() > 1) add(Action::BALL_SWITCH, "Cambiar de pokémon");
                 if (!status.team.empty()) add(Action::MODE, "Modo del pokémon");
+                add(Action::RADIO, "Radio");
                 add(Action::INVENTORY, "Jugador");
                 add(Action::PAUSE, "Pausa");
             }
@@ -382,6 +384,30 @@ namespace HudComponent {
             }
         }
 
+        // Menú rápido de la radio (a la izquierda): "Apagada" y las emisoras, con la sintonizada resaltada. Se cierra solo.
+        inline void drawRadio(ImDrawList* dl, const GameStatus& status) {
+            if (status.radioMenu <= 0.0f) return;
+            const float fade = (std::min)(status.radioMenu / 0.4f, 1.0f);
+            const auto alpha = [&](int value) { return static_cast<int>(static_cast<float>(value) * fade); };
+            constexpr float WIDTH = 250.0f, ROW = 26.0f, PAD = 12.0f, EDGE = 28.0f;
+            const int rows = static_cast<int>(Radio::COUNT) + 1;
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            const float height = PAD * 2.0f + ROW * static_cast<float>(rows + 2);
+            const float x0 = EDGE, y0 = (std::max)(screen.y * 0.5f - height * 0.5f, 90.0f);
+            const float cx = x0 + WIDTH * 0.5f;
+            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + WIDTH, y0 + height), IM_COL32(10, 12, 18, alpha(200)), 10.0f);
+            dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + WIDTH, y0 + height), IM_COL32(120, 200, 255, alpha(160)), 10.0f, 0, 1.5f);
+            centered(dl, ImVec2(cx, y0 + PAD + ROW * 0.5f), "RADIO", 1.2f, IM_COL32(120, 200, 255, alpha(255)));
+            for (int i = 0; i < rows; ++i) {
+                const float y = y0 + PAD + ROW * static_cast<float>(i + 1) + ROW * 0.5f;
+                const bool current = i == status.radioStation;
+                if (current) dl->AddRectFilled(ImVec2(x0 + 8.0f, y - ROW * 0.5f + 1.0f), ImVec2(x0 + WIDTH - 8.0f, y + ROW * 0.5f - 1.0f), IM_COL32(60, 130, 200, alpha(210)), 6.0f);
+                const char* name = i == 0 ? "Apagada" : Radio::station(i).name;
+                centered(dl, ImVec2(cx, y), name, 1.0f, current ? IM_COL32(255, 255, 255, alpha(255)) : IM_COL32(170, 180, 195, alpha(230)));
+            }
+            centered(dl, ImVec2(cx, y0 + height - PAD - ROW * 0.5f), "Q / E: cambiar    T: cerrar", 0.8f, IM_COL32(150, 160, 175, alpha(220)));
+        }
+
         // Mira redonda (anillo con punto central); cambia de color al apuntar a un pokémon en rango.
         inline void drawCrosshair(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
@@ -402,14 +428,16 @@ namespace HudComponent {
                 centered(dl, ImVec2(c.x, c.y + RADIUS + 8.0f), buffer, 1.6f, color);
 
                 float y = c.y + RADIUS + 8.0f + ImGui::GetFontSize() * 1.6f + 4.0f;
-                if (status.behind) {
-                    std::snprintf(buffer, sizeof(buffer), "ESPALDA x%.2f", CaptureRules::BACK_MULTIPLIER);
+                const struct { bool on; const char* label; float multiplier; } bonuses[] = {
+                    { status.behind, "ESPALDA", CaptureRules::BACK_MULTIPLIER },
+                    { status.hidden, "SIGILO", CaptureRules::STEALTH_MULTIPLIER },
+                    { status.eating, "COMIENDO", CaptureRules::EATING_MULTIPLIER },
+                };
+                for (const auto& bonus : bonuses) {
+                    if (!bonus.on) continue;
+                    std::snprintf(buffer, sizeof(buffer), "%s x%.2f", bonus.label, bonus.multiplier);
                     centered(dl, ImVec2(c.x, y), buffer, 0.9f, IM_COL32(120, 200, 255, a));
                     y += ImGui::GetFontSize() * 0.9f + 2.0f;
-                }
-                if (status.hidden) {
-                    std::snprintf(buffer, sizeof(buffer), "SIGILO x%.2f", CaptureRules::STEALTH_MULTIPLIER);
-                    centered(dl, ImVec2(c.x, y), buffer, 0.9f, IM_COL32(120, 200, 255, a));
                 }
             }
 
@@ -439,6 +467,7 @@ namespace HudComponent {
         MinimapComponent::draw(dl, status, device);
         detail::drawLocation(dl, status);
         detail::drawTeam(dl, status);
+        detail::drawRadio(dl, status);
         detail::drawHints(dl, status, device);
 
         detail::drawWorldPrompts(dl, status, device);

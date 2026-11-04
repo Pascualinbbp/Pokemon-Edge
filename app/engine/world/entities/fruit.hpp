@@ -35,6 +35,12 @@ class Fruit {
     bool finished() const { return (m_taken && m_fade >= FADE_TIME) || m_age >= LIFETIME; }
     void take() { m_taken = true; }
     float spin() const { return m_roll; }
+    // Volumen del golpe al tocar el suelo (0 = no acaba de tocarlo): el primero suena entero y cada bote siguiente, más flojo.
+    float takeLanding() {
+        const bool landed = body.onGround && !m_wasGround;
+        m_wasGround = body.onGround;
+        return landed ? std::pow(0.5f, static_cast<float>(m_landings++)) : 0.0f;
+    }
     bool settled() const { return body.onGround; }
 
     void update(float dt) {
@@ -58,4 +64,6 @@ class Fruit {
     float m_age = 0.0f;
     float m_fade = 0.0f;
     float m_roll = 0.0f;
+    bool m_wasGround = false;
+    int m_landings = 0;
 };

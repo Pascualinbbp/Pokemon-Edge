@@ -405,7 +405,7 @@ void MainWindow::run() {
             redrawFrames = 2;
             if (prevState == GameState::PAUSED && (g_state == GameState::INVENTORY || g_state == GameState::POKEMON || g_state == GameState::POKEDEX || g_state == GameState::TYPES || g_state == GameState::MAP || g_state == GameState::PLAYER)) g_backState = GameState::PAUSED;
             g_fullscreen.set(g_hwnd, isFullscreen(g_state));
-            if (isInGame(prevState) && !isInGame(g_state)) SessionManager::saveCurrent(); // salir al menú guarda la partida
+            if (isInGame(prevState) && !isInGame(g_state)) { SessionManager::saveCurrent(); engine.silence(); } // salir al menú guarda la partida y apaga la radio
         } else if (redrawFrames > 0) {
             --redrawFrames;
         }
