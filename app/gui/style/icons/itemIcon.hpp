@@ -71,8 +71,8 @@ namespace ItemIcon {
     // Caramelo (sube de nivel) o vitamina (sube EVs).
     inline void training(ImDrawList* dl, const ImVec2& c, float r, TrainingItem::Effect effect, float alpha = 1.0f, int amount = 0) {
         const int a = static_cast<int>(255.0f * alpha);
-        if (effect == TrainingItem::Effect::HEAL) { // sprite del modelo de la poción (assets/hud/item/potions/potion.png)
-            if (const ImTextureID sprite = HudIcons::sprite("potions/potion")) {
+        if (effect == TrainingItem::Effect::HEAL) { // sprite del modelo de la poción (potion, superpotion o ultrapotion)
+            if (const ImTextureID sprite = HudIcons::sprite(ItemStyle::medicineModel(amount))) {
                 dl->AddImage(sprite, ImVec2(c.x - r * 1.1f, c.y - r * 1.1f), ImVec2(c.x + r * 1.1f, c.y + r * 1.1f), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, a));
                 return;
             }

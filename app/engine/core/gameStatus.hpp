@@ -92,7 +92,9 @@ struct GameStatus {
     bool hidden = false;        // bonificación por sigilo (oculto entre matorrales)
     bool eating = false;        // bonificación: el pokémon está comiendo
 
-    // Radio: emisora sintonizada (0 = apagada) y segundos que le quedan abierto al menú rápido (0 = cerrado).
+    // Radio: emisora sintonizada (0 = apagada) y rueda de emisoras (apertura 0..1, cursor en píxeles respecto al centro y emisora señalada: -1 ninguna, -2 fuera).
     int radioStation = 0;
-    float radioMenu = 0.0f;
+    float radioFade = 0.0f;
+    float radioCursorX = 0.0f, radioCursorY = 0.0f;
+    int radioHover = -1;
 };

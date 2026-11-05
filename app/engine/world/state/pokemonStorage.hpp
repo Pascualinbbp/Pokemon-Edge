@@ -102,6 +102,10 @@ class PokemonStorage {
         owned->hp = amount <= 0 ? maxHp(*owned) : (std::min)(maxHp(*owned), hpOf(*owned) + amount);
         return true;
     }
+    // Poción usada con éxito desde el menú: el mundo la recoge (takeMedicine) para mostrarla sobre el acompañante.
+    struct MedicineUse { bool inTeam = false; int index = 0; int amount = 0; };
+    void noteMedicine(bool inTeam, int index, int amount) { m_medicine = { inTeam, index, amount }; m_medicinePending = true; }
+    bool takeMedicine(MedicineUse& out) { if (!m_medicinePending) return false; m_medicinePending = false; out = m_medicine; return true; }
     // Revivir: solo a uno debilitado. Deja la mitad de sus PS (redondeando a la baja) o todos.
     bool revive(bool inTeam, int index, bool full) {
         OwnedPokemon* owned = at(inTeam, index);
@@ -427,6 +431,8 @@ class PokemonStorage {
     std::vector<OwnedPokemon> m_team;
     std::vector<OwnedPokemon> m_pc;
     EvRules::Rank m_autoMin = EvRules::Rank::D;
+    MedicineUse m_medicine;
+    bool m_medicinePending = false;
     int m_active = 0;  // índice en el equipo del pokémon que acompaña al jugador
     mutable int m_nextUid = 1;
 };

@@ -20,7 +20,7 @@ El juego detecta automáticamente el dispositivo en uso (teclado y ratón, mando
 | Fijar objetivo / cambiar al siguiente | `Tab` (pulsación corta) |
 | Soltar el objetivo | `Tab` mantenido (400 ms) |
 | Interactuar (abrir cofres, talar, picar) | `F` |
-| Radio: abrir / cerrar el menú rápido | `T` (con él abierto, `Q` / `E` o la rueda cambian de emisora; se cierra solo a los 4 s) |
+| Radio: abrir / cerrar el menú rápido | `T` (rueda de emisoras: la mira se bloquea, el ratón señala un logo y el clic lo sintoniza; clic fuera del círculo o `T` cierra) |
 | Pausa / salir del modo captura | `Esc` |
 
 ## Mando
@@ -39,7 +39,7 @@ Los botones se asignan por posición, por lo que equivalen en cualquier mando.
 | Lanzar Pokéball | RT | R2 |
 | Pokéball anterior | LB | L1 |
 | Pokéball siguiente | RB | R1 |
-| Radio (menú rápido; LB / RB cambian de emisora) | Cruceta abajo | Cruceta abajo |
+| Radio (rueda de emisoras; el stick derecho señala, el gatillo de lanzar elige) | Cruceta abajo | Cruceta abajo |
 | Fijar / cambiar objetivo | Pulsar stick derecho (R3) | R3 |
 | Soltar objetivo | R3 mantenido (400 ms) | R3 mantenido |
 | Pausa | Menú | Options |

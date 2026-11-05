@@ -48,5 +48,6 @@ namespace HudIcons {
     inline ImTextureID weather(const std::string& name) { return detail::texture("hud/weather/" + detail::slug(name) + ".png"); }
     // Sprite de un objeto 3D: assets/hud/item/<modelo>.png, con el mismo nombre que su modelo (assets/models/<modelo>.glb). Sirve para cualquiera (mochila, listas...).
     inline ImTextureID sprite(const std::string& model) { return detail::texture("hud/item/" + model + ".png"); }
+    inline ImTextureID image(const std::string& name) { return detail::texture("hud/" + name + ".png"); } // cualquier imagen de assets/hud/ (p. ej. radio/03)
     inline ImTextureID dayNight() { return detail::texture("hud/daynight.png"); }
 }

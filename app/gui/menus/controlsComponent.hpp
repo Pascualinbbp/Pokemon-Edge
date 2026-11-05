@@ -72,7 +72,7 @@ namespace ControlsComponent {
             y += ROW;
             keyRow(dl, offset(o, RIGHT, y), { "P" }, "Pokédex");
             y += ROW;
-            keyRow(dl, offset(o, RIGHT, y), { "T" }, "Radio (Q / E: emisora)");
+            keyRow(dl, offset(o, RIGHT, y), { "T" }, "Radio (ratón: elegir emisora)");
             y += ROW;
             mouse(dl, offset(o, RIGHT + 14.0f, y - 6.0f));
             label(dl, o.x + RIGHT + 76.0f, o.y + y + 8.0f, "Mover la cámara");

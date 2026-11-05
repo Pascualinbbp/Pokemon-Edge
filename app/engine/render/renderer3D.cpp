@@ -1075,6 +1075,7 @@ void Renderer3D::collect(const Scene& scene) {
             }
         }
         if (const BallTransfer* transfer = pet.transfer()) addTransfer(*transfer, pet.drawCenter(), Companion::SIZE * pet.scale());
+        addPotionFx(scene);
     }
 
     for (const Scene::Strike& strike : scene.strikes) { // golpe del acompañante: rayo (a distancia) e impacto con el color de su tipo
@@ -1984,4 +1985,36 @@ void Renderer3D::cleanup() {
     m_cave.clear();
     m_caveWater.clear();
     m_worldBuilt = false;
+}
+
+// Poción sobre el acompañante: su modelo sube, se inclina vertiendo el líquido (destellos verdes que bajan al pokémon, que brilla) y se desvanece.
+void Renderer3D::addPotionFx(const Scene& scene) {
+    const Scene::PotionFx& fx = scene.potionFx;
+    if (fx.time < 0.0f) return;
+    const RenderModel* model = m_models.get(m_device, ItemStyle::medicineModel(fx.amount));
+    const Companion& pet = scene.companion;
+    const XMFLOAT3 at = pet.drawCenter();
+    const float t = fx.time / Scene::POTION_FX_TIME;                          // 0..1
+    const float appear = (std::min)(t / 0.2f, 1.0f), vanish = (std::min)((1.0f - t) / 0.2f, 1.0f);
+    const float scale = (std::min)(appear, vanish);                           // crece al aparecer y se encoge al irse
+    const float pour = (std::clamp)((t - 0.25f) / 0.25f, 0.0f, 1.0f) * (1.0f - (std::clamp)((t - 0.7f) / 0.2f, 0.0f, 1.0f)); // inclinación 0..1
+    const float lift = Companion::SIZE * 0.5f + 0.55f + 0.12f * std::sin(t * 6.2831853f);
+    const XMFLOAT3 top = { at.x, at.y + lift, at.z };
+    if (model && scale > 0.01f) {
+        const XMFLOAT3 c = model->center();
+        const float k = 0.5f * scale / model->height(); // medio metro de alto
+        const float tilt = pour * 1.9f;                  // ~110º hacia el pokémon
+        const XMMATRIX world = XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(k, k, k) * XMMatrixRotationZ(-tilt) * XMMatrixRotationY(pet.yaw() + 0.6f) * XMMatrixTranslation(top.x, top.y, top.z);
+        addModel(*model, world, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose{}, false);
+    }
+    if (pour > 0.05f) { // el líquido cae: destellos verdes bajan desde el frasco hasta el pokémon, y este brilla
+        for (int i = 0; i < 6; ++i) {
+            const float f = std::fmod(t * 3.0f + static_cast<float>(i) / 6.0f, 1.0f);
+            const float r = 0.05f * (1.0f - f) * pour + 0.01f;
+            const float ox = 0.12f * std::sin(static_cast<float>(i) * 2.1f), oz = 0.12f * std::cos(static_cast<float>(i) * 2.1f);
+            add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(top.x + ox * (1.0f - f), top.y + (at.y - top.y) * f, top.z + oz * (1.0f - f)), { 0.35f, 1.0f, 0.55f, 1.0f * pour }, false, DrawKind::GLOW);
+        }
+        const float g = Companion::SIZE * (0.9f + 0.4f * pour);
+        add(m_sphere, XMMatrixScaling(g, g, g) * XMMatrixTranslation(at.x, at.y, at.z), { 0.4f, 1.0f, 0.6f, 0.35f * pour }, false, DrawKind::GLOW);
+    }
 }

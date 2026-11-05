@@ -125,6 +125,7 @@ class Renderer3D {
     void addNode(const ResourceNode& node);
     void addGroundItem(const GroundItem& item);
     void addFruit(const Fruit& fruit);
+    void addPotionFx(const Scene& scene);
     void addFootprints(const Scene& scene);
     void addMachine();
     void addProfessor(const Scene& scene);

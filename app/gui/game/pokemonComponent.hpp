@@ -493,7 +493,11 @@ namespace PokemonComponent {
                     if (hovered) ImGui::SetTooltip("%s\n%s", med.name.c_str(), med.description.c_str());
                     if (clicked && usable) {
                         const bool done = med.effect == TrainingItem::Effect::REVIVE ? storage.revive(selection.inTeam, selection.index, med.amount >= 100) : storage.heal(selection.inTeam, selection.index, med.amount >= 99999 ? 0 : med.amount);
-                        if (done) { inventory.add(medItem->id, -1); message = med.name + " usado en " + species->name; }
+                        if (done) {
+                            inventory.add(medItem->id, -1);
+                            message = med.name + " usado en " + species->name;
+                            if (med.effect == TrainingItem::Effect::HEAL) storage.noteMedicine(selection.inTeam, selection.index, med.amount); // el mundo la muestra sobre el acompañante
+                        }
                     }
                     bx += 50.0f;
                 }

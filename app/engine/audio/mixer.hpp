@@ -67,8 +67,9 @@ namespace Audio {
             m_voices.push_back(make(request));
         }
 
-        // Emisora de radio: suena sobre el oyente en bucle. nullptr = apagada. Con el mismo clip no reinicia.
-        void setRadio(ClipPtr clip, float volume) {
+        // Emisora de radio: suena sobre el oyente en bucle. nullptr = apagada. Con el mismo clip no reinicia; 'start' (0..1) es el punto del clip
+        // por el que empieza (para retomar la emisora donde se dejó).
+        void setRadio(ClipPtr clip, float volume, float start = 0.0f) {
             std::lock_guard<std::mutex> guard(m_lock);
             m_radioVolume = volume;
             if (clip == m_radioClip) return;
@@ -81,6 +82,13 @@ namespace Audio {
             request.volume = volume;
             request.loop = true;
             m_radio = make(request);
+            m_radio.pos = static_cast<double>(std::clamp(start, 0.0f, 0.999f)) * static_cast<double>(clip->samples.size());
+        }
+
+        // Punto actual de la emisora (0..1 del clip); 0 si está apagada.
+        float radioPosition() const {
+            std::lock_guard<std::mutex> guard(m_lock);
+            return m_radioOn ? std::clamp(m_radio.progress(), 0.0f, 1.0f) : 0.0f;
         }
 
         int activeVoices() const {

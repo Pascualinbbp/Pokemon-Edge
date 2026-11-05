@@ -5,6 +5,7 @@
 #include <random>
 #include <string>
 #include <utility>
+#include <thread>
 #include <vector>
 #include "worldNoise.hpp"
 #include "underground.hpp"
@@ -461,6 +462,8 @@ class HabitatMap {
         for (const Island& island : m_islands) {
             ++index;
             const float dx = x - island.x, dz = z - island.z;
+            // Cota superior de lo que esta isla puede dar (ruido en [-1, 1], estiramiento >= 0.69): si ni así supera a la mejor, se salta sin calcular ruido.
+            if (island.r * 1.32f + 9.0f - std::sqrt(dx * dx + dz * dz) * 0.69f <= best) continue;
             const float angle = std::atan2(dz, dx);
             const float stretch = 1.0f + 0.16f * std::sin(2.0f * angle + island.phase1) + 0.10f * std::sin(3.0f * angle + island.phase2) + 0.05f * std::sin(5.0f * angle + island.phase1 * 2.0f);
             const float d = std::sqrt(dx * dx + dz * dz) * stretch;
@@ -646,16 +649,24 @@ class HabitatMap {
         m_coast.init(half, -300.0f);
         const int n = m_ground.count();
         m_islandOf.assign(static_cast<size_t>(n) * n, 0);
-        for (int row = 0; row < n; ++row) {
-            for (int col = 0; col < n; ++col) {
-                const float x = m_ground.nodeCoord(col), z = m_ground.nodeCoord(row);
-                int isle = 0;
-                const float s = coastSigned(x, z, &isle);
-                m_coast.at(col, row) = (std::max)(s, -300.0f);
-                m_islandOf[static_cast<size_t>(row) * n + col] = static_cast<uint8_t>(isle);
-                m_ground.at(col, row) = landHeight(x, z, s);
+        // Cada fila es independiente (solo lee las islas y el ruido): se reparten entre los núcleos del procesador.
+        const auto bakeRows = [&](int from, int to) {
+            for (int row = from; row < to; ++row) {
+                for (int col = 0; col < n; ++col) {
+                    const float x = m_ground.nodeCoord(col), z = m_ground.nodeCoord(row);
+                    int isle = 0;
+                    const float s = coastSigned(x, z, &isle);
+                    m_coast.at(col, row) = (std::max)(s, -300.0f);
+                    m_islandOf[static_cast<size_t>(row) * n + col] = static_cast<uint8_t>(isle);
+                    m_ground.at(col, row) = landHeight(x, z, s);
+                }
             }
-        }
+        };
+        const int workers = static_cast<int>((std::max)(1u, (std::min)(std::thread::hardware_concurrency(), 8u)));
+        std::vector<std::thread> pool;
+        for (int w = 1; w < workers; ++w) pool.emplace_back(bakeRows, n * w / workers, n * (w + 1) / workers);
+        bakeRows(0, n / workers);
+        for (std::thread& t : pool) t.join();
         m_surface = m_ground;
         m_sea.init(half, 0.0f);
         m_flowX.init(half, 0.0f);

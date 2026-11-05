@@ -384,28 +384,39 @@ namespace HudComponent {
             }
         }
 
-        // Menú rápido de la radio (a la izquierda): "Apagada" y las emisoras, con la sintonizada resaltada. Se cierra solo.
+        // Rueda de emisoras (como la de GTA) en el centro de la pantalla: un logo por emisora, la apagada abajo. La señalada por el cursor se ve a color y
+        // más grande; el resto, apagadas. Sin texto: solo logos.
         inline void drawRadio(ImDrawList* dl, const GameStatus& status) {
-            if (status.radioMenu <= 0.0f) return;
-            const float fade = (std::min)(status.radioMenu / 0.4f, 1.0f);
-            const auto alpha = [&](int value) { return static_cast<int>(static_cast<float>(value) * fade); };
-            constexpr float WIDTH = 250.0f, ROW = 26.0f, PAD = 12.0f, EDGE = 28.0f;
-            const int rows = static_cast<int>(Radio::COUNT) + 1;
+            const float fade = status.radioFade;
+            if (fade <= 0.0f) return;
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
-            const float height = PAD * 2.0f + ROW * static_cast<float>(rows + 2);
-            const float x0 = EDGE, y0 = (std::max)(screen.y * 0.5f - height * 0.5f, 90.0f);
-            const float cx = x0 + WIDTH * 0.5f;
-            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + WIDTH, y0 + height), IM_COL32(10, 12, 18, alpha(200)), 10.0f);
-            dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + WIDTH, y0 + height), IM_COL32(120, 200, 255, alpha(160)), 10.0f, 0, 1.5f);
-            centered(dl, ImVec2(cx, y0 + PAD + ROW * 0.5f), "RADIO", 1.2f, IM_COL32(120, 200, 255, alpha(255)));
-            for (int i = 0; i < rows; ++i) {
-                const float y = y0 + PAD + ROW * static_cast<float>(i + 1) + ROW * 0.5f;
-                const bool current = i == status.radioStation;
-                if (current) dl->AddRectFilled(ImVec2(x0 + 8.0f, y - ROW * 0.5f + 1.0f), ImVec2(x0 + WIDTH - 8.0f, y + ROW * 0.5f - 1.0f), IM_COL32(60, 130, 200, alpha(210)), 6.0f);
-                const char* name = i == 0 ? "Apagada" : Radio::station(i).name;
-                centered(dl, ImVec2(cx, y), name, 1.0f, current ? IM_COL32(255, 255, 255, alpha(255)) : IM_COL32(170, 180, 195, alpha(230)));
+            const ImVec2 c(screen.x * 0.5f, screen.y * 0.5f);
+            const auto alpha = [&](int value) { return static_cast<int>(static_cast<float>(value) * fade); };
+            const float grow = 0.88f + 0.12f * fade; // aparece creciendo un poco
+            dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(8, 10, 16, alpha(110)));
+            dl->AddCircleFilled(c, Radio::Wheel::OUTER * grow, IM_COL32(8, 10, 16, alpha(120)), 64);
+
+            for (int slot = 0; slot < static_cast<int>(Radio::Wheel::SLOTS); ++slot) {
+                float ox, oy;
+                Radio::Wheel::slotCenter(slot, ox, oy);
+                const bool hovered = slot == status.radioHover;
+                const ImVec2 p(c.x + ox * grow, c.y + oy * grow);
+                const float r = Radio::Wheel::ICON * grow * (hovered ? 1.3f : 1.0f);
+                const ImU32 tint = hovered ? IM_COL32(255, 255, 255, alpha(255)) : IM_COL32(95, 100, 112, alpha(205));
+                dl->AddCircleFilled(ImVec2(p.x + 2.0f, p.y + 3.0f), r, IM_COL32(0, 0, 0, alpha(110)), 32);
+                if (slot == 0) { // apagada: círculo tachado
+                    dl->AddCircleFilled(p, r, IM_COL32(20, 22, 30, alpha(220)), 32);
+                    dl->AddCircle(p, r * 0.78f, tint, 32, 3.0f);
+                    dl->AddLine(ImVec2(p.x - r * 0.55f, p.y + r * 0.55f), ImVec2(p.x + r * 0.55f, p.y - r * 0.55f), tint, 3.0f);
+                } else if (const ImTextureID logo = HudIcons::image(Radio::station(slot).logo)) {
+                    dl->AddImage(logo, ImVec2(p.x - r, p.y - r), ImVec2(p.x + r, p.y + r), ImVec2(0, 0), ImVec2(1, 1), tint);
+                } else {
+                    dl->AddCircleFilled(p, r, hovered ? IM_COL32(60, 130, 200, alpha(255)) : IM_COL32(40, 44, 56, alpha(220)), 32);
+                }
+                if (hovered) dl->AddCircle(p, r + 2.0f, IM_COL32(255, 255, 255, alpha(240)), 40, 3.0f);
+                else if (slot == status.radioStation) dl->AddCircle(p, r + 2.0f, IM_COL32(255, 255, 255, alpha(150)), 40, 2.0f); // la que suena ahora
             }
-            centered(dl, ImVec2(cx, y0 + height - PAD - ROW * 0.5f), "Q / E: cambiar    T: cerrar", 0.8f, IM_COL32(150, 160, 175, alpha(220)));
+            dl->AddCircleFilled(ImVec2(c.x + status.radioCursorX, c.y + status.radioCursorY), 4.0f, IM_COL32(255, 255, 255, alpha(235)));
         }
 
         // Mira redonda (anillo con punto central); cambia de color al apuntar a un pokémon en rango.

@@ -90,7 +90,14 @@ struct Scene {
     std::vector<Fruit> fruits; // cocos y plátanos caídos de los árboles (pocos a la vez)
     Footprints footprints;     // huellas en la arena de todo lo que se mueve
     int radioStation = 0;      // emisora sintonizada (0 = radio apagada)
-    float radioMenu = 0.0f;    // segundos que le quedan abierto al menú rápido de la radio
+    // Poción usada sobre el pokémon que acompaña: su modelo 3D aparece sobre él y se vuelca (lo dibuja Renderer3D::addPotionFx).
+    struct PotionFx { int amount = 0; float time = -1.0f; };
+    static constexpr float POTION_FX_TIME = 1.8f;
+    PotionFx potionFx;
+    bool radioOpen = false;    // rueda de emisoras abierta (con ella la mira queda bloqueada y el ratón elige)
+    float radioFade = 0.0f;    // apertura visible de la rueda (0..1)
+    float radioCursorX = 0.0f, radioCursorY = 0.0f; // cursor de la rueda, en píxeles respecto al centro
+    int radioHover = -1;       // emisora señalada (-1 ninguna, -2 fuera de la rueda)
     PokemonStorage storage;   // equipo (6) y PC
     PlayerProgress progress;  // nivel, experiencia y medallas del jugador
     PlayerHealth health;      // vida del jugador (caídas, ahogamiento)
@@ -131,7 +138,8 @@ struct Scene {
         const InputState& input = m_respawn > 0.0f ? blank : rawInput; // mientras carga tras desmayarse no se controla nada
         bool pause = false;
         if (input.escape) {
-            if (aimMode) aimMode = false;
+            if (radioOpen) closeRadio();
+            else if (aimMode) aimMode = false;
             else pause = true;
         }
         m_clock += dt;
@@ -139,11 +147,10 @@ struct Scene {
         world.tide = TIDE_AMPLITUDE * std::sin(m_clock * 6.2831853f / TIDE_PERIOD);
         if (input.aimToggle) aimMode = !aimMode;
         m_aiming = aimMode || input.aimHold;
-        if (input.radio) radioMenu = radioMenu > 0.0f ? 0.0f : RADIO_MENU_TIME;
-        radioMenu = (std::max)(0.0f, radioMenu - dt);
-        if (input.ballSwitch != 0) {
-            if (radioMenu > 0.0f) tuneRadio(input.ballSwitch); // con el menú de la radio abierto, Q / E / rueda cambian de emisora
-            else if (m_aiming) inventory.cycle(input.ballSwitch);
+        updatePotionFx(dt);
+        const bool wheel = updateRadioWheel(dt, input); // con la rueda abierta la mira y el lanzamiento quedan bloqueados
+        if (input.ballSwitch != 0 && !wheel) {
+            if (m_aiming) inventory.cycle(input.ballSwitch);
             else storage.cycleActive(input.ballSwitch); // fuera del modo captura cambia el pokémon que acompaña
         }
         if (input.modeSwitch) {
@@ -167,7 +174,7 @@ struct Scene {
         camera.setSwimming(m_swimLatch > 0.0f);
         camera.update(dt, m_aiming);
         if (lockedTarget) camera.trackToward(player.body.position, lockedTarget->center(), dt);
-        else camera.rotate(input.lookX, input.lookY);
+        else if (!wheel) camera.rotate(input.lookX, input.lookY);
         logSwimCamera(dt, input);
 
         // Los pokémon son sólidos para quien los pisa: el jugador los rodea igual que a las paredes.
@@ -200,7 +207,7 @@ struct Scene {
         weather.update(dt);
         throwCooldown = (std::max)(0.0f, throwCooldown - dt);
         noticeTime = (std::max)(0.0f, noticeTime - dt);
-        if (m_aiming && input.throwBall) m_throwQueued = THROW_BUFFER; // el clic se recuerda unos instantes: lanzar no depende de si caminamos, corremos o nadamos
+        if (m_aiming && input.throwBall && !wheel) m_throwQueued = THROW_BUFFER; // el clic se recuerda unos instantes: lanzar no depende de si caminamos, corremos o nadamos
         m_throwQueued = (std::max)(0.0f, m_throwQueued - dt);
         if (!m_aiming) m_throwQueued = 0.0f;
         if (m_throwQueued > 0.0f && throwCooldown <= 0.0f && m_throwDelay < 0.0f) { m_throwQueued = 0.0f; startThrow(); }
@@ -394,7 +401,9 @@ struct Scene {
             s.interactTarget = &MACHINE_NAME;
         }
         s.radioStation = radioStation;
-        s.radioMenu = radioMenu;
+        s.radioFade = radioFade;
+        s.radioCursorX = radioCursorX; s.radioCursorY = radioCursorY;
+        s.radioHover = radioHover;
         if (m_aimTarget) {
             const CaptureTarget& t = *m_aimTarget;
             s.hasAimTarget = true;
@@ -621,12 +630,47 @@ struct Scene {
         return CaptureRules::percent(base, isBehind(t), m_concealed, ballMultiplier, t.eating());
     }
 
-    // Emisora siguiente (+1) o anterior (-1); con interferencia al cambiar.
-    void tuneRadio(int step) {
-        radioStation = Radio::cycle(radioStation, step);
-        radioMenu = RADIO_MENU_TIME;
-        Sound::emitGlobal(Sound::Sfx::RADIO_TUNE);
+    // Recoge la poción usada desde el menú: sobre el acompañante muestra su modelo (y suena allí); sobre otro del equipo, solo el sonido.
+    void updatePotionFx(float dt) {
+        PokemonStorage::MedicineUse use;
+        if (storage.takeMedicine(use)) {
+            const bool onCompanion = use.inTeam && use.index == storage.activeIndex() && companion.active();
+            if (onCompanion) { potionFx = { use.amount, 0.0f }; Sound::emit(Sound::Sfx::HEAL, companion.center()); }
+            else Sound::emitGlobal(Sound::Sfx::HEAL);
+        }
+        if (potionFx.time >= 0.0f && (potionFx.time += dt) > POTION_FX_TIME) potionFx.time = -1.0f;
     }
+
+    // Rueda de emisoras. T la abre / cierra; con ella abierta el ratón (o el stick) mueve un cursor en lugar de la cámara, el clic sobre una emisora
+    // la sintoniza y cierra la rueda con calma, y el clic fuera del círculo la cierra sin cambiar nada. Devuelve true mientras controla la entrada.
+    bool updateRadioWheel(float dt, const InputState& input) {
+        if (input.radio) { if (radioOpen) closeRadio(); else openRadio(); }
+        if (m_radioHold > 0.0f && (m_radioHold -= dt) <= 0.0f) radioOpen = false; // tras elegir, la rueda aguanta un instante y se desvanece
+        radioFade = approach(radioFade, radioOpen ? 1.0f : 0.0f, dt / (radioOpen ? RADIO_FADE_IN : RADIO_FADE_OUT));
+        if (!radioOpen || m_radioHold > 0.0f) return radioOpen;
+        radioCursorX += input.lookX;
+        radioCursorY += input.lookY;
+        const float length = std::sqrt(radioCursorX * radioCursorX + radioCursorY * radioCursorY);
+        if (length > Radio::Wheel::REACH) { radioCursorX *= Radio::Wheel::REACH / length; radioCursorY *= Radio::Wheel::REACH / length; }
+        radioHover = Radio::Wheel::hit(radioCursorX, radioCursorY);
+        if (input.throwBall) {
+            if (radioHover >= 0) tuneRadio(radioHover);
+            else if (radioHover == -2) closeRadio();
+        }
+        return true;
+    }
+
+    void openRadio() { radioOpen = true; m_radioHold = 0.0f; radioCursorX = radioCursorY = 0.0f; radioHover = -1; }
+    void closeRadio() { radioOpen = false; m_radioHold = 0.0f; }
+
+    // Sintoniza una emisora (0 = apagada) con una interferencia, y cierra la rueda sin brusquedad.
+    void tuneRadio(int station) {
+        if (station != radioStation) Sound::emitGlobal(Sound::Sfx::RADIO_TUNE);
+        radioStation = station;
+        m_radioHold = RADIO_PICK_HOLD;
+    }
+
+    static float approach(float value, float target, float step) { return value < target ? (std::min)(value + step, target) : (std::max)(value - step, target); }
 
     void showNotice(Notice kind, std::string text = {}) {
         notice = kind;
@@ -1615,7 +1659,7 @@ struct Scene {
     static constexpr const char* CHEST_VERB = "Abrir";
     static constexpr const char* CAPTURE_VERB = "Capturar";
     static constexpr float FOOTPRINT_RANGE = 70.0f; // solo las criaturas cercanas dejan huellas
-    static constexpr float RADIO_MENU_TIME = 4.0f; // el menú rápido de la radio se cierra solo tras este tiempo sin tocarlo
+    static constexpr float RADIO_FADE_IN = 0.18f, RADIO_FADE_OUT = 0.35f, RADIO_PICK_HOLD = 0.25f; // la rueda aparece rápido y se va despacio
     static constexpr const char* PICK_VERB = "Recoger";
     static constexpr const char* USE_VERB = "Usar";
     static constexpr const char* TALK_VERB = "Hablar con";
@@ -1650,6 +1694,7 @@ struct Scene {
     static constexpr float CASCADE_TOGETHER = 9.0f;     // el pokémon debe estar así de cerca del jugador
     static constexpr float THROW_BUFFER = 0.35f;      // segundos que se recuerda un clic de lanzar que no pudo salir al instante
     float m_throwQueued = 0.0f;
+    float m_radioHold = 0.0f; // al elegir emisora, lo que le queda a la rueda antes de irse
     float m_throwDelay = -1.0f; // >= 0: lanzando (la bola sale al llegar a 0)
     int m_fishSkill = -1;       // habilidad de pesca (la de la animación FISH)
     bool m_castHint = false;    // se puede lanzar la caña aquí

@@ -28,6 +28,7 @@ namespace Sound {
         CHEST_OPEN,     // abrir un cofre
         EAT,            // comer
         FRUIT_DROP,     // un fruto cae al suelo
+        HEAL,           // poción sobre un pokémon
         RADIO_TUNE,     // cambio de emisora (interferencia)
         COUNT
     };
@@ -59,6 +60,7 @@ namespace Sound {
             { "audio/sfx/chest.wav",         0.90f, 40.0f, 0.00f },
             { "audio/sfx/eat.wav",           0.75f, 25.0f, 0.06f },
             { "audio/sfx/fruit_drop.wav",    0.65f, 30.0f, 0.10f },
+            { "audio/sfx/heal.wav",          0.85f, 40.0f, 0.00f },
             { "audio/sfx/radio_tune.wav",    0.60f, 0.0f,  0.00f },
         };
         return table[static_cast<size_t>(sfx)];

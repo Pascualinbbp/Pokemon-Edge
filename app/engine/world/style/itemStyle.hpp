@@ -21,4 +21,10 @@ namespace ItemStyle {
             }
         }
     }
+
+    // Modelo 3D (assets/models/<nombre>.glb) y sprite (assets/hud/item/<nombre>.png) de una poción según los PS que cura: poción 20, superpoción 60,
+    // ultrapoción 120 (y las de curación total). Lo usan el icono de la mochila y el efecto sobre el acompañante.
+    inline const char* medicineModel(int amount) {
+        return amount <= 20 ? "potions/potion" : amount <= 60 ? "potions/superpotion" : "potions/ultrapotion";
+    }
 }
