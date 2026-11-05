@@ -49,6 +49,7 @@ namespace PokemonComponent {
             ImVec2 a, b;
         };
 
+        inline bool manage = false;              // true en el PC de la máquina del inicio: solo ahí se mueven y liberan pokémon; en el menú rápido solo se ven
         inline Place selection;
         inline Held held;
         inline std::vector<SlotRect> slots;      // casillas dibujadas este fotograma (destinos posibles)
@@ -108,7 +109,7 @@ namespace PokemonComponent {
         // mando) y, en un clic (o ✕ del mando), suelta lo que se lleve. Devuelve true si es un clic normal para seleccionarla o marcarla.
         inline bool slotInput(PokemonStorage& storage, const Place& place, bool filled, bool clicked) {
             slots.push_back({ place, ImGui::GetItemRectMin(), ImGui::GetItemRectMax() });
-            if (filled && !selecting && !held.active) {
+            if (manage && filled && !selecting && !held.active) {
                 if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f)) held = { true, false, place };
                 else if (ImGui::IsItemFocused() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)) held = { true, true, place };
             }
@@ -141,7 +142,7 @@ namespace PokemonComponent {
             if (!species) { held.active = false; return; }
             ImDrawList* fg = ImGui::GetForegroundDrawList();
             if (!held.pad) {
-                TeamCircle::draw(fg, ImGui::GetIO().MousePos, 34.0f, data, *species, owned->level, owned->shiny, owned->ballId, true, 0, 0.85f);
+                TeamCircle::draw(fg, ImGui::GetIO().MousePos, 34.0f, data, *species, owned->level, owned->shiny, owned->ballId, true, 0, 0.85f, storage.fainted(*owned));
                 return;
             }
             for (const SlotRect& slot : slots) {
@@ -180,7 +181,7 @@ namespace PokemonComponent {
                 const bool target = held.active && hovered && !(held.from == place);
                 if (species) {
                     TeamCircle::draw(dl, c, radius, data, *species, owned->level, owned->shiny, owned->ballId, i == storage.activeIndex(), i + 1,
-                                     held.active && held.from == place ? 0.35f : 1.0f);
+                                     held.active && held.from == place ? 0.35f : 1.0f, storage.fainted(*owned));
                 } else TeamCircle::empty(dl, c, radius, target);
                 if (target) dl->AddCircle(c, radius + 4.0f, GuiCards::SELECT, 40, 2.5f);
                 if (selection == place) dl->AddCircle(c, radius + 5.0f, GuiCards::SELECT, 40, 3.0f);
@@ -233,7 +234,7 @@ namespace PokemonComponent {
                 ImGui::PushID(i);
                 std::snprintf(badge, sizeof(badge), "Nv %d", owned.level);
                 const bool clicked = GuiCards::tile("##pc", ImVec2(TILE_WIDTH, TILE_HEIGHT), selection == place,
-                    tone(*species), [&](ImDrawList* d, const ImVec2& c, float r) { ItemIcon::creature(d, c, r, species->id, held.active && held.from == place ? 0.35f : 1.0f); },
+                    tone(*species), [&](ImDrawList* d, const ImVec2& c, float r) { ItemIcon::creature(d, c, r, species->id, held.active && held.from == place ? 0.35f : 1.0f, 0.0f, storage.fainted(owned)); },
                     title(*species, owned).c_str(), badge);
                 ImGui::PopID();
                 const bool picked = slotInput(storage, place, true, clicked);
@@ -254,7 +255,7 @@ namespace PokemonComponent {
             }
 
             // Hueco final: destino para mandar un pokémon del equipo al PC.
-            if (!storage.pcFull()) {
+            if (manage && !storage.pcFull()) {
                 cell();
                 const Place place{ false, static_cast<int>(storage.pc().size()) };
                 ImGui::PushID(100000);
@@ -293,6 +294,7 @@ namespace PokemonComponent {
             x += barButton("##fShiny", shinyFilter ? "VARIOCOLOR: SÍ" : "VARIOCOLOR", x, pos.y, true, shinyFilter ? IM_COL32(190, 150, 30, 255) : NEUTRAL, pressed);
             if (pressed) shinyFilter = !shinyFilter;
 
+            if (!manage) return;
             // Liberar: a la derecha. Solo pide confirmación si entre los marcados hay variocolor o de mucho potencial.
             float right = pos.x + width;
             const auto place = [&](const std::string& label) { return right - (GuiCards::textWidth(label.c_str(), 0.95f) + 32.0f); };
@@ -555,7 +557,9 @@ namespace PokemonComponent {
     }
 
     // ESC o el botón de volver cierran la pantalla (vuelven a 'back'); con un pokémon en la mano, primero lo suelta.
-    inline void render(GameState& state, GameState back, const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, InputDevice device) {
+    inline void render(GameState& state, GameState back, const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, InputDevice device, bool manage = false) {
+        detail::manage = manage;
+        if (!manage) { detail::held.active = false; detail::selecting = false; }
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, 170));
 
         // La selección debe seguir apuntando a algo que existe.
@@ -568,7 +572,7 @@ namespace PokemonComponent {
         const float height = barY - top - 10.0f;
 
         if (GuiCards::backButton(ImVec2(detail::MARGIN, detail::MARGIN - 8.0f))) state = back;
-        GuiCards::text(dl, ImVec2(detail::MARGIN + 140.0f, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), "POKÉMON", 1.6f);
+        GuiCards::text(dl, ImVec2(detail::MARGIN + 140.0f, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), manage ? "PC" : "POKÉMON", 1.6f);
 
         detail::slots.clear();
         const float teamWidth = 2.0f * (std::min)(46.0f, (height - 40.0f - 5.0f * detail::GAP) / 12.0f);
@@ -582,7 +586,8 @@ namespace PokemonComponent {
         detail::drawDetail(data, storage, inventory, progress, ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));
 
         const ImVec2 hint(detail::MARGIN + 300.0f, detail::MARGIN - 4.0f);
-        if (!isGamepad(device)) GuiCards::text(dl, ImVec2(hint.x, hint.y + 4.0f), GuiStyle::MUTED, "Arrastra un pokémon para colocarlo o intercambiarlo", 0.9f);
+        if (!manage) GuiCards::text(dl, ImVec2(hint.x, hint.y + 4.0f), GuiStyle::MUTED, "Para cambiar pokémon entre equipo y PC usa el PC de la máquina del inicio", 0.9f);
+        else if (!isGamepad(device)) GuiCards::text(dl, ImVec2(hint.x, hint.y + 4.0f), GuiStyle::MUTED, "Arrastra un pokémon para colocarlo o intercambiarlo", 0.9f);
         else {
             const float w = GuiPrompts::draw(dl, hint, GuiPrompts::Action::INTERACT, "Coger", device);
             GuiPrompts::draw(dl, ImVec2(hint.x + w + 24.0f, hint.y), GuiPrompts::Action::JUMP, "Soltar en el destino", device);

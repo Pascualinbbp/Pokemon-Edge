@@ -13,13 +13,13 @@
 namespace TeamCircle {
     // 'emphasis' resalta el pokémon que acompaña al jugador.
     inline void draw(ImDrawList* dl, const ImVec2& c, float radius, const GameData& data, const PokemonSpecies& species, int level,
-                     bool shiny, int ballId, bool emphasis, int number = 0, float alpha = 1.0f) {
+                     bool shiny, int ballId, bool emphasis, int number = 0, float alpha = 1.0f, bool fainted = false) {
         const float mini = radius * 0.3f;
         const auto fade = [&](ImU32 color) { return GuiCards::withAlpha(color, static_cast<int>(((color >> 24) & 0xFF) * alpha)); };
-        const ImU32 tone = species.types.empty() ? IM_COL32(60, 60, 80, 255) : GuiCards::typeColor(species.types.front());
+        const ImU32 tone = fainted || species.types.empty() ? IM_COL32(90, 90, 96, 255) : GuiCards::typeColor(species.types.front()); // debilitado: gris
         dl->AddCircleFilled(c, radius, fade(GuiCards::withAlpha(tone, emphasis ? 235 : 150)), 40);
         dl->AddCircle(c, radius, fade(shiny ? IM_COL32(255, 220, 90, 255) : IM_COL32(255, 255, 255, emphasis ? 255 : 90)), 40, emphasis ? 3.5f : 1.5f);
-        ItemIcon::creature(dl, ImVec2(c.x, c.y - radius * 0.13f), radius * 0.5f, species.id, (emphasis ? 1.0f : 0.8f) * alpha);
+        ItemIcon::creature(dl, ImVec2(c.x, c.y - radius * 0.13f), radius * 0.5f, species.id, (emphasis ? 1.0f : 0.8f) * alpha, 0.0f, fainted);
 
         // "Nivel x": etiqueta pequeña sobre el borde superior, oscura y con el filo del color del tipo.
         char text[24];

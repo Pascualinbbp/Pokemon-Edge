@@ -136,3 +136,8 @@ Más información en [Guardado de partidas](guardado.md).
 ---
 
 [← Volver al índice](../README.md) · Anterior: [Controles](controles.md) · Siguiente: [Guardado de partidas](guardado.md)
+
+## Pokémon debilitados y PC
+- Un pokémon sin PS sale en gris (equipo, PC y HUD) y no se puede sacar. Si el acompañante cae, vuelve a su bola y sale el siguiente disponible; si todo el equipo está debilitado, el jugador vuelve al inicio y el equipo se cura.
+- Durante la aventura el menú de Pokémon solo permite ver y usar objetos. Cambiar pokémon entre el equipo y el PC (y liberar) solo se hace en el PC de la máquina de investigación del inicio.
+- Un pokémon capturado va al equipo si hay hueco y, si no, al PC.

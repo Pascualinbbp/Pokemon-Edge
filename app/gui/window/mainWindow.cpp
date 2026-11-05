@@ -385,6 +385,9 @@ void MainWindow::run() {
             case GameState::RESEARCH:
                 ResearchComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory());
                 break;
+            case GameState::PC:
+                PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress(), InputHandler::activeDevice(), true);
+                break;
             case GameState::STARTER:
                 if (const int starter = StarterComponent::render(engine.data()); starter >= 0) {
                     engine.chooseStarter(starter);

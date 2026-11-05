@@ -105,6 +105,10 @@ namespace ResearchComponent {
             inventory.addMoney(detail::lastReport.total);
         }
 
+        ImGui::SetCursorScreenPos(ImVec2(sidePos.x + 20.0f, sidePos.y + 270.0f));
+        if (GuiCards::button("##pc", "ABRIR PC (EQUIPO Y CAJAS)", ImVec2(SIDE_WIDTH - 40.0f, 44.0f), true, IM_COL32(70, 90, 190, 255))) state = GameState::PC;
+        GuiCards::text(dl, ImVec2(sidePos.x + 20.0f, sidePos.y + 322.0f), GuiStyle::MUTED, "Cambia pokémon entre el equipo y el PC.", 0.8f);
+
         detail::drawReport(data, ImVec2(sidePos.x + SIDE_WIDTH + 28.0f, top), ImVec2(screen.x - sidePos.x - SIDE_WIDTH - 28.0f - MARGIN, height));
 
         GuiCards::text(dl, ImVec2(MARGIN, screen.y - MARGIN), GuiStyle::MUTED, "ESC: volver", 0.9f);

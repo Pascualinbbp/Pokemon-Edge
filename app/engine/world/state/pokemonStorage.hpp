@@ -113,8 +113,23 @@ class PokemonStorage {
         owned->hp = full ? maxHp(*owned) : (std::max)(1, maxHp(*owned) / 2);
         return true;
     }
-    void setActive(int teamIndex) { if (teamIndex >= 0 && teamIndex < static_cast<int>(m_team.size())) m_active = teamIndex; }
-    void cycleActive(int direction) { if (!m_team.empty()) m_active = ((m_active + direction) % static_cast<int>(m_team.size()) + static_cast<int>(m_team.size())) % static_cast<int>(m_team.size()); }
+    // Un pokémon debilitado no se puede sacar: setActive lo rechaza y cycleActive lo salta.
+    void setActive(int teamIndex) { if (teamIndex >= 0 && teamIndex < static_cast<int>(m_team.size()) && !fainted(m_team[teamIndex])) m_active = teamIndex; }
+    void cycleActive(int direction) {
+        const int n = static_cast<int>(m_team.size());
+        for (int step = 1; step <= n; ++step) {
+            const int next = ((m_active + direction * step) % n + n) % n;
+            if (!fainted(m_team[next])) { m_active = next; return; }
+        }
+    }
+    // Primer pokémon del equipo en condiciones de salir (-1 si todos están debilitados).
+    int nextUsable() const {
+        for (int i = 0; i < static_cast<int>(m_team.size()); ++i) if (!fainted(m_team[i])) return i;
+        return -1;
+    }
+    bool teamWiped() const { return !m_team.empty() && nextUsable() < 0; }
+    // Centro pokémon: todo el equipo recupera sus PS.
+    void healTeam() { for (OwnedPokemon& owned : m_team) owned.hp = -1; }
 
     // Un pokémon recién capturado va al equipo y, si está lleno, al PC. Devuelve false si no hay sitio en ninguno.
     bool add(const OwnedPokemon& owned, bool& sentToPc) {

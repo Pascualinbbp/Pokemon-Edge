@@ -364,7 +364,7 @@ struct Scene {
         for (size_t i = 0; i < storage.team().size(); ++i) {
             const OwnedPokemon& owned = storage.team()[i];
             if (const PokemonSpecies* species = m_data->speciesById(owned.speciesId)) {
-                s.team.push_back({ species, owned.level, owned.shiny, owned.ballId, static_cast<int>(i) == storage.activeIndex() });
+                s.team.push_back({ species, owned.level, owned.shiny, owned.ballId, static_cast<int>(i) == storage.activeIndex(), storage.fainted(owned) });
             }
         }
         if (!noticeText.empty()) s.noticeText = &noticeText;
@@ -569,7 +569,7 @@ struct Scene {
         if (player.drowning()) health.hurt(HealthRules::DROWN_PER_SECOND * dt);
         updateBurn(dt);
         updateSpring(dt);
-        if (m_respawn <= 0.0f && health.dead()) { // desmayado: pantalla de carga y, ya a oscuras, vuelta al inicio
+        if (m_respawn <= 0.0f && (health.dead() || storage.teamWiped())) { // desmayado: pantalla de carga y, ya a oscuras, vuelta al inicio
             m_respawn = RESPAWN_TIME;
             m_respawnMoved = false;
             showNotice(Notice::FAINTED);
@@ -581,6 +581,7 @@ struct Scene {
             player.body.position = m_home;
             player.body.velocity = { 0.0f, 0.0f, 0.0f };
             health.restore();
+            storage.healTeam(); // al volver al inicio, el equipo se cura
         }
     }
 
@@ -856,6 +857,14 @@ struct Scene {
     // El líder del equipo acompaña al jugador y trabaja solo lo cercano: recoge plantas crecidas y objetos sueltos (cualquier
     // pokémon) y trabaja los nodos y riega las plantas si su habilidad del mundo llega al nivel que piden.
     void updateCompanion(float dt) {
+        if (m_respawn <= 0.0f && storage.active() && storage.fainted(*storage.active()) && !companion.changing()) { // el compañero cae: vuelve a su bola y sale el siguiente
+            const int next = storage.nextUsable();
+            if (next >= 0) {
+                const PokemonSpecies* fallen = m_data->speciesById(storage.active()->speciesId);
+                storage.setActive(next);
+                showNotice(Notice::REWARD, (fallen ? fallen->name : std::string("Tu pokémon")) + " está debilitado");
+            }
+        }
         const OwnedPokemon* lead = storage.active();
         const PokemonSpecies* species = lead ? m_data->speciesById(lead->speciesId) : nullptr;
         if (!lead && companion.active()) companion.set(-1, false, false, player.body.position, camera.yaw());

@@ -98,7 +98,7 @@ namespace PauseComponent {
         const float width = PANEL_WIDTH - 40.0f;
         if (option(0, Icon::BAG, "Mochila", "Objetos, materiales y herramientas", width)) state = GameState::INVENTORY;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
-        if (option(1, Icon::POKEBALL, "Pokémon", "Equipo y PC", width)) state = GameState::POKEMON;
+        if (option(1, Icon::POKEBALL, "Pokémon", "Equipo", width)) state = GameState::POKEMON;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));
         if (option(2, Icon::DEX, "Pokédex", "Pokémon vistos y capturados", width)) state = GameState::POKEDEX;
         ImGui::SetCursorScreenPos(ImVec2(a.x + 20.0f, ImGui::GetCursorScreenPos().y));

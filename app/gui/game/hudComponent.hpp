@@ -379,7 +379,7 @@ namespace HudComponent {
             float y = (std::max)(screen.y * 0.5f - total * 0.5f, top) + RADIUS;
             int number = 1;
             for (const TeamEntry& entry : status.team) {
-                TeamCircle::draw(dl, ImVec2(x, y), RADIUS, *status.data, *entry.species, entry.level, entry.shiny, entry.ballId, entry.active, number++);
+                TeamCircle::draw(dl, ImVec2(x, y), RADIUS, *status.data, *entry.species, entry.level, entry.shiny, entry.ballId, entry.active, number++, 1.0f, entry.fainted);
                 y += RADIUS * 2.0f + GAP;
             }
         }
@@ -394,7 +394,6 @@ namespace HudComponent {
             const auto alpha = [&](int value) { return static_cast<int>(static_cast<float>(value) * fade); };
             const float grow = 0.88f + 0.12f * fade; // aparece creciendo un poco
             dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(8, 10, 16, alpha(110)));
-            dl->AddCircleFilled(c, Radio::Wheel::OUTER * grow, IM_COL32(8, 10, 16, alpha(120)), 64);
 
             for (int slot = 0; slot < static_cast<int>(Radio::Wheel::SLOTS); ++slot) {
                 float ox, oy;

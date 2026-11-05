@@ -25,6 +25,7 @@ struct TeamEntry {
     bool shiny = false;
     int ballId = -1;     // pokéball con la que se capturó
     bool active = false; // el que acompaña al jugador
+    bool fainted = false; // sin PS (se ve en gris)
 };
 
 // Estado del juego que la interfaz necesita mostrar (el HUD no conoce la escena).
