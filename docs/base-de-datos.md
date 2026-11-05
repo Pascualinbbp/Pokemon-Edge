@@ -22,7 +22,7 @@ Están en `testing/sql/` (carpeta ignorada por Git: `/testing` en `.gitignore`).
 | 1 | `pokeball.sql` | `pokeball` |
 | 2 | `material.sql` | `material`, `resource_node` |
 | 3 | `item.sql` | `item_category`, `item` |
-| 4 | `chest.sql` | `chest_rarity`, `chest`, `chest_reward` |
+| 4 | `chest.sql` | `chest`, `chest_reward` |
 | — | `type.sql` | `type` (independiente) |
 
 `item.sql` elimina `chest_reward` al ejecutarse, así que si lo reaplicas debes volver a aplicar `chest.sql` después.
@@ -35,7 +35,7 @@ erDiagram
     material ||--o{ item : "ref_id (MATERIAL)"
     item_category ||--o{ item : category_id
     material ||--o{ resource_node : material_id
-    chest_rarity ||--o{ chest : rarity_id
+    rarity ||--o{ chest : rarity_id
     chest ||--o{ chest_reward : chest_id
     item ||--o{ chest_reward : item_id
 ```
@@ -45,14 +45,13 @@ erDiagram
 | Tabla | Columnas | Descripción |
 |---|---|---|
 | `pokeball` | `id`, `name`, `description`, `capture_multiplier` | Tipos de Pokéball |
-| `material` | `id`, `name`, `description` | Materiales de recolección |
+| `material` | `id`, `name`, `description`, `color` (hex) | Materiales de recolección |
 | `resource_node` | `id`, `name`, `action`, `material_id`, `hits`, `min_yield`, `max_yield`, `spawn_weight` | Nodos del mundo (árbol, roca…) |
 | `item_category` | `id`, `name` | Categorías de objeto: `POKEBALL`, `MATERIAL` |
 | `item` | `id`, `category_id`, `ref_id` | Objeto del juego; `ref_id` apunta a la fila de la tabla de su categoría |
-| `chest_rarity` | `id`, `name` | Común, Raro, Épico |
 | `chest` | `id`, `name`, `rarity_id`, `spawn_weight` | Tipos de cofre |
 | `chest_reward` | `id`, `chest_id`, `item_id`, `quantity`, `probability` | Recompensas posibles de cada cofre |
-| `type` | `id`, `name` | Tipos de Pokémon (19 tipos; de momento no se usa en el juego) |
+| `type` | `id`, `name`, `color` (hex) | Tipos de Pokémon (19 tipos; de momento no se usa en el juego) |
 
 Los nombres y descripciones de un objeto no están en `item`, sino en la tabla de su categoría.
 

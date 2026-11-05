@@ -103,14 +103,22 @@ class PokemonStorage {
         return true;
     }
     // Poción usada con éxito desde el menú: el mundo la recoge (takeMedicine) para mostrarla sobre el acompañante.
-    struct MedicineUse { bool inTeam = false; int index = 0; int amount = 0; bool evolved = false; };
-    void noteMedicine(bool inTeam, int index, int amount, bool evolved) { m_medicine = { inTeam, index, amount, evolved }; m_medicinePending = true; }
+    struct MedicineUse { bool inTeam = false; int index = 0; int trainingId = -1; bool evolved = false; }; // trainingId: objeto de training_item usado (-1 si fue una evolución)
+    void noteMedicine(bool inTeam, int index, int trainingId, bool evolved) { m_medicine = { inTeam, index, trainingId, evolved }; m_medicinePending = true; }
     bool takeMedicine(MedicineUse& out) { if (!m_medicinePending) return false; m_medicinePending = false; out = m_medicine; return true; }
     // Revivir: solo a uno debilitado. Deja la mitad de sus PS (redondeando a la baja) o todos.
     bool revive(bool inTeam, int index, bool full) {
         OwnedPokemon* owned = at(inTeam, index);
         if (!owned || !fainted(*owned)) return false;
         owned->hp = full ? maxHp(*owned) : (std::max)(1, maxHp(*owned) / 2);
+        return true;
+    }
+    // Un debilitado que evoluciona por un objeto vuelve con un pequeño porcentaje de sus PS y sale al mundo (si es del equipo).
+    bool reviveEvolved(bool inTeam, int index, int percent) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned || !fainted(*owned)) return false;
+        owned->hp = (std::max)(1, maxHp(*owned) * percent / 100);
+        if (inTeam) setActive(index);
         return true;
     }
     // Un pokémon debilitado no se puede sacar: setActive lo rechaza y cycleActive lo salta.

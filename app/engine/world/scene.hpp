@@ -15,6 +15,7 @@
 #include "../../utils/core/loggerUtil.hpp"
 #include <cstdio>
 #include "camera.hpp"
+#include "style/styleRegistry.hpp"
 #include "entities/companion.hpp"
 #include "spawn/chestField.hpp"
 #include "rules/captureRules.hpp"
@@ -91,7 +92,7 @@ struct Scene {
     Footprints footprints;     // huellas en la arena de todo lo que se mueve
     int radioStation = 0;      // emisora sintonizada (0 = radio apagada)
     // Poción que el jugador está usando sobre su acompañante (la dibuja Renderer3D::addPotionFx: en su mano, el spray y el brillo del pokémon).
-    struct PotionFx { int amount = 0; float time = -1.0f; bool sprayed = false; };
+    struct PotionFx { std::string model; DirectX::XMFLOAT3 tint = { 1.0f, 1.0f, 1.0f }; float time = -1.0f; bool sprayed = false; };
     static constexpr float POTION_FX_TIME = 2.2f, POTION_SPRAY_FROM = 0.55f, POTION_SPRAY_TO = 1.75f, POTION_DISTANCE = 1.7f;
     PotionFx potionFx;
     bool radioOpen = false;    // rueda de emisoras abierta (con ella la mira queda bloqueada y el ratón elige)
@@ -636,10 +637,16 @@ struct Scene {
     void updatePotionFx(float dt) {
         PokemonStorage::MedicineUse use;
         if (storage.takeMedicine(use)) {
-            const bool onCompanion = use.inTeam && use.index == storage.activeIndex() && companion.active();
-            if (use.evolved) Sound::emit(Sound::Sfx::EVOLVE, onCompanion ? companion.center() : player.body.position);
-            else if (onCompanion) { potionFx = { use.amount, 0.0f, false }; player.act(PlayerAction::POTION); }
-            else Sound::emitGlobal(Sound::Sfx::HEAL);
+            const bool onActive = use.inTeam && use.index == storage.activeIndex();
+            const bool onCompanion = onActive && companion.active();
+            const TrainingItem* type = m_data->training(use.trainingId);
+            if (use.evolved) {
+                if (onActive && storage.active()) m_itemEvolveUid = storage.active()->uid; // el efecto de evolución lo hace el acompañante en cuanto está fuera
+                else Sound::emit(Sound::Sfx::EVOLVE, player.body.position);
+            } else if (onCompanion && type && !type->model.empty()) {
+                potionFx = { type->model, type->rgb >= 0 ? StyleRegistry::unpack(type->rgb) : DirectX::XMFLOAT3{ 1.0f, 1.0f, 1.0f }, 0.0f, false };
+                player.act(PlayerAction::POTION);
+            } else Sound::emitGlobal(Sound::Sfx::HEAL);
         }
         if (potionFx.time < 0.0f) return;
         potionFx.time += dt;
@@ -826,7 +833,12 @@ struct Scene {
     // Devuelve el punto de la cascada hacia el que va (nullptr si no hay intento en marcha).
     const DirectX::XMFLOAT3* updateWaterfall(float dt, const PokemonSpecies* species) {
         m_cascadeRest = (std::max)(0.0f, m_cascadeRest - dt);
-        if (companion.takeEvolveReady() && storage.active()) { // en lo alto de la cascada, en pleno destello
+        const bool evolveReady = companion.takeEvolveReady();
+        if (evolveReady && storage.active() && storage.active()->speciesId != companion.speciesId()) { // evolución por objeto: cambia de especie en pleno destello
+            const PokemonSpecies* next = m_data->speciesById(storage.active()->speciesId);
+            m_shownSpecies = storage.active()->speciesId;
+            if (next) companion.morph(next->id, m_data->levitates(*next));
+        } else if (evolveReady && storage.active()) { // en lo alto de la cascada, en pleno destello
             const std::string before = storage.active()->speciesId >= 0 ? m_data->speciesById(storage.active()->speciesId)->name : std::string();
             if (const PokemonSpecies* next = storage.evolveBy(storage.activeIndex(), Evolution::Method::WATERFALL)) {
                 m_shownSpecies = next->id; // misma criatura: no hay cambio de pokéball
@@ -875,10 +887,14 @@ struct Scene {
         const OwnedPokemon* lead = storage.active();
         const PokemonSpecies* species = lead ? m_data->speciesById(lead->speciesId) : nullptr;
         if (!lead && companion.active()) companion.set(-1, false, false, player.body.position, camera.yaw());
-        else if (lead && species && (lead->uid != m_shownUid || lead->speciesId != m_shownSpecies)) {
+        else if (lead && species && (lead->uid != m_shownUid || (lead->speciesId != m_shownSpecies && lead->uid != m_itemEvolveUid))) {
             m_shownUid = lead->uid; // otro pokémon (o ha evolucionado): vuelve el que está fuera y sale su pokéball
             m_shownSpecies = lead->speciesId;
             companion.swap(species->id, m_data->levitates(*species), lead->ballId, lead->shiny, player.body.position, camera.yaw());
+        }
+        if (m_itemEvolveUid != 0 && lead && lead->uid == m_itemEvolveUid && companion.active() && !companion.changing() && !companion.tripActive()) {
+            m_itemEvolveUid = 0;
+            companion.beginEvolve(); // el destello cambia la especie (updateWaterfall); si ya salió con la nueva, solo brilla
         }
         if (companion.changing() || companion.tripActive()) species = nullptr; // durante el cambio o el intento de subir la cascada no trabaja
         updateDuel(dt, lead, species);
@@ -1733,6 +1749,7 @@ struct Scene {
     float m_captureRest = 0.0f; // descanso del acompañante entre ataques en modo captura
     bool m_collecting = false;
     float m_holdClock = 0.0f;
+    int m_itemEvolveUid = 0;   // pokémon que evoluciona por un objeto y aún no ha hecho el efecto (0 = ninguno)
     int m_shownUid = 0;        // pokémon (uid y especie) que está fuera o saliendo
     int m_shownSpecies = -1;
     int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)

@@ -15,7 +15,7 @@ struct ChestReward {
 struct ChestType {
     int id = -1;
     std::string name;
-    int rarity = 1; // id de chest_rarity: 1 = común, 2 = raro, 3 = épico
+    int rarity = 1; // id de la tabla rarity (la misma de los pokémon)
     float spawnWeight = 1.0f;
     std::vector<ChestReward> rewards;
 };

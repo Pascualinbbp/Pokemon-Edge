@@ -499,7 +499,7 @@ namespace PokemonComponent {
                     if (med.effect != TrainingItem::Effect::HEAL && med.effect != TrainingItem::Effect::REVIVE) continue;
                     if (const Item* medItem = data.itemOf(ItemCategory::TRAINING, med.id)) {
                         const float alpha = ItemUse::applies(data, storage, progress, *medItem, owned) && inventory.count(medItem->id) > 0 ? 1.0f : 0.4f;
-                        button(*medItem, [&](ImDrawList* d, const ImVec2& c) { ItemIcon::training(d, c, 9.0f, med.effect, alpha, med.amount); }, med.name + "\n" + med.description);
+                        button(*medItem, [&](ImDrawList* d, const ImVec2& c) { ItemIcon::training(d, c, 9.0f, med, alpha); }, med.name + "\n" + med.description);
                     }
                 }
                 for (const Item& stone : data.items) {

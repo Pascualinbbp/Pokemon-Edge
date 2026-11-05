@@ -2,6 +2,7 @@
 #include "../models/gameData.hpp"
 #include "../utils/core/loggerUtil.hpp"
 #include "../daos/typeDao.hpp"
+#include "../engine/world/style/styleRegistry.hpp"
 #include "../daos/pokeballDao.hpp"
 #include "../daos/itemDao.hpp"
 #include "../daos/chestDao.hpp"
@@ -91,6 +92,8 @@ class DatabaseManager {
         data.types = typeDaoInstance.findAll();
         data.groundItems = groundItemDaoInstance.findAll();
         data.trainingItems = trainingItemDaoInstance.findAll();
+        for (const PokemonType& type : data.types) StyleRegistry::typeColors()[type.id] = type.rgb;
+        for (const Material& material : data.materials) StyleRegistry::materialColors()[material.id] = material.rgb;
         data.dexRewards = dexRewardDaoInstance.findAll();
         data.habitats = habitatDaoInstance.findHabitats();
         data.weathers = habitatDaoInstance.findWeathers();

@@ -68,11 +68,13 @@ namespace ItemIcon {
         }
     }
 
-    // Caramelo (sube de nivel) o vitamina (sube EVs).
-    inline void training(ImDrawList* dl, const ImVec2& c, float r, TrainingItem::Effect effect, float alpha = 1.0f, int amount = 0) {
+    // Objeto de entrenamiento: sprite de su modelo (pociones y revivir) o, sin él, un dibujo del efecto (caramelo de nivel, vitamina).
+    inline void training(ImDrawList* dl, const ImVec2& c, float r, const TrainingItem& type, float alpha = 1.0f) {
         const int a = static_cast<int>(255.0f * alpha);
-        if (effect == TrainingItem::Effect::HEAL) { // sprite del modelo de la poción (potion, superpotion o ultrapotion)
-            if (const ImTextureID sprite = HudIcons::sprite(ItemStyle::medicineModel(amount))) {
+        const TrainingItem::Effect effect = type.effect;
+        const int amount = type.amount;
+        if (!type.model.empty()) {
+            if (const ImTextureID sprite = HudIcons::sprite(type.model)) {
                 dl->AddImage(sprite, ImVec2(c.x - r * 1.1f, c.y - r * 1.1f), ImVec2(c.x + r * 1.1f, c.y + r * 1.1f), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, a));
                 return;
             }
@@ -120,7 +122,7 @@ namespace ItemIcon {
             case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::look(type->id), alpha); break;
             case ItemCategory::MATERIAL: material(dl, c, r, item.refId, alpha); break;
             case ItemCategory::TOOL:     tool(dl, c, r, item.refId, alpha); break;
-            case ItemCategory::TRAINING: if (const TrainingItem* type = data.training(item.refId)) training(dl, c, r, type->effect, alpha, type->amount); break;
+            case ItemCategory::TRAINING: if (const TrainingItem* type = data.training(item.refId)) training(dl, c, r, *type, alpha); break;
             default: break;
         }
     }
@@ -142,7 +144,7 @@ namespace ItemIcon {
             case ItemCategory::POKEBALL: ball(dl, c, r, PokeballStyle::look(1)); break;
             case ItemCategory::MATERIAL: material(dl, c, r, 2); break;
             case ItemCategory::TOOL:     tool(dl, c, r, 1); break;
-            case ItemCategory::TRAINING: training(dl, c, r, TrainingItem::Effect::LEVEL); break;
+            case ItemCategory::TRAINING: training(dl, c, r, TrainingItem{}); break;
             default: break;
         }
     }

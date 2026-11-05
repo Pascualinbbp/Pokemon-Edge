@@ -15,8 +15,8 @@ namespace ChestStyle {
 
     inline Look look(int rarity) {
         switch (rarity) {
-            case 2:  return { { 0.20f, 0.45f, 0.95f }, 0.15f, 10 }; // raro: azul
-            case 3:  return { { 0.65f, 0.28f, 0.92f }, 0.28f, 16 }; // épico: morado
+            case 3: case 4: return { { 0.20f, 0.45f, 0.95f }, 0.15f, 10 }; // raro (id de rarity): azul
+            case 5: case 6: case 7: return { { 0.65f, 0.28f, 0.92f }, 0.28f, 16 }; // épico: morado
             default: return { { 0.60f, 0.40f, 0.22f }, 0.00f, 6 };  // común: madera
         }
     }

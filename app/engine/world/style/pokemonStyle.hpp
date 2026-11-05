@@ -2,8 +2,9 @@
 #include <algorithm>
 #include <cmath>
 #include <DirectXMath.h>
+#include "styleRegistry.hpp"
 
-// Aspecto de cada pokémon y tipo (por id de la base de datos). Es el único sitio donde se definen sus colores.
+// Aspecto de cada pokémon (por id de la base de datos); el color de los tipos viene de la tabla type.
 namespace PokemonStyle {
     // Color propio de cada especie sin color a mano: el tono recorre el círculo cromático con el id (ángulo áureo), así que dos
     // especies seguidas nunca se parecen.
@@ -43,31 +44,9 @@ namespace PokemonStyle {
         return { (std::min)(1.0f, c.z * 1.3f + 0.15f), (std::min)(1.0f, c.x * 1.1f + 0.1f), (std::min)(1.0f, c.y * 1.3f + 0.15f) };
     }
 
-    // Color de la etiqueta de cada tipo (RGB 0..255); el orden de la tabla type fija los id.
+    // Color de la etiqueta de cada tipo (RGB 0..255), de la columna color de la tabla type.
     inline void typeRgb(int typeId, int& r, int& g, int& b) {
-        static constexpr int RGB[][3] = {
-            { 168, 168, 120 }, // 1 normal
-            { 240, 128, 48 },  // 2 fuego
-            { 104, 144, 240 }, // 3 agua
-            { 120, 200, 80 },  // 4 planta
-            { 248, 208, 48 },  // 5 eléctrico
-            { 152, 216, 216 }, // 6 hielo
-            { 192, 48, 40 },   // 7 lucha
-            { 160, 90, 200 },  // 8 veneno
-            { 224, 192, 104 }, // 9 tierra
-            { 168, 144, 240 }, // 10 volador
-            { 248, 88, 136 },  // 11 psíquico
-            { 168, 184, 32 },  // 12 bicho
-            { 184, 160, 56 },  // 13 roca
-            { 112, 88, 152 },  // 14 fantasma
-            { 112, 56, 248 },  // 15 dragón
-            { 112, 88, 72 },   // 16 siniestro
-            { 184, 184, 208 }, // 17 acero
-            { 238, 153, 172 }, // 18 hada
-            { 80, 190, 170 },  // 19 sonido
-        };
-        constexpr int COUNT = static_cast<int>(sizeof(RGB) / sizeof(RGB[0]));
-        const int i = (typeId >= 1 && typeId <= COUNT) ? typeId - 1 : 0;
-        r = RGB[i][0]; g = RGB[i][1]; b = RGB[i][2];
+        const DirectX::XMFLOAT3 c = StyleRegistry::lookup(StyleRegistry::typeColors(), typeId, { 0.66f, 0.66f, 0.47f });
+        r = static_cast<int>(c.x * 255.0f + 0.5f); g = static_cast<int>(c.y * 255.0f + 0.5f); b = static_cast<int>(c.z * 255.0f + 0.5f);
     }
 }

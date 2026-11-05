@@ -33,10 +33,10 @@ class TypeDao {
     }
 
     private:
-    static constexpr const char* SELECT_ALL = "SELECT id, name FROM type;";
-    static constexpr const char* SELECT_BY_ID = "SELECT id, name FROM type WHERE id = ?;";
+    static constexpr const char* SELECT_ALL = "SELECT id, name, color FROM type ORDER BY id;";
+    static constexpr const char* SELECT_BY_ID = "SELECT id, name, color FROM type WHERE id = ?;";
     
     static PokemonType fromRow(const SqliteUtil::Row& row) {
-        return { std::stoi(row.at("id")), row.at("name") };
+        return { DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::rgb(row, "color") };
     }
 };

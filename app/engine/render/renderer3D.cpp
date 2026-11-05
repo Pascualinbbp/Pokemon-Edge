@@ -2003,7 +2003,7 @@ void Renderer3D::addPotionFx(const Scene& scene, CXMMATRIX hand) {
     const float sinF = std::sin(facing), cosF = std::cos(facing);
     const XMFLOAT3 nozzle = { grip.x + sinF * 0.14f, grip.y + 0.22f, grip.z + cosF * 0.14f }; // la boquilla, delante y arriba del puño
 
-    if (const RenderModel* model = m_models.get(m_device, ItemStyle::medicineModel(fx.amount)); model && fade > 0.01f) {
+    if (const RenderModel* model = m_models.get(m_device, fx.model); model && fade > 0.01f) {
         const XMFLOAT3 c = model->center();
         const float k = ItemStyle::MEDICINE_HELD_HEIGHT * fade / model->height();
         const XMMATRIX world = XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(k, k, k) * XMMatrixRotationY(facing + ItemStyle::MEDICINE_FRONT_YAW) *
@@ -2015,7 +2015,7 @@ void Renderer3D::addPotionFx(const Scene& scene, CXMMATRIX hand) {
     if (t < from || t > to + 0.1f) return;
     const float envelope = (std::min)((t - from) / 0.08f, 1.0f) * (std::min)((to + 0.1f - t) / 0.1f, 1.0f); // el chorro arranca y se corta suave
     const XMFLOAT3 target = pet.center();
-    const XMFLOAT3 tint = ItemStyle::medicineColor(fx.amount);
+    const XMFLOAT3 tint = fx.tint;
     constexpr int PUFFS = 18;
     for (int i = 0; i < PUFFS; ++i) { // niebla del spray: gotas que salen de la boquilla y se abren hacia el pokémon
         const float f = std::fmod(fx.time * 2.4f + static_cast<float>(i) / PUFFS, 1.0f);

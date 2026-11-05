@@ -9,6 +9,7 @@
 // sirve cada objeto y qué hace; lo usan por igual el menú de pokémon y la mochila.
 namespace ItemUse {
     using Place = PokemonStorage::Place;
+    constexpr int EVOLVE_REVIVE_PERCENT = 25; // PS con los que vuelve un debilitado al evolucionar por un objeto
     enum class Kind { NONE, HEAL, REVIVE, LEVEL, STONE };
 
     // Evolución que provoca esta piedra (mineral) en esta especie; nullptr si no hace nada.
@@ -58,19 +59,21 @@ namespace ItemUse {
         if (!applies(data, storage, progress, item, owned)) return {};
         const PokemonSpecies* before = data.speciesById(owned.speciesId);
         const std::string name = before ? before->name : "El pokémon";
+        const bool wasFainted = storage.fainted(owned);
         const std::string itemName = data.itemTitle(item, 1);
         std::string message;
         switch (kind(data, item)) {
             case Kind::HEAL: {
                 const TrainingItem* type = data.training(item.refId);
                 storage.heal(place.inTeam, place.index, type->amount >= 99999 ? 0 : type->amount);
-                storage.noteMedicine(place.inTeam, place.index, type->amount, false); // el mundo lo muestra sobre el acompañante
+                storage.noteMedicine(place.inTeam, place.index, type->id, false); // el mundo lo muestra sobre el acompañante
                 message = itemName + " usado en " + name;
                 break;
             }
             case Kind::REVIVE: {
                 const TrainingItem* type = data.training(item.refId);
                 storage.revive(place.inTeam, place.index, type->amount >= 100);
+                storage.noteMedicine(place.inTeam, place.index, type->id, false);
                 message = itemName + " usado en " + name;
                 break;
             }
@@ -78,13 +81,17 @@ namespace ItemUse {
                 const PokemonStorage::LevelResult result = storage.levelUp(place.inTeam, place.index, progress.levelCap());
                 const PokemonSpecies* after = data.speciesById(list[place.index].speciesId);
                 message = result == PokemonStorage::LevelResult::EVOLVED && after ? "¡" + name + " ha evolucionado a " + after->name + "!" : name + " sube de nivel";
-                if (result == PokemonStorage::LevelResult::EVOLVED) storage.noteMedicine(place.inTeam, place.index, 0, true);
+                if (result == PokemonStorage::LevelResult::EVOLVED) {
+                    if (wasFainted) storage.reviveEvolved(place.inTeam, place.index, EVOLVE_REVIVE_PERCENT);
+                    storage.noteMedicine(place.inTeam, place.index, -1, true);
+                }
                 break;
             }
             case Kind::STONE: {
                 const PokemonSpecies* after = storage.evolveWithStone(place.inTeam, place.index, item.refId);
                 if (!after) return {};
-                storage.noteMedicine(place.inTeam, place.index, 0, true);
+                if (wasFainted) storage.reviveEvolved(place.inTeam, place.index, EVOLVE_REVIVE_PERCENT);
+                storage.noteMedicine(place.inTeam, place.index, -1, true);
                 message = "¡" + name + " ha evolucionado a " + after->name + "!";
                 break;
             }
