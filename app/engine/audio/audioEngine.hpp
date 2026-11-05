@@ -15,13 +15,15 @@ namespace Audio {
     //  - 'Loader' devuelve el clip de un fichero de assets/ (nullptr si no existe): así el motor no sabe de dónde salen los datos.
     class AudioEngine {
         public:
-        using Loader = std::function<ClipPtr(const std::string& path)>;
+        using Loader = std::function<ClipPtr(const std::string& path)>;           // efectos: un WAV de assets/
+        using RadioLoader = std::function<RadioPtr(const std::string& path)>;   // emisoras: su fichero (MP3 o WAV) sin extensión
         static constexpr float RADIO_VOLUME = 0.42f;
         static constexpr float UNLOAD_AFTER = 90.0f; // segundos sin sonar para soltar un efecto
         static constexpr float SWEEP_EVERY = 20.0f;
 
-        bool init(Loader loader) {
+        bool init(Loader loader, RadioLoader radioLoader) {
             m_loader = std::move(loader);
+            m_radioLoader = std::move(radioLoader);
             m_clock = m_lastSweep = 0.0f;
             return m_device.start(Mixer::RATE, [this](int16_t* out, int frames) { m_mixer.render(out, frames); });
         }
@@ -30,7 +32,7 @@ namespace Audio {
             m_device.stop();
             m_mixer.setRadio(nullptr, 0.0f);
             m_station = 0;
-            m_resume.fill(0.0f);
+            m_resume.fill(0);
             for (Slot& slot : m_slots) slot = {};
         }
 
@@ -82,9 +84,9 @@ namespace Audio {
             if (station == m_station) return;
             if (m_station > 0) m_resume[static_cast<size_t>(m_station)] = m_mixer.radioPosition(); // la emisora que se deja guarda por dónde iba
             m_station = station;
-            ClipPtr clip;
-            if (station > 0 && m_loader) clip = m_loader(Radio::station(station).path); // solo la emisora actual está en memoria
-            m_mixer.setRadio(clip, RADIO_VOLUME, station > 0 ? m_resume[static_cast<size_t>(station)] : 0.0f); // y al volver a ella sigue desde ahí
+            RadioPtr source;
+            if (station > 0 && m_radioLoader) source = m_radioLoader(Radio::station(station).path); // solo la emisora actual está abierta
+            m_mixer.setRadio(source, RADIO_VOLUME, station > 0 ? m_resume[static_cast<size_t>(station)] : 0); // y al volver a ella sigue desde ahí
         }
 
         void sweep() {
@@ -95,12 +97,13 @@ namespace Audio {
         float jitter() { m_seed = m_seed * 1664525u + 1013904223u; return static_cast<float>((m_seed >> 8) & 0xFFFF) / 32767.5f - 1.0f; } // -1..1
 
         Loader m_loader;
+        RadioLoader m_radioLoader;
         AudioDevice m_device;
         Mixer m_mixer;
         std::array<Slot, static_cast<size_t>(Sound::Sfx::COUNT)> m_slots;
         std::vector<Sound::Event> m_events;
         int m_station = 0;
-        std::array<float, Radio::COUNT + 1> m_resume{}; // por dónde iba cada emisora (0..1 de su fichero)
+        std::array<size_t, Radio::COUNT + 1> m_resume{}; // por dónde iba cada emisora (fotograma de su fichero)
         float m_clock = 0.0f, m_lastSweep = 0.0f;
         unsigned m_seed = 2463534242u;
     };

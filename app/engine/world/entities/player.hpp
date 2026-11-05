@@ -47,6 +47,7 @@ class Player {
     // Al apuntar el personaje se mueve siempre respecto a la cámara (la sigue de forma continua).
     // Lo asigna la escena antes de cada update.
     bool aiming = false;
+    float actionYaw = 0.0f; // hacia dónde mira mientras usa una poción (hacia el pokémon)
 
     // Aire que aguanta el personaje bajo el agua (s). Es el punto de extensión del equipo de buceo: un equipamiento lo sube, y
     // con 'breathesUnderwater' no se gasta nunca.
@@ -173,7 +174,8 @@ class Player {
         const bool faceCamera = aiming || m_action != PlayerAction::NONE || m_holding != PlayerAction::NONE;
         const float speed = std::hypot(body.velocity.x, body.velocity.z);
         float target = m_facing;
-        if (faceCamera) target = cameraYaw;
+        if (m_action == PlayerAction::POTION) target = actionYaw;
+        else if (faceCamera) target = cameraYaw;
         else if (speed > FACING_MIN_SPEED) target = std::atan2(body.velocity.x, body.velocity.z);
         const float delta = DirectX::XMScalarModAngle(target - m_facing);
         m_facing += (std::clamp)(delta, -TURN_SPEED * dt, TURN_SPEED * dt);

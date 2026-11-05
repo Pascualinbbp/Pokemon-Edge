@@ -27,4 +27,12 @@ namespace ItemStyle {
     inline const char* medicineModel(int amount) {
         return amount <= 20 ? "potions/potion" : amount <= 60 ? "potions/superpotion" : "potions/ultrapotion";
     }
+
+    inline constexpr float MEDICINE_HELD_HEIGHT = 0.34f; // alto del frasco en la mano (m)
+    inline constexpr float MEDICINE_FRONT_YAW = 0.0f;    // giro para que la boquilla (+z en el modelo) apunte hacia delante; se ajusta aquí si hiciera falta
+
+    // Color del spray de cada poción.
+    inline DirectX::XMFLOAT3 medicineColor(int amount) {
+        return amount <= 20 ? DirectX::XMFLOAT3{ 0.65f, 0.45f, 0.95f } : amount <= 60 ? DirectX::XMFLOAT3{ 0.95f, 0.40f, 0.70f } : DirectX::XMFLOAT3{ 1.0f, 0.60f, 0.25f };
+    }
 }

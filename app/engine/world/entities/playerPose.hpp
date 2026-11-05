@@ -123,6 +123,15 @@ struct PlayerPose {
                 pose.holding = PlayerAction::NONE;
                 break;
             }
+            case PlayerAction::POTION: { // saca la poción, apunta con ella al pokémon, rocía y la baja
+                const float raise = ease((std::min)(u / 0.2f, 1.0f)) * (1.0f - ease((std::max)((u - 0.85f) / 0.15f, 0.0f)));
+                pose.rightArm = 0.3f + 1.2f * raise;
+                pose.leftArm = 0.15f * raise;
+                pose.rightRoll = 0.1f * raise;
+                pose.lean = 0.1f * raise;
+                pose.toolTilt = 0.0f;
+                break;
+            }
             case PlayerAction::OPEN: {
                 const float down = std::sin(3.14159265f * u);
                 pose.lean = 0.15f + 0.5f * down;

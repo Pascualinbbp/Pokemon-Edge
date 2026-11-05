@@ -103,8 +103,8 @@ class PokemonStorage {
         return true;
     }
     // Poción usada con éxito desde el menú: el mundo la recoge (takeMedicine) para mostrarla sobre el acompañante.
-    struct MedicineUse { bool inTeam = false; int index = 0; int amount = 0; };
-    void noteMedicine(bool inTeam, int index, int amount) { m_medicine = { inTeam, index, amount }; m_medicinePending = true; }
+    struct MedicineUse { bool inTeam = false; int index = 0; int amount = 0; bool evolved = false; };
+    void noteMedicine(bool inTeam, int index, int amount, bool evolved) { m_medicine = { inTeam, index, amount, evolved }; m_medicinePending = true; }
     bool takeMedicine(MedicineUse& out) { if (!m_medicinePending) return false; m_medicinePending = false; out = m_medicine; return true; }
     // Revivir: solo a uno debilitado. Deja la mitad de sus PS (redondeando a la baja) o todos.
     bool revive(bool inTeam, int index, bool full) {
@@ -238,6 +238,21 @@ class PokemonStorage {
             return LevelResult::EVOLVED;
         }
         return LevelResult::LEVELED;
+    }
+
+    // Evoluciona (equipo o PC) con una piedra: 'materialId' es el mineral usado. Devuelve la especie nueva o nullptr si esa piedra no le hace nada.
+    const PokemonSpecies* evolveWithStone(bool inTeam, int index, int materialId) {
+        OwnedPokemon* owned = at(inTeam, index);
+        const PokemonSpecies* species = owned ? m_data->speciesById(owned->speciesId) : nullptr;
+        if (!species) return nullptr;
+        for (const Evolution& evolution : species->evolutions) {
+            const PokemonSpecies* next = evolution.method == Evolution::Method::STONE && evolution.materialId == materialId ? m_data->speciesById(evolution.toId) : nullptr;
+            if (!next) continue;
+            owned->speciesId = next->id;
+            markDex(next->id, DEX_CAUGHT);
+            return next;
+        }
+        return nullptr;
     }
 
     // Evoluciona a un pokémon del equipo por un método que no es el nivel (cascada...). Devuelve la especie nueva o nullptr si no toca.

@@ -13,6 +13,7 @@
 #include "../../models/saveData.hpp"
 #include "gameStatus.hpp"
 #include "input.hpp"
+#include "../audio/mp3Source.hpp"
 
 class GameEngine {
     public:
@@ -21,9 +22,15 @@ class GameEngine {
 
     void init(ID3D11Device* device) {
         m_renderer.init(device);
-        m_audio.init([](const std::string& path) -> Audio::ClipPtr { // los sonidos están incrustados en el exe (assets/audio/...)
+        m_audio.init([](const std::string& path) -> Audio::ClipPtr { // los efectos están incrustados en el exe (assets/audio/...)
             const ResourceUtil::Blob blob = ResourceUtil::loadAsset(path);
             return blob ? Audio::Wav::parse(blob.data, blob.size) : nullptr;
+        }, [](const std::string& path) -> Audio::RadioPtr { // las emisoras: MP3 (se lee directamente del exe, sin copiarlo) o, si no, WAV
+            const ResourceUtil::Blob mp3 = ResourceUtil::loadAsset(path + ".mp3");
+            if (mp3) return Audio::Mp3Source::open(mp3.data, mp3.size);
+            const ResourceUtil::Blob wav = ResourceUtil::loadAsset(path + ".wav");
+            const Audio::ClipPtr clip = wav ? Audio::Wav::parse(wav.data, wav.size) : nullptr;
+            return clip ? std::make_shared<Audio::ClipSource>(clip) : nullptr;
         });
     }
 

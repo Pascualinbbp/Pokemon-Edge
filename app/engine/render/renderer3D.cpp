@@ -1075,7 +1075,6 @@ void Renderer3D::collect(const Scene& scene) {
             }
         }
         if (const BallTransfer* transfer = pet.transfer()) addTransfer(*transfer, pet.drawCenter(), Companion::SIZE * pet.scale());
-        addPotionFx(scene);
     }
 
     for (const Scene::Strike& strike : scene.strikes) { // golpe del acompañante: rayo (a distancia) e impacto con el color de su tipo
@@ -1144,6 +1143,7 @@ void Renderer3D::addPlayer(const Scene& scene) {
     if (pose.holding != PlayerAction::NONE) {
         const XMMATRIX hand = XMMatrixRotationX(-pose.toolTilt) * XMMatrixTranslation(0.0f, -ARM, 0.0f) * rightArm; // marco de la mano: -y sigue la dirección del brazo
         addTool(pose.holding, hand);
+        addPotionFx(scene, hand);
         if (pose.holding == PlayerAction::FISH) {
             XMFLOAT3 tip;
             XMStoreFloat3(&tip, XMVector3TransformCoord(XMVectorSet(0.0f, -ROD_LENGTH, 0.0f, 1.0f), hand));
@@ -1987,34 +1987,48 @@ void Renderer3D::cleanup() {
     m_worldBuilt = false;
 }
 
-// Poción sobre el acompañante: su modelo sube, se inclina vertiendo el líquido (destellos verdes que bajan al pokémon, que brilla) y se desvanece.
-void Renderer3D::addPotionFx(const Scene& scene) {
+// Poción que el jugador usa sobre su acompañante: el frasco (su modelo 3D) en la mano, el spray hacia el pokémon (que brilla mientras lo recibe) y el frasco
+// que se encoge hasta desaparecer. 'hand' es el marco de la mano derecha del jugador (ver addPlayer).
+void Renderer3D::addPotionFx(const Scene& scene, CXMMATRIX hand) {
     const Scene::PotionFx& fx = scene.potionFx;
     if (fx.time < 0.0f) return;
-    const RenderModel* model = m_models.get(m_device, ItemStyle::medicineModel(fx.amount));
     const Companion& pet = scene.companion;
-    const XMFLOAT3 at = pet.drawCenter();
-    const float t = fx.time / Scene::POTION_FX_TIME;                          // 0..1
-    const float appear = (std::min)(t / 0.2f, 1.0f), vanish = (std::min)((1.0f - t) / 0.2f, 1.0f);
-    const float scale = (std::min)(appear, vanish);                           // crece al aparecer y se encoge al irse
-    const float pour = (std::clamp)((t - 0.25f) / 0.25f, 0.0f, 1.0f) * (1.0f - (std::clamp)((t - 0.7f) / 0.2f, 0.0f, 1.0f)); // inclinación 0..1
-    const float lift = Companion::SIZE * 0.5f + 0.55f + 0.12f * std::sin(t * 6.2831853f);
-    const XMFLOAT3 top = { at.x, at.y + lift, at.z };
-    if (model && scale > 0.01f) {
+    const float t = fx.time / Scene::POTION_FX_TIME; // 0..1
+    const float appear = (std::min)(t / 0.12f, 1.0f), vanish = (std::min)((1.0f - t) / 0.15f, 1.0f);
+    const float fade = (std::min)(appear, vanish);   // el frasco crece al sacarlo y se encoge al guardarlo
+
+    XMFLOAT3 grip;
+    XMStoreFloat3(&grip, XMVector3TransformCoord(XMVectorZero(), hand));
+    const float facing = scene.player.facing();
+    const float sinF = std::sin(facing), cosF = std::cos(facing);
+    const XMFLOAT3 nozzle = { grip.x + sinF * 0.14f, grip.y + 0.22f, grip.z + cosF * 0.14f }; // la boquilla, delante y arriba del puño
+
+    if (const RenderModel* model = m_models.get(m_device, ItemStyle::medicineModel(fx.amount)); model && fade > 0.01f) {
         const XMFLOAT3 c = model->center();
-        const float k = 0.5f * scale / model->height(); // medio metro de alto
-        const float tilt = pour * 1.9f;                  // ~110º hacia el pokémon
-        const XMMATRIX world = XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(k, k, k) * XMMatrixRotationZ(-tilt) * XMMatrixRotationY(pet.yaw() + 0.6f) * XMMatrixTranslation(top.x, top.y, top.z);
+        const float k = ItemStyle::MEDICINE_HELD_HEIGHT * fade / model->height();
+        const XMMATRIX world = XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(k, k, k) * XMMatrixRotationY(facing + ItemStyle::MEDICINE_FRONT_YAW) *
+                               XMMatrixTranslation(grip.x, grip.y + 0.12f, grip.z);
         addModel(*model, world, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose{}, false);
     }
-    if (pour > 0.05f) { // el líquido cae: destellos verdes bajan desde el frasco hasta el pokémon, y este brilla
-        for (int i = 0; i < 6; ++i) {
-            const float f = std::fmod(t * 3.0f + static_cast<float>(i) / 6.0f, 1.0f);
-            const float r = 0.05f * (1.0f - f) * pour + 0.01f;
-            const float ox = 0.12f * std::sin(static_cast<float>(i) * 2.1f), oz = 0.12f * std::cos(static_cast<float>(i) * 2.1f);
-            add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(top.x + ox * (1.0f - f), top.y + (at.y - top.y) * f, top.z + oz * (1.0f - f)), { 0.35f, 1.0f, 0.55f, 1.0f * pour }, false, DrawKind::GLOW);
-        }
-        const float g = Companion::SIZE * (0.9f + 0.4f * pour);
-        add(m_sphere, XMMatrixScaling(g, g, g) * XMMatrixTranslation(at.x, at.y, at.z), { 0.4f, 1.0f, 0.6f, 0.35f * pour }, false, DrawKind::GLOW);
+
+    const float from = Scene::POTION_SPRAY_FROM / Scene::POTION_FX_TIME, to = Scene::POTION_SPRAY_TO / Scene::POTION_FX_TIME;
+    if (t < from || t > to + 0.1f) return;
+    const float envelope = (std::min)((t - from) / 0.08f, 1.0f) * (std::min)((to + 0.1f - t) / 0.1f, 1.0f); // el chorro arranca y se corta suave
+    const XMFLOAT3 target = pet.center();
+    const XMFLOAT3 tint = ItemStyle::medicineColor(fx.amount);
+    constexpr int PUFFS = 18;
+    for (int i = 0; i < PUFFS; ++i) { // niebla del spray: gotas que salen de la boquilla y se abren hacia el pokémon
+        const float f = std::fmod(fx.time * 2.4f + static_cast<float>(i) / PUFFS, 1.0f);
+        const float a = static_cast<float>(i) * 2.399963f, spread = 0.16f * f;
+        const float r = 0.03f + 0.07f * f;
+        const XMFLOAT3 p = { nozzle.x + (target.x - nozzle.x) * f + std::cos(a) * spread, nozzle.y + (target.y - nozzle.y) * f + std::sin(a * 1.7f) * spread, nozzle.z + (target.z - nozzle.z) * f + std::sin(a) * spread };
+        add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(p.x, p.y, p.z), { tint.x, tint.y, tint.z, 0.75f * (1.0f - f) * envelope }, false, DrawKind::GLOW);
+    }
+    const float g = Companion::SIZE * (1.0f + 0.15f * std::sin(fx.time * 14.0f));
+    add(m_sphere, XMMatrixScaling(g, g, g) * XMMatrixTranslation(target.x, target.y, target.z), { 0.4f, 1.0f, 0.6f, 0.30f * envelope }, false, DrawKind::GLOW); // el pokémon se cura
+    for (int i = 0; i < 6; ++i) { // chispas verdes que suben
+        const float f = std::fmod(fx.time * 1.3f + static_cast<float>(i) / 6.0f, 1.0f), a = static_cast<float>(i) * 1.047f + fx.time;
+        const float r = 0.04f * (1.0f - f);
+        add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(target.x + std::cos(a) * 0.35f, target.y - 0.2f + f * 0.8f, target.z + std::sin(a) * 0.35f), { 0.5f, 1.0f, 0.65f, 0.9f * envelope }, false, DrawKind::GLOW);
     }
 }

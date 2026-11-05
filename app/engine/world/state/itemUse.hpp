@@ -1,0 +1,96 @@
+#pragma once
+#include <string>
+#include "inventory.hpp"
+#include "playerProgress.hpp"
+#include "pokemonStorage.hpp"
+#include "../../../models/gameData.hpp"
+
+// Uso de objetos sobre un pokémon (pociones, revivir, caramelo de nivel y piedras evolutivas). Es el único sitio donde se decide para qué
+// sirve cada objeto y qué hace; lo usan por igual el menú de pokémon y la mochila.
+namespace ItemUse {
+    using Place = PokemonStorage::Place;
+    enum class Kind { NONE, HEAL, REVIVE, LEVEL, STONE };
+
+    // Evolución que provoca esta piedra (mineral) en esta especie; nullptr si no hace nada.
+    inline const Evolution* stoneEvolution(const GameData& data, const PokemonSpecies& species, const Item& item) {
+        if (item.category != ItemCategory::MATERIAL) return nullptr;
+        for (const Evolution& evolution : species.evolutions) {
+            if (evolution.method == Evolution::Method::STONE && evolution.materialId == item.refId && data.speciesById(evolution.toId)) return &evolution;
+        }
+        return nullptr;
+    }
+
+    // ¿Es un objeto que se usa sobre un pokémon? Las piedras son materiales que algún pokémon necesita para evolucionar.
+    inline Kind kind(const GameData& data, const Item& item) {
+        if (item.category == ItemCategory::TRAINING) {
+            const TrainingItem* type = data.training(item.refId);
+            if (!type) return Kind::NONE;
+            switch (type->effect) {
+                case TrainingItem::Effect::HEAL:   return Kind::HEAL;
+                case TrainingItem::Effect::REVIVE: return Kind::REVIVE;
+                case TrainingItem::Effect::LEVEL:  return Kind::LEVEL;
+                default:                           return Kind::NONE; // vitaminas: se gastan desde la ficha de estadísticas
+            }
+        }
+        if (item.category == ItemCategory::MATERIAL) {
+            for (const PokemonSpecies& species : data.species) if (stoneEvolution(data, species, item)) return Kind::STONE;
+        }
+        return Kind::NONE;
+    }
+
+    // ¿Tendría efecto sobre este pokémon?
+    inline bool applies(const GameData& data, const PokemonStorage& storage, const PlayerProgress& progress, const Item& item, const OwnedPokemon& owned) {
+        const PokemonSpecies* species = data.speciesById(owned.speciesId);
+        switch (kind(data, item)) {
+            case Kind::HEAL:   return !storage.fainted(owned) && storage.hpOf(owned) < storage.maxHp(owned);
+            case Kind::REVIVE: return storage.fainted(owned);
+            case Kind::LEVEL:  return owned.level < progress.levelCap();
+            case Kind::STONE:  return species && stoneEvolution(data, *species, item);
+            default:           return false;
+        }
+    }
+
+    // Usa el objeto sobre el pokémon de 'place'. Si surte efecto gasta una unidad y devuelve el mensaje; si no, devuelve "" y no gasta nada.
+    inline std::string apply(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, const Item& item, const Place& place) {
+        const std::vector<OwnedPokemon>& list = place.inTeam ? storage.team() : storage.pc();
+        if (place.index < 0 || place.index >= static_cast<int>(list.size()) || inventory.count(item.id) <= 0) return {};
+        const OwnedPokemon& owned = list[place.index];
+        if (!applies(data, storage, progress, item, owned)) return {};
+        const PokemonSpecies* before = data.speciesById(owned.speciesId);
+        const std::string name = before ? before->name : "El pokémon";
+        const std::string itemName = data.itemTitle(item, 1);
+        std::string message;
+        switch (kind(data, item)) {
+            case Kind::HEAL: {
+                const TrainingItem* type = data.training(item.refId);
+                storage.heal(place.inTeam, place.index, type->amount >= 99999 ? 0 : type->amount);
+                storage.noteMedicine(place.inTeam, place.index, type->amount, false); // el mundo lo muestra sobre el acompañante
+                message = itemName + " usado en " + name;
+                break;
+            }
+            case Kind::REVIVE: {
+                const TrainingItem* type = data.training(item.refId);
+                storage.revive(place.inTeam, place.index, type->amount >= 100);
+                message = itemName + " usado en " + name;
+                break;
+            }
+            case Kind::LEVEL: {
+                const PokemonStorage::LevelResult result = storage.levelUp(place.inTeam, place.index, progress.levelCap());
+                const PokemonSpecies* after = data.speciesById(list[place.index].speciesId);
+                message = result == PokemonStorage::LevelResult::EVOLVED && after ? "¡" + name + " ha evolucionado a " + after->name + "!" : name + " sube de nivel";
+                if (result == PokemonStorage::LevelResult::EVOLVED) storage.noteMedicine(place.inTeam, place.index, 0, true);
+                break;
+            }
+            case Kind::STONE: {
+                const PokemonSpecies* after = storage.evolveWithStone(place.inTeam, place.index, item.refId);
+                if (!after) return {};
+                storage.noteMedicine(place.inTeam, place.index, 0, true);
+                message = "¡" + name + " ha evolucionado a " + after->name + "!";
+                break;
+            }
+            default: return {};
+        }
+        inventory.add(item.id, -1);
+        return message;
+    }
+}

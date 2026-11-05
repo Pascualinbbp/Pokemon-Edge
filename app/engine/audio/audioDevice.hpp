@@ -17,7 +17,7 @@ namespace Audio {
         public:
         using Fill = std::function<void(int16_t* out, int frames)>;
         static constexpr int BUFFERS = 4;
-        static constexpr int FRAMES = 512; // ~23 ms por búfer a 22 050 Hz: poca latencia sin cortes
+        static constexpr int FRAMES = 1024; // ~23 ms por búfer a 44 100 Hz: poca latencia sin cortes
 
 #ifdef _WIN32
         bool start(int rate, Fill fill) {

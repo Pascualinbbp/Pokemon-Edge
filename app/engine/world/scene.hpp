@@ -90,9 +90,9 @@ struct Scene {
     std::vector<Fruit> fruits; // cocos y plátanos caídos de los árboles (pocos a la vez)
     Footprints footprints;     // huellas en la arena de todo lo que se mueve
     int radioStation = 0;      // emisora sintonizada (0 = radio apagada)
-    // Poción usada sobre el pokémon que acompaña: su modelo 3D aparece sobre él y se vuelca (lo dibuja Renderer3D::addPotionFx).
-    struct PotionFx { int amount = 0; float time = -1.0f; };
-    static constexpr float POTION_FX_TIME = 1.8f;
+    // Poción que el jugador está usando sobre su acompañante (la dibuja Renderer3D::addPotionFx: en su mano, el spray y el brillo del pokémon).
+    struct PotionFx { int amount = 0; float time = -1.0f; bool sprayed = false; };
+    static constexpr float POTION_FX_TIME = 2.2f, POTION_SPRAY_FROM = 0.55f, POTION_SPRAY_TO = 1.75f, POTION_DISTANCE = 1.7f;
     PotionFx potionFx;
     bool radioOpen = false;    // rueda de emisoras abierta (con ella la mira queda bloqueada y el ratón elige)
     float radioFade = 0.0f;    // apertura visible de la rueda (0..1)
@@ -631,15 +631,22 @@ struct Scene {
         return CaptureRules::percent(base, isBehind(t), m_concealed, ballMultiplier, t.eating());
     }
 
-    // Recoge la poción usada desde el menú: sobre el acompañante muestra su modelo (y suena allí); sobre otro del equipo, solo el sonido.
+    // Recoge lo usado desde el menú sobre un pokémon: una poción sobre el acompañante la usa el jugador (se vuelve hacia él, el pokémon se acerca, le rocía
+    // y la guarda); sobre otro del equipo solo suena. Una evolución por objeto suena igual.
     void updatePotionFx(float dt) {
         PokemonStorage::MedicineUse use;
         if (storage.takeMedicine(use)) {
             const bool onCompanion = use.inTeam && use.index == storage.activeIndex() && companion.active();
-            if (onCompanion) { potionFx = { use.amount, 0.0f }; Sound::emit(Sound::Sfx::HEAL, companion.center()); }
+            if (use.evolved) Sound::emit(Sound::Sfx::EVOLVE, onCompanion ? companion.center() : player.body.position);
+            else if (onCompanion) { potionFx = { use.amount, 0.0f, false }; player.act(PlayerAction::POTION); }
             else Sound::emitGlobal(Sound::Sfx::HEAL);
         }
-        if (potionFx.time >= 0.0f && (potionFx.time += dt) > POTION_FX_TIME) potionFx.time = -1.0f;
+        if (potionFx.time < 0.0f) return;
+        potionFx.time += dt;
+        const DirectX::XMFLOAT3& pet = companion.body.position;
+        player.actionYaw = std::atan2(pet.x - player.body.position.x, pet.z - player.body.position.z);
+        if (!potionFx.sprayed && potionFx.time >= POTION_SPRAY_FROM) { potionFx.sprayed = true; Sound::emit(Sound::Sfx::HEAL, companion.center()); }
+        if (potionFx.time > POTION_FX_TIME) potionFx.time = -1.0f;
     }
 
     // Rueda de emisoras. T la abre / cierra; con ella abierta el ratón (o el stick) mueve un cursor en lugar de la cámara, el clic sobre una emisora
@@ -955,7 +962,8 @@ struct Scene {
         if (nodeTarget && arrived) nodeTarget->companionWorking();
         const float teamBonus = nodeTarget && arrived ? nodeTarget->teamBonus(false) : 1.0f;
         const float power = arrived ? Companion::workPower(fightTarget ? 1 : level, teamBonus) : 0.0f;
-        if (!companion.update(dt, world, player.body.position, camera.yaw(), power, goal, approach)) return;
+        const bool tending = potionFx.time >= 0.0f && potionFx.time < POTION_SPRAY_TO; // viene a donde el jugador le está curando
+        if (!companion.update(dt, world, player.body.position, camera.yaw(), tending ? 0.0f : power, tending ? &player.body.position : goal, tending ? POTION_DISTANCE : approach)) return;
         if (nodeTarget) workNode(*nodeTarget, false);
         else if (groundTarget) collect(*groundTarget);
         else if (fruitTarget) collectFruit(*fruitTarget);

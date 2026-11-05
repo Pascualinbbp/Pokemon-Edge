@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <set>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@
 #include "../../engine/core/inputDevice.hpp"
 #include "../../engine/world/rules/evRules.hpp"
 #include "../../engine/world/state/inventory.hpp"
+#include "../../engine/world/state/itemUse.hpp"
 #include "../../engine/world/state/playerProgress.hpp"
 #include "../../engine/world/state/pokemonStorage.hpp"
 #include "../../models/gameData.hpp"
@@ -475,13 +477,10 @@ namespace PokemonComponent {
                 GuiCards::text(dl, ImVec2(bar.x + 8.0f, bar.y + 1.0f), IM_COL32(255, 255, 255, 245), text, 0.75f);
                 float bx = pos.x + 16.0f;
                 int index = 0;
-                for (const TrainingItem& med : data.trainingItems) {
-                    if (med.effect != TrainingItem::Effect::HEAL && med.effect != TrainingItem::Effect::REVIVE) continue;
-                    const Item* medItem = data.itemOf(ItemCategory::TRAINING, med.id);
-                    if (!medItem) continue;
-                    const int count = inventory.count(medItem->id);
-                    const bool applies = med.effect == TrainingItem::Effect::REVIVE ? hp <= 0 : (hp > 0 && hp < maxHp);
-                    const bool usable = count > 0 && applies;
+                // Un botón por objeto que se puede usar sobre este pokémon: pociones y revivir (siempre, apagados si no valen) y las piedras evolutivas que le sirven.
+                const auto button = [&](const Item& medItem, const std::function<void(ImDrawList*, const ImVec2&)>& icon, const std::string& tip) {
+                    const int count = inventory.count(medItem.id);
+                    const bool usable = count > 0 && ItemUse::applies(data, storage, progress, medItem, owned);
                     const ImVec2 a(bx, pos.y + headerHeight - 28.0f), b(a.x + 46.0f, a.y + 24.0f);
                     ImGui::SetCursorScreenPos(a);
                     ImGui::PushID(1000 + index++);
@@ -489,19 +488,23 @@ namespace PokemonComponent {
                     const bool hovered = ImGui::IsItemHovered();
                     ImGui::PopID();
                     dl->AddRectFilled(a, b, IM_COL32(0, 0, 0, hovered && usable ? 150 : 90), 6.0f);
-                    ItemIcon::training(dl, ImVec2(a.x + 12.0f, a.y + 13.0f), 9.0f, med.effect, usable ? 1.0f : 0.4f, med.amount);
+                    icon(dl, ImVec2(a.x + 12.0f, a.y + 13.0f));
                     std::snprintf(text, sizeof(text), "%d", count);
                     GuiCards::text(dl, ImVec2(a.x + 25.0f, a.y + 6.0f), usable ? IM_COL32(255, 255, 255, 255) : IM_COL32(180, 180, 190, 180), text, 0.85f);
-                    if (hovered) ImGui::SetTooltip("%s\n%s", med.name.c_str(), med.description.c_str());
-                    if (clicked && usable) {
-                        const bool done = med.effect == TrainingItem::Effect::REVIVE ? storage.revive(selection.inTeam, selection.index, med.amount >= 100) : storage.heal(selection.inTeam, selection.index, med.amount >= 99999 ? 0 : med.amount);
-                        if (done) {
-                            inventory.add(medItem->id, -1);
-                            message = med.name + " usado en " + species->name;
-                            if (med.effect == TrainingItem::Effect::HEAL) storage.noteMedicine(selection.inTeam, selection.index, med.amount); // el mundo la muestra sobre el acompañante
-                        }
-                    }
+                    if (hovered) ImGui::SetTooltip("%s", tip.c_str());
+                    if (clicked && usable) message = ItemUse::apply(data, storage, inventory, progress, medItem, selection);
                     bx += 50.0f;
+                };
+                for (const TrainingItem& med : data.trainingItems) {
+                    if (med.effect != TrainingItem::Effect::HEAL && med.effect != TrainingItem::Effect::REVIVE) continue;
+                    if (const Item* medItem = data.itemOf(ItemCategory::TRAINING, med.id)) {
+                        const float alpha = ItemUse::applies(data, storage, progress, *medItem, owned) && inventory.count(medItem->id) > 0 ? 1.0f : 0.4f;
+                        button(*medItem, [&](ImDrawList* d, const ImVec2& c) { ItemIcon::training(d, c, 9.0f, med.effect, alpha, med.amount); }, med.name + "\n" + med.description);
+                    }
+                }
+                for (const Item& stone : data.items) {
+                    if (ItemUse::kind(data, stone) != ItemUse::Kind::STONE || !ItemUse::applies(data, storage, progress, stone, owned)) continue;
+                    button(stone, [&](ImDrawList* d, const ImVec2& c) { ItemIcon::item(d, c, 9.0f, stone, data); }, data.itemTitle(stone, 1) + "\nHace evolucionar a " + species->name);
                 }
             }
 
@@ -510,12 +513,8 @@ namespace PokemonComponent {
                 const int count = inventory.count(item->id);
                 std::snprintf(text, sizeof(text), "NIVEL +1  x%d", count);
                 ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 150.0f, pos.y + 44.0f));
-                if (GuiCards::button("##candy", text, ImVec2(134.0f, 26.0f), count > 0 && owned.level < progress.levelCap(), IM_COL32(40, 150, 120, 255))) {
-                    inventory.add(item->id, -1);
-                    const std::string before = species->name;
-                    const PokemonStorage::LevelResult result = storage.levelUp(selection.inTeam, selection.index, progress.levelCap());
-                    const PokemonSpecies* after = ownedAt(storage, selection) ? data.speciesById(ownedAt(storage, selection)->speciesId) : nullptr;
-                    message = result == PokemonStorage::LevelResult::EVOLVED && after ? "¡" + before + " ha evolucionado a " + after->name + "!" : "";
+                if (GuiCards::button("##candy", text, ImVec2(134.0f, 26.0f), count > 0 && ItemUse::applies(data, storage, progress, *item, owned), IM_COL32(40, 150, 120, 255))) {
+                    message = ItemUse::apply(data, storage, inventory, progress, *item, selection);
                 }
             }
 

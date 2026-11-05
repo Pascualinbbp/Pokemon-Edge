@@ -8,8 +8,12 @@
 #include "../style/guiCards.hpp"
 #include "../style/guiStyle.hpp"
 #include "../style/icons/itemIcon.hpp"
+#include "../style/icons/teamCircle.hpp"
 #include "../window/guiInput.hpp"
 #include "../../engine/world/state/inventory.hpp"
+#include "../../engine/world/state/itemUse.hpp"
+#include "../../engine/world/state/playerProgress.hpp"
+#include "../../engine/world/state/pokemonStorage.hpp"
 #include "../../models/gameData.hpp"
 #include "../../models/items/itemInfo.hpp"
 
@@ -119,6 +123,35 @@ namespace InventoryComponent {
         }
 
         // Precios (pokémonedas) y venta de las unidades que se tienen. Las herramientas no se venden.
+        inline std::string useMessage; // resultado del último uso (se borra al cambiar de objeto)
+        inline int useMessageItem = -1;
+
+        // Objetos que se usan sobre un pokémon (pociones, revivir, caramelo, piedras evolutivas): el equipo, y al pulsar uno se usa sobre él.
+        inline void drawUse(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, const Item& item, int count) {
+            if (ItemUse::kind(data, item) == ItemUse::Kind::NONE) return;
+            if (useMessageItem != item.id) { useMessage.clear(); useMessageItem = item.id; }
+            heading("Usar sobre");
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            constexpr float R = 24.0f;
+            const std::vector<OwnedPokemon>& team = storage.team();
+            for (int i = 0; i < static_cast<int>(team.size()); ++i) {
+                const PokemonSpecies* species = data.speciesById(team[i].speciesId);
+                if (!species) continue;
+                if (i > 0) ImGui::SameLine();
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                ImGui::PushID(2000 + i);
+                const bool clicked = ImGui::InvisibleButton("##target", ImVec2(R * 2.0f + 6.0f, R * 2.0f + 14.0f));
+                const bool hovered = ImGui::IsItemHovered();
+                ImGui::PopID();
+                const bool works = count > 0 && ItemUse::applies(data, storage, progress, item, team[i]);
+                const ImVec2 c(at.x + R + 3.0f, at.y + R + 10.0f);
+                TeamCircle::draw(dl, c, R, data, *species, team[i].level, team[i].shiny, team[i].ballId, hovered && works, 0, works ? 1.0f : 0.35f, storage.fainted(team[i]));
+                if (clicked && works) { useMessage = ItemUse::apply(data, storage, inventory, progress, item, { true, i }); useMessageItem = item.id; }
+            }
+            if (!useMessage.empty()) GuiCards::muted(useMessage.c_str());
+            else if (count > 0) GuiCards::muted("Elige un pokémon del equipo (los apagados no sacan provecho).");
+        }
+
         inline void drawTrade(const GameData& data, Inventory& inventory, const Item& item, int count) {
             if (item.category == ItemCategory::TOOL) return;
             heading("Precio");
@@ -132,7 +165,7 @@ namespace InventoryComponent {
             if (GuiCards::button("##sellAll", "VENDER TODO", ImVec2(170.0f, 34.0f), canSell, IM_COL32(190, 120, 30, 255))) inventory.sell(item.id, count);
         }
 
-        inline void drawDetail(const GameData& data, Inventory& inventory, const Item* item, const std::string& category, const ImVec2& pos, const ImVec2& size) {
+        inline void drawDetail(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, const Item* item, const std::string& category, const ImVec2& pos, const ImVec2& size) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             GuiCards::panel(dl, pos, ImVec2(pos.x + size.x, pos.y + size.y));
             if (!item) return;
@@ -184,6 +217,7 @@ namespace InventoryComponent {
                 drawUpgrade(data, inventory, *tool);
             }
 
+            drawUse(data, storage, inventory, progress, *item, count);
             drawTrade(data, inventory, *item, count);
 
             if (const std::vector<std::string> sources = ItemInfo::sources(data, *item); !sources.empty()) {
@@ -199,7 +233,7 @@ namespace InventoryComponent {
     }
 
     // ESC, I o el botón de volver del mando cierran la mochila (vuelven a 'back'). Q/E o L1/R1 cambian de pestaña.
-    inline void render(GameState& state, GameState back, const GameData& data, Inventory& inventory) {
+    inline void render(GameState& state, GameState back, const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress) {
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, 170));
 
         const int categories = static_cast<int>(data.categories.size());
@@ -240,7 +274,7 @@ namespace InventoryComponent {
         ImGui::SetCursorScreenPos(ImVec2(gridPos.x, gridPos.y + 34.0f));
         detail::drawGrid(data, list, ImVec2(gridWidth, height - 34.0f));
 
-        detail::drawDetail(data, inventory, picked ? picked->item : nullptr, category.label,
+        detail::drawDetail(data, storage, inventory, progress, picked ? picked->item : nullptr, category.label,
             ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));
 
         GuiCards::text(dl, ImVec2(detail::MARGIN, screen.y - detail::MARGIN), GuiStyle::MUTED, "Q / E: categoría     ESC: volver", 0.9f);

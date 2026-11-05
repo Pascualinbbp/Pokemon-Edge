@@ -3,7 +3,7 @@
 
 // Acciones con las que el jugador usa una herramienta o interactúa: la animación del personaje y el objeto que sostiene.
 // Cada habilidad del mundo (tabla skill, columna animation) dice cuál es la suya; así una habilidad nueva solo necesita su fila.
-enum class PlayerAction { NONE, CHOP, MINE, WATER, PICK, FISH, THROW, OPEN };
+enum class PlayerAction { NONE, CHOP, MINE, WATER, PICK, FISH, THROW, OPEN, POTION };
 
 namespace PlayerActions {
     inline PlayerAction parse(const std::string& name) {
@@ -25,6 +25,7 @@ namespace PlayerActions {
             case PlayerAction::FISH:  return 0.8f;
             case PlayerAction::THROW: return 0.4f;
             case PlayerAction::OPEN:  return 0.5f;
+            case PlayerAction::POTION: return 2.2f; // usar una poción sobre el pokémon (Scene::POTION_FX_TIME)
             default:                  return 0.0f;
         }
     }

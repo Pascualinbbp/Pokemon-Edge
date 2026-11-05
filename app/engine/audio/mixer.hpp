@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <mutex>
 #include <vector>
+#include "radioSource.hpp"
 #include "wav.hpp"
 
 namespace Audio {
@@ -12,7 +13,7 @@ namespace Audio {
     // derecha sale de hacia dónde mira el oyente. Las ganancias cambian de forma suave dentro de cada bloque (sin chasquidos).
     class Mixer {
         public:
-        static constexpr int   RATE = 22050;     // frecuencia de salida; cada clip se remuestrea con 'step' si tiene otra
+        static constexpr int   RATE = 44100;     // frecuencia de salida; cada clip se remuestrea con 'step' si tiene otra
         static constexpr int   MAX_VOICES = 32;
         static constexpr float REFERENCE = 1.5f; // a menos de esto suena al máximo
         static constexpr float MAX_PAN = 0.65f;  // cuánto se reparte hacia un lado como mucho
@@ -67,33 +68,32 @@ namespace Audio {
             m_voices.push_back(make(request));
         }
 
-        // Emisora de radio: suena sobre el oyente en bucle. nullptr = apagada. Con el mismo clip no reinicia; 'start' (0..1) es el punto del clip
-        // por el que empieza (para retomar la emisora donde se dejó).
-        void setRadio(ClipPtr clip, float volume, float start = 0.0f) {
+        // Emisora de radio: suena sobre el oyente, en estéreo y leída poco a poco de su fuente (streaming). nullptr = apagada. 'start' es el
+        // fotograma por el que empieza (para retomar la emisora donde se dejó). Entra con un fundido corto.
+        void setRadio(RadioPtr source, float volume, size_t start = 0) {
             std::lock_guard<std::mutex> guard(m_lock);
             m_radioVolume = volume;
-            if (clip == m_radioClip) return;
-            m_radioClip = clip;
-            m_radioOn = clip != nullptr;
-            if (!clip) { m_radio = Voice(); return; }
-            Play request;
-            request.clip = clip;
-            request.spatial = false;
-            request.volume = volume;
-            request.loop = true;
-            m_radio = make(request);
-            m_radio.pos = static_cast<double>(std::clamp(start, 0.0f, 0.999f)) * static_cast<double>(clip->samples.size());
+            if (source == m_radio) return;
+            m_radio = std::move(source);
+            m_ring.clear();
+            m_ringPos = 0.0;
+            m_radioFade = 0.0f;
+            if (m_radio) m_radio->seek(start);
         }
 
-        // Punto actual de la emisora (0..1 del clip); 0 si está apagada.
-        float radioPosition() const {
+        // Fotograma de la emisora que suena ahora mismo (la fuente va por delante: lo que ya está leído y aún no sonó se descuenta).
+        size_t radioPosition() const {
             std::lock_guard<std::mutex> guard(m_lock);
-            return m_radioOn ? std::clamp(m_radio.progress(), 0.0f, 1.0f) : 0.0f;
+            if (!m_radio) return 0;
+            const size_t length = m_radio->length();
+            if (length == 0) return 0;
+            const size_t ahead = static_cast<size_t>((std::max)(0.0, static_cast<double>(m_ring.size() / 2) - m_ringPos)); // en fotogramas de la fuente
+            return (m_radio->position() + length - ahead % length) % length;
         }
 
         int activeVoices() const {
             std::lock_guard<std::mutex> guard(m_lock);
-            return static_cast<int>(m_voices.size()) + (m_radioOn ? 1 : 0);
+            return static_cast<int>(m_voices.size()) + (m_radio ? 1 : 0);
         }
 
         // Rellena 'frames' fotogramas estéreo entrelazados.
@@ -101,10 +101,7 @@ namespace Audio {
             std::lock_guard<std::mutex> guard(m_lock);
             m_mix.assign(static_cast<size_t>(frames) * 2, 0.0f);
             for (Voice& voice : m_voices) mixVoice(voice, frames);
-            if (m_radioOn) {
-                m_radio.volume = m_radioVolume;
-                mixVoice(m_radio, frames);
-            }
+            if (m_radio) mixRadio(frames);
             m_voices.erase(std::remove_if(m_voices.begin(), m_voices.end(), [](const Voice& v) { return v.done; }), m_voices.end());
             for (int i = 0; i < frames * 2; ++i) out[i] = static_cast<int16_t>(std::tanh(m_mix[static_cast<size_t>(i)]) * 32000.0f); // limitador suave
         }
@@ -176,13 +173,44 @@ namespace Audio {
             v.lastR = tr;
         }
 
+        // La emisora: lee de la fuente lo que haga falta (a su frecuencia) y lo remuestrea a RATE con interpolación lineal.
+        void mixRadio(int frames) {
+            const double step = static_cast<double>(m_radio->rate()) / RATE;
+            const size_t need = static_cast<size_t>(std::ceil(frames * step)) + 2;
+            size_t have = m_ring.size() / 2;
+            if (have < static_cast<size_t>(m_ringPos) + need) {
+                const size_t drop = static_cast<size_t>(m_ringPos); // lo ya sonado se descarta
+                m_ring.erase(m_ring.begin(), m_ring.begin() + static_cast<long>(drop * 2));
+                m_ringPos -= static_cast<double>(drop);
+                have = m_ring.size() / 2;
+                const size_t want = (std::max)(need + 1, static_cast<size_t>(2048));
+                m_ring.resize((have + want) * 2);
+                const size_t got = m_radio->read(m_ring.data() + have * 2, want);
+                m_ring.resize((have + got) * 2);
+                if (got == 0) return;
+            }
+            const size_t avail = m_ring.size() / 2;
+            const float fadeStep = 1.0f / (RATE * 0.25f);
+            for (int i = 0; i < frames; ++i) {
+                const size_t a = static_cast<size_t>(m_ringPos);
+                if (a + 1 >= avail) break;
+                const float f = static_cast<float>(m_ringPos - static_cast<double>(a));
+                const float gain = m_radioVolume * m_radioFade * (1.0f / 32768.0f);
+                m_mix[static_cast<size_t>(i) * 2] += (m_ring[a * 2] * (1.0f - f) + m_ring[(a + 1) * 2] * f) * gain;
+                m_mix[static_cast<size_t>(i) * 2 + 1] += (m_ring[a * 2 + 1] * (1.0f - f) + m_ring[(a + 1) * 2 + 1] * f) * gain;
+                m_ringPos += step;
+                m_radioFade = (std::min)(1.0f, m_radioFade + fadeStep);
+            }
+        }
+
         mutable std::mutex m_lock;
         Listener m_listener;
         std::vector<Voice> m_voices;
         std::vector<float> m_mix;
-        Voice m_radio;
-        ClipPtr m_radioClip;
-        bool m_radioOn = false;
+        RadioPtr m_radio;
+        std::vector<int16_t> m_ring; // lo leído de la emisora y aún sin sonar (estéreo entrelazado)
+        double m_ringPos = 0.0;      // fotograma del anillo por el que va la salida
+        float m_radioFade = 0.0f;
         float m_radioVolume = 0.5f;
     };
 }

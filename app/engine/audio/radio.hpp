@@ -2,7 +2,7 @@
 #include <cmath>
 #include <cstddef>
 
-// Emisoras de radio del juego. Cada una es un fichero de assets/audio/radio/ (WAV mono 16 bit en bucle). Para cambiar la música de una
+// Emisoras de radio del juego. Cada una es un fichero de assets/audio/radio/ (MP3 —o WAV—, sin extensión aquí; se descodifica sobre la marcha, así que puede durar horas). Para cambiar la música de una
 // emisora basta con sustituir su fichero; para añadir otra, una fila aquí. La emisora 0 es "apagada".
 namespace Radio {
     struct Station { const char* name; const char* genre; const char* path; const char* logo; }; // logo: assets/hud/<logo>.png
@@ -11,16 +11,16 @@ namespace Radio {
 
     inline const Station& station(int number) { // 1..COUNT
         static const Station table[COUNT] = {
-            { "Ruta 1 FM",           "Pop",         "audio/radio/01_pop.wav", "radio/01" },
-            { "Lofi Centro Pokémon", "Lofi",        "audio/radio/02_lofi.wav", "radio/02" },
-            { "Kanto Rock",          "Rock",        "audio/radio/03_rock.wav", "radio/03" },
-            { "Chiptune 8-bit",      "Chiptune",    "audio/radio/04_chip.wav", "radio/04" },
-            { "Jazz Nocturno",       "Jazz",        "audio/radio/05_jazz.wav", "radio/05" },
-            { "Neón Electro",        "Electrónica", "audio/radio/06_electro.wav", "radio/06" },
-            { "Reggae de la Playa",  "Reggae",      "audio/radio/07_reggae.wav", "radio/07" },
-            { "Orquesta Épica",      "Orquestal",   "audio/radio/08_epic.wav", "radio/08" },
-            { "Funk del Gimnasio",   "Funk",        "audio/radio/09_funk.wav", "radio/09" },
-            { "Ambient del Cielo",   "Ambiental",   "audio/radio/10_ambient.wav", "radio/10" },
+            { "Ruta 1 FM",           "Pop",         "audio/radio/01_pop", "radio/01" },
+            { "Lofi Centro Pokémon", "Lofi",        "audio/radio/02_lofi", "radio/02" },
+            { "Kanto Rock",          "Rock",        "audio/radio/03_rock", "radio/03" },
+            { "Chiptune 8-bit",      "Chiptune",    "audio/radio/04_chip", "radio/04" },
+            { "Jazz Nocturno",       "Jazz",        "audio/radio/05_jazz", "radio/05" },
+            { "Neón Electro",        "Electrónica", "audio/radio/06_electro", "radio/06" },
+            { "Reggae de la Playa",  "Reggae",      "audio/radio/07_reggae", "radio/07" },
+            { "Orquesta Épica",      "Orquestal",   "audio/radio/08_epic", "radio/08" },
+            { "Funk del Gimnasio",   "Funk",        "audio/radio/09_funk", "radio/09" },
+            { "Ambient del Cielo",   "Ambiental",   "audio/radio/10_ambient", "radio/10" },
         };
         return table[(number < 1 ? 1 : number > static_cast<int>(COUNT) ? static_cast<int>(COUNT) : number) - 1];
     }
