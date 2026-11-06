@@ -92,8 +92,8 @@ struct Scene {
     Footprints footprints;     // huellas en la arena de todo lo que se mueve
     int radioStation = 0;      // emisora sintonizada (0 = radio apagada)
     // Poción que el jugador está usando sobre su acompañante (la dibuja Renderer3D::addPotionFx: en su mano, el spray y el brillo del pokémon).
-    struct PotionFx { std::string model; DirectX::XMFLOAT3 tint = { 1.0f, 1.0f, 1.0f }; float time = -1.0f; bool sprayed = false; };
-    static constexpr float POTION_FX_TIME = 2.2f, POTION_SPRAY_FROM = 0.55f, POTION_SPRAY_TO = 1.75f, POTION_DISTANCE = 1.7f;
+    struct PotionFx { std::string model; DirectX::XMFLOAT3 tint = { 1.0f, 1.0f, 1.0f }; float time = -1.0f; bool sprayed = false; bool give = false; }; // give: revivir (se lo da al pokémon, sin spray)
+    static constexpr float POTION_FX_TIME = 2.2f, POTION_SPRAY_FROM = 0.55f, POTION_SPRAY_TO = 1.75f, POTION_DISTANCE = 1.7f, GIVE_FROM = 0.4f, GIVE_TO = 1.0f;
     PotionFx potionFx;
     bool radioOpen = false;    // rueda de emisoras abierta (con ella la mira queda bloqueada y el ratón elige)
     float radioFade = 0.0f;    // apertura visible de la rueda (0..1)
@@ -655,7 +655,7 @@ struct Scene {
             if (!lead || lead->uid != m_pendingPotion.uid || m_pendingPotion.wait <= 0.0f) m_pendingPotion.type = nullptr;
             else if (lead->uid == m_shownUid && companion.active() && companion.speciesId() == lead->speciesId && !companion.changing() && !companion.tripActive() && potionFx.time < 0.0f) {
                 const TrainingItem& type = *m_pendingPotion.type;
-                potionFx = { type.asset, type.rgb >= 0 ? StyleRegistry::unpack(type.rgb) : DirectX::XMFLOAT3{ 1.0f, 1.0f, 1.0f }, 0.0f, false };
+                potionFx = { type.asset, type.rgb >= 0 ? StyleRegistry::unpack(type.rgb) : DirectX::XMFLOAT3{ 1.0f, 1.0f, 1.0f }, 0.0f, false, type.effect == TrainingItem::Effect::REVIVE };
                 player.act(PlayerAction::POTION);
                 m_pendingPotion.type = nullptr;
             }
@@ -664,7 +664,7 @@ struct Scene {
         potionFx.time += dt;
         const DirectX::XMFLOAT3& pet = companion.body.position;
         player.actionYaw = std::atan2(pet.x - player.body.position.x, pet.z - player.body.position.z);
-        if (!potionFx.sprayed && potionFx.time >= POTION_SPRAY_FROM) { potionFx.sprayed = true; Sound::emit(Sound::Sfx::HEAL, companion.center()); }
+        if (!potionFx.sprayed && potionFx.time >= (potionFx.give ? GIVE_TO : POTION_SPRAY_FROM)) { potionFx.sprayed = true; Sound::emit(Sound::Sfx::HEAL, companion.center()); }
         if (potionFx.time > POTION_FX_TIME) potionFx.time = -1.0f;
     }
 
@@ -899,6 +899,9 @@ struct Scene {
         const OwnedPokemon* lead = storage.active();
         const PokemonSpecies* species = lead ? m_data->speciesById(lead->speciesId) : nullptr;
         if (!lead && companion.active()) companion.set(-1, false, false, player.body.position, camera.yaw());
+        else if (lead && species && lead->uid != m_shownUid && lead->speciesId == m_shownSpecies && companion.active() && !companion.changing() && !uidExists(m_shownUid)) {
+            m_shownUid = lead->uid; // el mismo pokémon con otra identidad interna: sigue fuera, no vuelve a su bola ni sale otra vez
+        }
         else if (lead && species && (lead->uid != m_shownUid || (lead->speciesId != m_shownSpecies && lead->uid != m_itemEvolveUid))) {
             m_shownUid = lead->uid; // otro pokémon (o ha evolucionado): vuelve el que está fuera y sale su pokéball
             m_shownSpecies = lead->speciesId;
@@ -1768,6 +1771,11 @@ struct Scene {
     float m_holdClock = 0.0f;
     struct PendingPotion { const TrainingItem* type = nullptr; int uid = 0; float wait = 0.0f; } m_pendingPotion; // poción o revivir a la espera de que el pokémon salga
     int m_itemEvolveUid = 0;   // pokémon que evoluciona por un objeto y aún no ha hecho el efecto (0 = ninguno)
+    bool uidExists(int uid) const {
+        for (const OwnedPokemon& o : storage.team()) if (o.uid == uid) return true;
+        for (const OwnedPokemon& o : storage.pc()) if (o.uid == uid) return true;
+        return false;
+    }
     int m_shownUid = 0;        // pokémon (uid y especie) que está fuera o saliendo
     int m_shownSpecies = -1;
     int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)

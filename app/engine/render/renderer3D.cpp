@@ -1406,6 +1406,38 @@ void Renderer3D::addNode(const ResourceNode& node) {
             draw(tree, { 2.3f, 1.5f, 2.3f }, 0.0f, { 0.0f, 2.65f, 0.0f }, look.accent, 0.0f);
             draw(tree, { 1.5f, 1.2f, 1.5f }, 0.785f, { 0.0f, 3.65f, 0.0f }, look.accent, 0.0f);
         }
+        // Frutos solo decorativos (no son lo que cae al sacudir el árbol): cocos bajo las hojas de la palmera, plátanos bajo la copa de la jungla
+        // y cerezas colgando de los cerezos.
+        const auto ball = [&](float r, const XMFLOAT3& at, const XMFLOAT3& color) {
+            add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(at.x, at.y, at.z) * tree, { color.x, color.y, color.z, 0.0f });
+        };
+        const int type = node.typeId();
+        if (type == 10) { // palmera: racimo de cocos justo bajo las hojas
+            for (int i = 0; i < 5; ++i) {
+                const float a = static_cast<float>(i) * 1.2566f + 0.4f;
+                ball(0.17f, { std::cos(a) * 0.28f, 2.86f - 0.05f * (i % 2), std::sin(a) * 0.28f }, { 0.36f, 0.24f, 0.12f });
+            }
+        } else if (type == 13) { // árbol de jungla: racimos de plátanos colgando bajo la copa
+            for (int i = 0; i < 6; ++i) {
+                const float a = static_cast<float>(i) * 1.0472f + 0.3f, rad = 1.0f + 0.35f * (i % 2);
+                for (int j = 0; j < 4; ++j) {
+                    const float o = (static_cast<float>(j) - 1.5f) * 0.13f;
+                    draw(tree, { 0.11f, 0.42f, 0.11f }, a, { std::cos(a) * rad + std::sin(a) * o, 2.9f, std::sin(a) * rad - std::cos(a) * o }, { 0.97f, 0.84f, 0.18f }, 0.0f);
+                }
+            }
+        } else if (type == 11) { // cerezo: cerezas rojas colgando bajo la copa y asomando entre las flores
+            for (int i = 0; i < 12; ++i) {
+                const float a = static_cast<float>(i) * 0.5236f + 0.2f, rad = 0.8f + 0.4f * (i % 3), y = 1.8f + 0.15f * (i % 2);
+                const XMFLOAT3 at = { std::cos(a) * rad, y, std::sin(a) * rad };
+                draw(tree, { 0.03f, 0.40f, 0.03f }, 0.0f, { at.x, y + 0.25f, at.z }, { 0.20f, 0.45f, 0.15f }, 0.0f);
+                ball(0.15f, { at.x + 0.08f, y - 0.05f, at.z }, { 0.85f, 0.05f, 0.12f });
+                ball(0.15f, { at.x - 0.08f, y - 0.10f, at.z }, { 0.85f, 0.05f, 0.12f });
+            }
+            for (int i = 0; i < 8; ++i) { // sobre la copa, a la vista
+                const float a = static_cast<float>(i) * 0.785f + 0.5f;
+                ball(0.13f, { std::cos(a) * 1.2f, 2.5f + 0.25f * (i % 3), std::sin(a) * 1.2f }, { 0.85f, 0.05f, 0.12f });
+            }
+        }
         return;
     }
 
@@ -2002,6 +2034,31 @@ void Renderer3D::addPotionFx(const Scene& scene, CXMMATRIX hand) {
     const float facing = scene.player.facing();
     const float sinF = std::sin(facing), cosF = std::cos(facing);
     const XMFLOAT3 nozzle = { grip.x + sinF * 0.14f, grip.y + 0.22f, grip.z + cosF * 0.14f }; // la boquilla, delante y arriba del puño
+
+    if (fx.give) { // revivir: el objeto viaja de la mano al pokémon y desaparece al recibirlo (sin spray)
+        const float tg = (fx.time - Scene::GIVE_FROM) / (Scene::GIVE_TO - Scene::GIVE_FROM);
+        const XMFLOAT3 target = pet.center();
+        const XMFLOAT3 start = { grip.x, grip.y + 0.12f, grip.z };
+        const float f = (std::clamp)(tg, 0.0f, 1.0f), e = f * f * (3.0f - 2.0f * f);
+        const float size = (fx.time < Scene::GIVE_TO ? (tg < 0.0f ? appear : 1.0f - 0.85f * e) : 0.0f);
+        if (const RenderModel* model = m_models.get(m_device, fx.model); model && size > 0.01f) {
+            const XMFLOAT3 c = model->center();
+            const float k = ItemStyle::MEDICINE_HELD_HEIGHT * size / model->height();
+            const XMFLOAT3 p = { start.x + (target.x - start.x) * e, start.y + (target.y - start.y) * e + 0.35f * std::sin(3.14159265f * e), start.z + (target.z - start.z) * e };
+            const XMMATRIX world = XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(k, k, k) * XMMatrixRotationY(facing + ItemStyle::MEDICINE_FRONT_YAW + 6.0f * e) * XMMatrixTranslation(p.x, p.y, p.z);
+            addModel(*model, world, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose{}, false);
+        }
+        const float since = fx.time - Scene::GIVE_TO;
+        if (since < 0.0f || since > 0.9f) return;
+        const float env = 1.0f - since / 0.9f;
+        const float g = Companion::SIZE * (1.0f + 0.15f * std::sin(fx.time * 14.0f));
+        add(m_sphere, XMMatrixScaling(g, g, g) * XMMatrixTranslation(target.x, target.y, target.z), { fx.tint.x, fx.tint.y, fx.tint.z, 0.35f * env }, false, DrawKind::GLOW);
+        for (int i = 0; i < 6; ++i) {
+            const float h = std::fmod(since * 1.3f + static_cast<float>(i) / 6.0f, 1.0f), a = static_cast<float>(i) * 1.047f + fx.time, r = 0.04f * (1.0f - h);
+            add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(target.x + std::cos(a) * 0.35f, target.y - 0.2f + h * 0.8f, target.z + std::sin(a) * 0.35f), { fx.tint.x, fx.tint.y, fx.tint.z, 0.9f * env }, false, DrawKind::GLOW);
+        }
+        return;
+    }
 
     if (const RenderModel* model = m_models.get(m_device, fx.model); model && fade > 0.01f) {
         const XMFLOAT3 c = model->center();
