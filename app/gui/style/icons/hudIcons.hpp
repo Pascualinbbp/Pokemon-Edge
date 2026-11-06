@@ -1,5 +1,4 @@
 #pragma once
-#include <cctype>
 #include <cstdint>
 #include <map>
 #include <utility>
@@ -7,32 +6,10 @@
 #include "imgui.h"
 #include "assetTexture.hpp"
 
-// Logos del HUD (assets/hud/): uno por clima (weather/<nombre>.png), donde el nombre
-// es el de la base de datos en minúsculas, sin tildes y con '_' en vez de espacios; y el disco de día y noche (daynight.png).
-// Se cargan la primera vez que se piden. Un nombre sin logo devuelve 0 y quien dibuja usa un círculo de reserva.
+// Imágenes del HUD y de los objetos (assets/sprites/): un clima es weather/<id>.png, un objeto items/<categoría>/<id>.png (el mismo nombre que su modelo 3D), una emisora radio/<id>.png, y ui/ el disco de día y noche.
+// Se cargan la primera vez que se piden. Una imagen que no existe devuelve 0 y quien dibuja usa un dibujo de reserva.
 namespace HudIcons {
     namespace detail {
-        inline std::string slug(const std::string& name) {
-            static const std::pair<const char*, char> ACCENTS[] = { { "á", 'a' }, { "é", 'e' }, { "í", 'i' }, { "ó", 'o' }, { "ú", 'u' }, { "ñ", 'n' }, { "ü", 'u' } };
-            std::string result;
-            for (size_t i = 0; i < name.size();) {
-                bool replaced = false;
-                for (const auto& accent : ACCENTS) {
-                    const size_t length = std::char_traits<char>::length(accent.first);
-                    if (name.compare(i, length, accent.first) == 0) {
-                        result += accent.second;
-                        i += length;
-                        replaced = true;
-                        break;
-                    }
-                }
-                if (replaced) continue;
-                const unsigned char c = static_cast<unsigned char>(name[i++]);
-                result += c == ' ' ? '_' : static_cast<char>(std::tolower(c));
-            }
-            return result;
-        }
-
         inline ImTextureID texture(const std::string& path) {
             static std::map<std::string, Texture> cache;
             auto it = cache.find(path);
@@ -45,9 +22,9 @@ namespace HudIcons {
         }
     }
 
-    inline ImTextureID weather(const std::string& name) { return detail::texture("hud/weather/" + detail::slug(name) + ".png"); }
-    // Sprite de un objeto 3D: assets/hud/item/<modelo>.png, con el mismo nombre que su modelo (assets/models/<modelo>.glb). Sirve para cualquiera (mochila, listas...).
-    inline ImTextureID sprite(const std::string& model) { return detail::texture("hud/item/" + model + ".png"); }
-    inline ImTextureID image(const std::string& name) { return detail::texture("hud/" + name + ".png"); } // cualquier imagen de assets/hud/ (p. ej. radio/03)
-    inline ImTextureID dayNight() { return detail::texture("hud/daynight.png"); }
+    inline ImTextureID texture(const std::string& path) { return detail::texture(path); } // cualquier imagen de assets/ por su ruta (p. ej. sprites/radio/3.png)
+    inline ImTextureID weather(int weatherId) { return detail::texture("sprites/weather/" + std::to_string(weatherId) + ".png"); }
+    // Sprite de un objeto: assets/sprites/<modelo>.png, con el mismo nombre que su modelo 3D (assets/models/<modelo>.glb), p. ej. "items/pokeballs/1".
+    inline ImTextureID sprite(const std::string& model) { return detail::texture("sprites/" + model + ".png"); }
+    inline ImTextureID dayNight() { return detail::texture("sprites/ui/daynight.png"); }
 }

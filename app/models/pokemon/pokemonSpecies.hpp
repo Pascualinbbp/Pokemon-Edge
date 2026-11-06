@@ -33,7 +33,7 @@ struct Evolution {
     int toId = -1;
     Method method = Method::LEVEL;
     int level = 0;       // LEVEL: nivel que hay que alcanzar; FAINT: nivel mínimo al ser derrotado
-    int materialId = -1; // STONE: mineral que se usa
+    int itemId = -1;     // STONE: piedra (id de item) que se usa
 
     static Method parse(const std::string& text) {
         return text == "STONE" ? Method::STONE : text == "FAINT" ? Method::FAINT : text == "WATERFALL" ? Method::WATERFALL : Method::LEVEL;

@@ -19,9 +19,9 @@ class SkillDao {
     // Herramientas con sus niveles y lo que cuesta subir a cada uno.
     std::vector<Tool> findTools() const {
         std::vector<Tool> tools;
-        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, skill_id FROM tool ORDER BY id;")) {
+        for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, description, skill_id, category_id FROM tool ORDER BY id;")) {
             tools.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::text(row, "description"),
-                              DaoRow::integer(row, "skill_id"), {} });
+                              DaoRow::integer(row, "skill_id"), DaoRow::integer(row, "category_id"), {} });
         }
         for (const auto& row : SqliteUtil::executeSelect("SELECT tool_id, level, description, speed_bonus FROM tool_level ORDER BY tool_id, level;")) {
             if (Tool* tool = find(tools, DaoRow::integer(row, "tool_id"))) {

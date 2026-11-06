@@ -1,9 +1,9 @@
 #pragma once
 #include <string>
 
-// Categoría de objeto (tabla item_category): 'name' es la clave que reconoce el código y 'label' lo que ve el jugador.
+// Categoría (tabla category): agrupa objetos, materiales y herramientas en la mochila.
 struct ItemCategoryInfo {
     int id = -1;
     std::string name;
-    std::string label;
+    int iconItemId = -1; // objeto que da icono a su pestaña (el primero de la categoría)
 };

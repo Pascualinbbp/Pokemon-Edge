@@ -5,7 +5,7 @@
 #include "../../physics/physicsWorld.hpp"
 
 // Objeto suelto en el mundo: una semiesfera blanca apoyada en el suelo que brilla un poco. No es sólida; la recoge el jugador o su pokémon al pasar cerca y se desvanece.
-// Qué da se sortea al recogerla (tabla ground_item).
+// Qué da se sortea al recogerla (grupo RewardGroup::GROUND de la tabla reward).
 class GroundItem {
     public:
     static constexpr float RADIUS = 0.09f;        // radio de la semiesfera
@@ -17,7 +17,7 @@ class GroundItem {
     GroundItem(int spot, const DirectX::XMFLOAT3& position) : m_spot(spot) { body.position = position; }
 
     int spot() const { return m_spot; }
-    int reward() const { return m_reward; }       // índice en GameData::groundItems de lo que da (se sortea al aparecer)
+    int reward() const { return m_reward; }       // índice en GameData::rewards de lo que da (se sortea al aparecer)
     void setReward(int index) { m_reward = index; }
     float reach() const { return INTERACT_RANGE; }
     bool available() const { return !m_taken; }

@@ -2,91 +2,47 @@
 
 # Base de datos
 
-Los datos de juego (Pokéballs, objetos, materiales, cofres y nodos de recolección) viven en una base de datos **SQLite**: `app/data/db/pokemonEdge.db`. Se cargan una sola vez al arrancar (`DatabaseManager::loadGameData`) y el motor solo recibe una estructura `GameData`.
+Los datos de juego viven en **Neon (PostgreSQL)**. En cada compilación, GitHub Actions los vuelca (secret `NEON_DATABASE_URL`) a una base **SQLite** que se incrusta en el `.exe`; `DatabaseManager::loadGameData` la lee una sola vez y el motor solo recibe un `GameData`. Los DAO (`app/daos`) leen con `SqliteUtil` y siempre con `ORDER BY`.
 
-## Incrustación y cifrado
+## Tablas
 
-1. `resources.rc` incrusta `app/data/db/pokemonEdge.db` en el ejecutable como recurso (`IDR_DATABASE`), junto con el icono (`IDI_ICON1`).
-2. Durante la compilación (GitHub Actions), la base de datos se **cifra con XOR** de un byte antes de incrustarla. La clave sale del secret `DB_ENCRYPTION_KEY`; si no existe, se usa `90`. El mismo valor se pasa al compilador como `XOR_KEY_VAL`.
-3. Al arrancar, si `app/data/db/pokemonEdge.db` no existe, `DatabaseUtil::extractDatabaseIfNeeded` descifra el recurso y lo escribe en disco.
-4. `SqliteUtil` abre una única conexión de lectura/escritura que se reutiliza.
-
-> El XOR es una ofuscación, no un cifrado seguro. Ver [Compilación y releases](compilacion.md).
-
-## Scripts SQL
-
-Están en `testing/sql/` (carpeta ignorada por Git: `/testing` en `.gitignore`). Se aplican sobre la base de datos de desarrollo `app/data/db/pokemonEdge.db`, **en este orden**:
-
-| Orden | Script | Crea |
+| Tabla | Columnas | Para qué |
 |---|---|---|
-| 1 | `pokeball.sql` | `pokeball` |
-| 2 | `material.sql` | `material`, `resource_node` |
-| 3 | `item.sql` | `item_category`, `item` |
-| 4 | `chest.sql` | `chest`, `chest_reward` |
-| — | `type.sql` | `type` (independiente) |
+| `effect` | `id`, `name`, `kind`, `type_id`, `multiplier`, `shiny_multiplier`, `hp_below`, `amount`, `color` | Efecto de una habilidad o de un objeto. `kind`: `TYPE_BOOST`, `FLOAT`, `WATER_BREATHING`, `CAPTURE`, `CAPTURE_EXCLUSIVE`, `HEAL`, `REVIVE`, `LEVEL`, `EV`, `EVOLVE`. Un efecto lo pueden usar varias habilidades u objetos |
+| `ability` | `id`, `name`, `description`, `effect_id` | Habilidades de los pokémon |
+| `rarity` | `id`, `name`, `spawn_weight`, `xp_multiplier` | Rareza de pokémon y cofres (probabilidad de aparecer y experiencia) |
+| `category` | `id`, `name` | Pestaña de la mochila (objetos, materiales y herramientas) |
+| `item` | `id`, `name`, `description`, `category_id`, `effect_id`, `buy_price`, `sell_price`, `gift_every`, `gift_reward_id` | Objetos con efecto: pokéballs, medicinas, entrenamiento y piedras evolutivas. `gift_*`: la tienda regala esa recompensa cada tantas unidades compradas |
+| `material` | `id`, `name`, `description`, `category_id`, `color`, `buy_price`, `sell_price` | Recursos que se sacan del mundo |
+| `tool`, `tool_level`, `tool_upgrade` | | Herramientas, sus niveles y los materiales que cuesta mejorarlas |
+| `skill` | `id`, `name`, `description`, `animation` | Habilidad de recolección (talar, picar, regar…) |
+| `resource_node`, `habitat_resource` | | Nodos de recolección y dónde salen |
+| `reward` | `id` (grupo), `kind`, `target_id`, `probability`, `min_quantity`, `max_quantity` | Todas las recompensas. `kind`: `ITEM`, `MATERIAL`, `XP`. Al sortear un grupo sale **una** entrada según su probabilidad |
+| `chest` | `id`, `name`, `rarity_id`, `reward_id` | Cofres |
+| `dex_milestone` | `id`, `kind`, `threshold`, `species_id`, `description`, `progress`, `reward_id` | Hitos de la Pokédex (la experiencia que dan está en `reward`) |
+| `generation` | `id`, `name`, `region` | Generación de cada pokémon |
+| `pokemon`, `evolution`, `pokemon_habitat`, `pokemon_ecotone`, `pokemon_condition` | | Especies y sus tablas secundarias. `evolution`: `from_id`, `to_id`, `method`, `level`, `item_id` (piedra) |
+| `type`, `type_matchup` | `type.color` | Tipos y fortalezas / debilidades |
+| `habitat`, `weather`, `habitat_weather`, `weather_fusion` | | Hábitats y clima |
+| `radio` | `id`, `name`, `genre` | Emisoras |
 
-`item.sql` elimina `chest_reward` al ejecutarse, así que si lo reaplicas debes volver a aplicar `chest.sql` después.
+Grupos de `reward`: 1-3 cofres, 10 objetos del suelo (`RewardGroup::GROUND`), 100+ hitos de la Pokédex, 200 regalo de la tienda.
 
-## Modelo de datos
+## Cómo se reparte `item` en el código
 
-```mermaid
-erDiagram
-    pokeball ||--o{ item : "ref_id (POKEBALL)"
-    material ||--o{ item : "ref_id (MATERIAL)"
-    item_category ||--o{ item : category_id
-    material ||--o{ resource_node : material_id
-    rarity ||--o{ chest : rarity_id
-    chest ||--o{ chest_reward : chest_id
-    item ||--o{ chest_reward : item_id
+Cada fila se clasifica por su efecto: `CAPTURE` → `PokeballType`; `HEAL`/`REVIVE`/`LEVEL`/`EV` → `TrainingItem`; `EVOLVE` → piedra evolutiva. Los materiales y las herramientas entran en el inventario con ids `1000 + id` y `2000 + id`. `CAPTURE_EXCLUSIVE` es la bola del pokémon inicial (no es un objeto).
+
+## Assets según la base de datos
+
+```
+assets/
+  sprites/  items/<categoría>/<id>.png · types/<id>.png · weather/<id>.png · radio/<id>.png · ui/
+  models/   items/<categoría>/<id>.glb
+  audio/    radio/<id>.mp3 · sfx/*.wav
 ```
 
-### Tablas
+`<categoría>` es el nombre de `category` sin tildes ni espacios (`pokeballs`, `medicinas`, `entrenamiento`, `piedras_evolutivas`). Un objeto sin sprite se dibuja con un icono de reserva.
 
-| Tabla | Columnas | Descripción |
-|---|---|---|
-| `pokeball` | `id`, `name`, `description`, `capture_multiplier` | Tipos de Pokéball |
-| `material` | `id`, `name`, `description`, `color` (hex) | Materiales de recolección |
-| `resource_node` | `id`, `name`, `action`, `material_id`, `hits`, `min_yield`, `max_yield`, `spawn_weight` | Nodos del mundo (árbol, roca…) |
-| `item_category` | `id`, `name` | Categorías de objeto: `POKEBALL`, `MATERIAL` |
-| `item` | `id`, `category_id`, `ref_id` | Objeto del juego; `ref_id` apunta a la fila de la tabla de su categoría |
-| `chest` | `id`, `name`, `rarity_id`, `spawn_weight` | Tipos de cofre |
-| `chest_reward` | `id`, `chest_id`, `item_id`, `quantity`, `probability` | Recompensas posibles de cada cofre |
-| `type` | `id`, `name`, `color` (hex) | Tipos de Pokémon (19 tipos; de momento no se usa en el juego) |
+## Cambiar la base de datos
 
-Los nombres y descripciones de un objeto no están en `item`, sino en la tabla de su categoría.
-
-## Datos iniciales
-
-**Pokéballs:** Poké Ball (×1,0), Super Ball (×1,5), Ultra Ball (×2,0).
-
-**Materiales:** Madera, Piedra, Hierro, Carbón.
-
-**Nodos y cofres:** ver las tablas completas en [Jugabilidad](jugabilidad.md).
-
-## Acceso desde C++ (DAOs)
-
-| DAO | Tabla(s) | Modelo |
-|---|---|---|
-| `PokeballDao` | `pokeball` | `PokeballType` |
-| `ItemDao` | `item` + `item_category` | `Item` |
-| `MaterialDao` | `material` | `Material` |
-| `ResourceNodeDao` | `resource_node` | `ResourceNodeType` |
-| `ChestDao` | `chest` + `chest_reward` | `ChestType` (con sus `ChestReward`) |
-| `TypeDao` | `type` | `PokemonType` |
-
-`DaoRow` agrupa la lectura de columnas (`text`, `integer`, `real`). `SqliteUtil::executeSelect` devuelve filas como mapas `columna → texto`. `DatabaseManager` instancia los DAO y expone `loadGameData()`.
-
-Si una tabla no existe o está vacía, el DAO lo registra en el log indicando qué script falta aplicar.
-
-## Añadir una categoría de objeto nueva
-
-1. Crear su tabla (con nombre, descripción y demás datos).
-2. Añadir una fila en `item_category`.
-3. Insertar sus objetos en `item` (`category_id` + `ref_id`).
-4. Añadir el valor en `ItemCategory` (`app/models/item.hpp`) y en `ItemCategoryText::parse`.
-5. Crear su modelo y DAO, cargarlo en `GameData` / `DatabaseManager::loadGameData`.
-6. Hacer que `GameData::itemName` devuelva el nombre desde la nueva tabla.
-
----
-
-[← Volver al índice](../README.md) · Anterior: [Actualizaciones](actualizaciones.md) · Siguiente: [Arquitectura](arquitectura.md)
+`neon_cambios.sql` migra una base antigua a este esquema en una sola sentencia `DO $$ … $$;` (ejecutar en el editor SQL de Neon con **Run**). Si ya está migrada no hace nada.

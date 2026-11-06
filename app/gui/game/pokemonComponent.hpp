@@ -361,7 +361,7 @@ namespace PokemonComponent {
             GuiCards::radar(dl, center, radius, base, GuiStyle::ACCENT, &grown, IM_COL32(255, 160, 40, 255));
 
             const TrainingItem* vitamin = data.trainingWith(TrainingItem::Effect::EV);
-            const Item* vitaminItem = vitamin ? data.itemOf(ItemCategory::TRAINING, vitamin->id) : nullptr;
+            const Item* vitaminItem = vitamin ? data.item(vitamin->id) : nullptr;
             const int count = vitaminItem ? inventory.count(vitaminItem->id) : 0;
             char line[48];
             for (int i = 0; i < 6; ++i) {
@@ -497,7 +497,7 @@ namespace PokemonComponent {
                 };
                 for (const TrainingItem& med : data.trainingItems) {
                     if (med.effect != TrainingItem::Effect::HEAL && med.effect != TrainingItem::Effect::REVIVE) continue;
-                    if (const Item* medItem = data.itemOf(ItemCategory::TRAINING, med.id)) {
+                    if (const Item* medItem = data.item(med.id)) {
                         const float alpha = ItemUse::applies(data, storage, progress, *medItem, owned) && inventory.count(medItem->id) > 0 ? 1.0f : 0.4f;
                         button(*medItem, [&](ImDrawList* d, const ImVec2& c) { ItemIcon::training(d, c, 9.0f, med, alpha); }, med.name + "\n" + med.description);
                     }
@@ -509,7 +509,7 @@ namespace PokemonComponent {
             }
 
             // Caramelo: sube un nivel (sin pasar del límite del jugador).
-            if (const TrainingItem* candy = data.trainingWith(TrainingItem::Effect::LEVEL)) if (const Item* item = data.itemOf(ItemCategory::TRAINING, candy->id)) {
+            if (const TrainingItem* candy = data.trainingWith(TrainingItem::Effect::LEVEL)) if (const Item* item = data.item(candy->id)) {
                 const int count = inventory.count(item->id);
                 std::snprintf(text, sizeof(text), "NIVEL +1  x%d", count);
                 ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 150.0f, pos.y + 44.0f));

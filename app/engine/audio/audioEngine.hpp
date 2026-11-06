@@ -85,7 +85,7 @@ namespace Audio {
             if (m_station > 0) m_resume[static_cast<size_t>(m_station)] = m_mixer.radioPosition(); // la emisora que se deja guarda por dónde iba
             m_station = station;
             RadioPtr source;
-            if (station > 0 && m_radioLoader) source = m_radioLoader(Radio::station(station).path); // solo la emisora actual está abierta
+            if (station > 0 && m_radioLoader) source = m_radioLoader(Radio::music(station)); // solo la emisora actual está abierta
             m_mixer.setRadio(source, RADIO_VOLUME, station > 0 ? m_resume[static_cast<size_t>(station)] : 0); // y al volver a ella sigue desde ahí
         }
 
@@ -103,7 +103,7 @@ namespace Audio {
         std::array<Slot, static_cast<size_t>(Sound::Sfx::COUNT)> m_slots;
         std::vector<Sound::Event> m_events;
         int m_station = 0;
-        std::array<size_t, Radio::COUNT + 1> m_resume{}; // por dónde iba cada emisora (fotograma de su fichero)
+        std::array<size_t, Radio::MAX + 1> m_resume{}; // por dónde iba cada emisora (fotograma de su fichero)
         float m_clock = 0.0f, m_lastSweep = 0.0f;
         unsigned m_seed = 2463534242u;
     };

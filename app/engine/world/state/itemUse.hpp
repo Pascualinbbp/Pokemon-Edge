@@ -12,16 +12,16 @@ namespace ItemUse {
     constexpr int EVOLVE_REVIVE_PERCENT = 25; // PS con los que vuelve un debilitado al evolucionar por un objeto
     enum class Kind { NONE, HEAL, REVIVE, LEVEL, STONE };
 
-    // Evolución que provoca esta piedra (mineral) en esta especie; nullptr si no hace nada.
+    // Evolución que provoca esta piedra evolutiva en esta especie; nullptr si no hace nada.
     inline const Evolution* stoneEvolution(const GameData& data, const PokemonSpecies& species, const Item& item) {
-        if (item.category != ItemCategory::MATERIAL) return nullptr;
+        if (item.category != ItemCategory::STONE) return nullptr;
         for (const Evolution& evolution : species.evolutions) {
-            if (evolution.method == Evolution::Method::STONE && evolution.materialId == item.refId && data.speciesById(evolution.toId)) return &evolution;
+            if (evolution.method == Evolution::Method::STONE && evolution.itemId == item.id && data.speciesById(evolution.toId)) return &evolution;
         }
         return nullptr;
     }
 
-    // ¿Es un objeto que se usa sobre un pokémon? Las piedras son materiales que algún pokémon necesita para evolucionar.
+    // ¿Es un objeto que se usa sobre un pokémon? Las piedras evolutivas tienen su propia categoría.
     inline Kind kind(const GameData& data, const Item& item) {
         if (item.category == ItemCategory::TRAINING) {
             const TrainingItem* type = data.training(item.refId);
@@ -33,10 +33,7 @@ namespace ItemUse {
                 default:                           return Kind::NONE; // vitaminas: se gastan desde la ficha de estadísticas
             }
         }
-        if (item.category == ItemCategory::MATERIAL) {
-            for (const PokemonSpecies& species : data.species) if (stoneEvolution(data, species, item)) return Kind::STONE;
-        }
-        return Kind::NONE;
+        return item.category == ItemCategory::STONE ? Kind::STONE : Kind::NONE;
     }
 
     // ¿Tendría efecto sobre este pokémon?
@@ -73,6 +70,7 @@ namespace ItemUse {
             case Kind::REVIVE: {
                 const TrainingItem* type = data.training(item.refId);
                 storage.revive(place.inTeam, place.index, type->amount >= 100);
+                if (place.inTeam) storage.setActive(place.index); // el revivido sale al mundo y el jugador se lo da
                 storage.noteMedicine(place.inTeam, place.index, type->id, false);
                 message = itemName + " usado en " + name;
                 break;
@@ -83,14 +81,16 @@ namespace ItemUse {
                 message = result == PokemonStorage::LevelResult::EVOLVED && after ? "¡" + name + " ha evolucionado a " + after->name + "!" : name + " sube de nivel";
                 if (result == PokemonStorage::LevelResult::EVOLVED) {
                     if (wasFainted) storage.reviveEvolved(place.inTeam, place.index, EVOLVE_REVIVE_PERCENT);
+                    if (place.inTeam) storage.setActive(place.index);
                     storage.noteMedicine(place.inTeam, place.index, -1, true);
                 }
                 break;
             }
             case Kind::STONE: {
-                const PokemonSpecies* after = storage.evolveWithStone(place.inTeam, place.index, item.refId);
+                const PokemonSpecies* after = storage.evolveWithStone(place.inTeam, place.index, item.id);
                 if (!after) return {};
                 if (wasFainted) storage.reviveEvolved(place.inTeam, place.index, EVOLVE_REVIVE_PERCENT);
+                if (place.inTeam) storage.setActive(place.index);
                 storage.noteMedicine(place.inTeam, place.index, -1, true);
                 message = "¡" + name + " ha evolucionado a " + after->name + "!";
                 break;

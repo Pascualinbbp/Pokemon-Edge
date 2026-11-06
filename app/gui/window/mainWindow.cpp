@@ -181,7 +181,7 @@ void MainWindow::init() {
     WindowUtil::setIcon(g_hwnd, ResourceUtil::loadIcon(IDI_ICON1));
 
     GraphicsDevice::init(g_hwnd);
-    AssetTexture::load("logos/logo.png", g_logo); // el logo es opcional: si falla solo se registra
+    AssetTexture::load("sprites/ui/logo.png", g_logo); // el logo es opcional: si falla solo se registra
     InputHandler::init(g_hwnd);
 
     ShowWindow(g_hwnd, SW_SHOWDEFAULT);

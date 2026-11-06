@@ -16,7 +16,7 @@ namespace ItemIcon {
         }
     }
 
-    // Pokéball: su sprite (assets/hud/item/<modelo>.png) o, si falta, un dibujo con los colores de su modelo (mitad superior e inferior, banda y botón central).
+    // Pokéball: su sprite (assets/sprites/<modelo>.png) o, si falta, un dibujo con los colores de su modelo (mitad superior e inferior, banda y botón central).
     inline void ball(ImDrawList* dl, const ImVec2& c, float r, const PokeballStyle::Look& look, float alpha = 1.0f) {
         if (const ImTextureID sprite = HudIcons::sprite(look.model)) { // el sprite de su modelo 3D
             dl->AddImage(sprite, ImVec2(c.x - r * 1.1f, c.y - r * 1.1f), ImVec2(c.x + r * 1.1f, c.y + r * 1.1f), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, static_cast<int>(255.0f * alpha)));
@@ -36,8 +36,7 @@ namespace ItemIcon {
     }
 
     // Bloque del color del material (cubo en perspectiva).
-    inline void material(ImDrawList* dl, const ImVec2& c, float r, int materialId, float alpha = 1.0f) {
-        const DirectX::XMFLOAT3 tone = ItemStyle::materialColor(materialId);
+    inline void block(ImDrawList* dl, const ImVec2& c, float r, const DirectX::XMFLOAT3& tone, float alpha = 1.0f) {
         const float w = r * 0.9f, h = r * 0.52f;
         const ImVec2 top[4] = { { c.x, c.y - r * 0.9f }, { c.x + w, c.y - r * 0.9f + h }, { c.x, c.y - r * 0.9f + h * 2.0f }, { c.x - w, c.y - r * 0.9f + h } };
         const ImVec2 left[4] = { top[3], top[2], { c.x, c.y + r * 0.9f }, { c.x - w, c.y + r * 0.9f - h } };
@@ -45,6 +44,17 @@ namespace ItemIcon {
         dl->AddConvexPolyFilled(top, 4, detail::color(tone, alpha, 1.25f));
         dl->AddConvexPolyFilled(left, 4, detail::color(tone, alpha, 0.85f));
         dl->AddConvexPolyFilled(right, 4, detail::color(tone, alpha, 0.65f));
+    }
+
+    inline void material(ImDrawList* dl, const ImVec2& c, float r, int materialId, float alpha = 1.0f) { block(dl, c, r, ItemStyle::materialColor(materialId), alpha); }
+
+    // Piedra evolutiva: su sprite (assets/sprites/items/piedras_evolutivas/<id>.png) o, si falta, un bloque del color de su tipo.
+    inline void stone(ImDrawList* dl, const ImVec2& c, float r, const Item& item, float alpha = 1.0f) {
+        if (const ImTextureID sprite = HudIcons::sprite(item.asset)) {
+            dl->AddImage(sprite, ImVec2(c.x - r * 1.1f, c.y - r * 1.1f), ImVec2(c.x + r * 1.1f, c.y + r * 1.1f), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, static_cast<int>(255.0f * alpha)));
+            return;
+        }
+        block(dl, c, r, StyleRegistry::lookup(StyleRegistry::typeColors(), item.typeId, { 0.60f, 0.60f, 0.63f }), alpha);
     }
 
     // Herramienta: mango y cabeza (hacha o pico).
@@ -73,8 +83,8 @@ namespace ItemIcon {
         const int a = static_cast<int>(255.0f * alpha);
         const TrainingItem::Effect effect = type.effect;
         const int amount = type.amount;
-        if (!type.model.empty()) {
-            if (const ImTextureID sprite = HudIcons::sprite(type.model)) {
+        if (!type.asset.empty()) {
+            if (const ImTextureID sprite = HudIcons::sprite(type.asset)) {
                 dl->AddImage(sprite, ImVec2(c.x - r * 1.1f, c.y - r * 1.1f), ImVec2(c.x + r * 1.1f, c.y + r * 1.1f), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, a));
                 return;
             }
@@ -121,6 +131,7 @@ namespace ItemIcon {
         switch (item.category) {
             case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::look(type->id), alpha); break;
             case ItemCategory::MATERIAL: material(dl, c, r, item.refId, alpha); break;
+            case ItemCategory::STONE:    stone(dl, c, r, item, alpha); break;
             case ItemCategory::TOOL:     tool(dl, c, r, item.refId, alpha); break;
             case ItemCategory::TRAINING: if (const TrainingItem* type = data.training(item.refId)) training(dl, c, r, *type, alpha); break;
             default: break;
@@ -132,20 +143,10 @@ namespace ItemIcon {
         switch (category) {
             case ItemCategory::POKEBALL: return IM_COL32(52, 96, 190, 255);
             case ItemCategory::MATERIAL: return IM_COL32(196, 128, 48, 255);
+            case ItemCategory::STONE:    return IM_COL32(190, 70, 110, 255);
             case ItemCategory::TOOL:     return IM_COL32(120, 76, 190, 255);
             case ItemCategory::TRAINING: return IM_COL32(40, 150, 120, 255);
             default:                     return IM_COL32(90, 90, 100, 255);
-        }
-    }
-
-    // Icono representativo de una categoría (pestañas del inventario).
-    inline void category(ImDrawList* dl, const ImVec2& c, float r, ItemCategory category) {
-        switch (category) {
-            case ItemCategory::POKEBALL: ball(dl, c, r, PokeballStyle::look(1)); break;
-            case ItemCategory::MATERIAL: material(dl, c, r, 2); break;
-            case ItemCategory::TOOL:     tool(dl, c, r, 1); break;
-            case ItemCategory::TRAINING: training(dl, c, r, TrainingItem{}); break;
-            default: break;
         }
     }
 }

@@ -21,7 +21,7 @@ namespace TypeIcons {
             auto it = textures.find(typeId);
             if (it == textures.end()) {
                 Texture loaded;
-                AssetTexture::load("types/" + std::to_string(typeId) + ".png", loaded);
+                AssetTexture::load("sprites/types/" + std::to_string(typeId) + ".png", loaded);
                 it = textures.emplace(typeId, std::move(loaded)).first;
             }
             return (ImTextureID)(intptr_t)it->second.srv.Get();

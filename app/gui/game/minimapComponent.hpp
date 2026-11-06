@@ -140,6 +140,6 @@ namespace MinimapComponent {
 
         // Clima arriba a la izquierda (en diagonal, simétrico al disco de día y noche), pegado al borde del círculo.
         const float badgeReach = RADIUS + 4.0f + BADGE - 6.0f;
-        badge(dl, ImVec2(mid.x - std::sin(EAR_ANGLE) * badgeReach, mid.y - std::cos(EAR_ANGLE) * badgeReach), BADGE, HudIcons::weather(status.weatherName ? *status.weatherName : "Sol"));
+        badge(dl, ImVec2(mid.x - std::sin(EAR_ANGLE) * badgeReach, mid.y - std::cos(EAR_ANGLE) * badgeReach), BADGE, HudIcons::weather(status.weatherId));
     }
 }

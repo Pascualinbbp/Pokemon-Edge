@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <string>
 
-// Tipo de Pokéball tal como está en la base de datos.
+// Pokéball: una fila de item cuyo efecto es CAPTURE (o CAPTURE_EXCLUSIVE, la bola del pokémon inicial, que no es un objeto).
 struct PokeballType {
     int id = -1;
     std::string name;
@@ -18,6 +18,5 @@ struct PokeballType {
         return text;
     }
     bool obtainable = true;         // false = bola exclusiva (la del pokémon inicial): no es un objeto
-    int giftId = -1;                // bola que regala la tienda al comprar esta (-1 = ninguna)
-    int giftEvery = 0;              // cada cuántas compradas
+    std::string asset;              // "items/pokeballs/<id>": modelo 3D y sprite (assets/models/ y assets/sprites/)
 };

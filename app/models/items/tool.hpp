@@ -26,6 +26,7 @@ struct Tool {
     std::string name;
     std::string description;
     int skillId = -1;
+    int categoryId = -1;
     std::vector<ToolTier> tiers; // ordenados por nivel (el índice 0 es el nivel 1)
 
     int maxLevel() const { return static_cast<int>(tiers.size()); }

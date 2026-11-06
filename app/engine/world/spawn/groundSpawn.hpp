@@ -5,9 +5,10 @@
 #include "../../../models/gameData.hpp"
 #include "../../../utils/core/randomUtil.hpp"
 #include "../entities/groundItem.hpp"
+#include "../rules/rewardRules.hpp"
 
 // Dónde aparecen los objetos sueltos (pruebas): puntos fijos, como los cofres. Qué dan se sortea al recogerlos
-// según spawn_weight (tabla ground_item).
+// según su probabilidad en el grupo RewardGroup::GROUND (tabla reward).
 namespace GroundSpawn {
     inline constexpr float DELAY = 45.0f; // segundos desde que se recoge uno hasta que aparece otro en su punto
 
@@ -23,14 +24,14 @@ namespace GroundSpawn {
     };
     inline constexpr int COUNT = static_cast<int>(sizeof(SPOTS) / sizeof(SPOTS[0]));
 
-    // Qué dará un objeto suelto: índice en ground_item sorteado según su peso (se decide al aparecer para poder mostrarlo).
+    // Qué dará un objeto suelto: índice en data.rewards sorteado en su grupo (se decide al aparecer para poder mostrarlo).
     inline int pickReward(const GameData& data) {
-        const GroundItemType* reward = RandomUtil::pick(data.groundItems, [](const GroundItemType& g) { return g.spawnWeight; });
-        return reward ? static_cast<int>(reward - data.groundItems.data()) : -1;
+        const RewardEntry* reward = RewardRules::pick(data, RewardGroup::GROUND);
+        return reward ? static_cast<int>(reward - data.rewards.data()) : -1;
     }
 
     inline std::optional<GroundItem> make(const GameData& data, int spot) {
-        if (data.groundItems.empty()) return std::nullopt;
+        if (data.rewardGroup(RewardGroup::GROUND).first == data.rewardGroup(RewardGroup::GROUND).second) return std::nullopt;
         GroundItem item(spot, DirectX::XMFLOAT3{ SPOTS[spot][0], Physics::World::START_HEIGHT, SPOTS[spot][1] });
         item.setReward(pickReward(data));
         return item;

@@ -50,6 +50,7 @@ struct GameStatus {
     const Exploration* exploration = nullptr;    // lo explorado (mapa grande)
     std::vector<DirectX::XMFLOAT4> mapBlocks;    // construcciones fijas (x, z, semilado x, semilado z) para los mapas
     const std::string* habitatName = nullptr;    // hábitat dominante donde está el jugador
+    int weatherId = 1;                           // id del clima (para su logo; 1 = sol cuando está despejado)
     const std::string* weatherName = nullptr;    // clima más fuerte donde está el jugador (nullptr = despejado)
     float dayAngle = 0.0f;                       // posición del sol: 0..π de día, π..2π de noche
     const char* companionMode = nullptr;         // modo del pokémon que acompaña (nullptr = no hay)

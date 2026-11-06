@@ -248,13 +248,13 @@ class PokemonStorage {
         return LevelResult::LEVELED;
     }
 
-    // Evoluciona (equipo o PC) con una piedra: 'materialId' es el mineral usado. Devuelve la especie nueva o nullptr si esa piedra no le hace nada.
-    const PokemonSpecies* evolveWithStone(bool inTeam, int index, int materialId) {
+    // Evoluciona (equipo o PC) con una piedra: 'itemId' es la piedra usada. Devuelve la especie nueva o nullptr si esa piedra no le hace nada.
+    const PokemonSpecies* evolveWithStone(bool inTeam, int index, int itemId) {
         OwnedPokemon* owned = at(inTeam, index);
         const PokemonSpecies* species = owned ? m_data->speciesById(owned->speciesId) : nullptr;
         if (!species) return nullptr;
         for (const Evolution& evolution : species->evolutions) {
-            const PokemonSpecies* next = evolution.method == Evolution::Method::STONE && evolution.materialId == materialId ? m_data->speciesById(evolution.toId) : nullptr;
+            const PokemonSpecies* next = evolution.method == Evolution::Method::STONE && evolution.itemId == itemId ? m_data->speciesById(evolution.toId) : nullptr;
             if (!next) continue;
             owned->speciesId = next->id;
             markDex(next->id, DEX_CAUGHT);

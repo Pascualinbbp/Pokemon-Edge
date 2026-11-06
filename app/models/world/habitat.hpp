@@ -28,7 +28,6 @@ enum class HabitatPlacement { ANY, COAST, BESIDE, SEA, RIVER, UPPER_RIVER, LAKE,
 struct Habitat {
     int id = -1;
     std::string name;
-    std::string description;
     int minZones = 1;
     int maxZones = 1;
     float minRadius = 10.0f;

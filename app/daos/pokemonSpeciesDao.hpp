@@ -39,11 +39,11 @@ class PokemonSpeciesDao {
 
     private:
     static void loadEvolutions(std::vector<PokemonSpecies>& species) {
-        for (const auto& row : SqliteUtil::executeSelect("SELECT from_id, to_id, method, level, material_id FROM evolution ORDER BY rowid;")) {
+        for (const auto& row : SqliteUtil::executeSelect("SELECT from_id, to_id, method, level, item_id FROM evolution ORDER BY id;")) {
             for (PokemonSpecies& entry : species) {
                 if (entry.id != DaoRow::integer(row, "from_id")) continue;
                 entry.evolutions.push_back({ DaoRow::integer(row, "to_id"), Evolution::parse(DaoRow::text(row, "method")),
-                                             DaoRow::integer(row, "level"), DaoRow::integer(row, "material_id") > 0 ? DaoRow::integer(row, "material_id") : -1 });
+                                             DaoRow::integer(row, "level"), DaoRow::integer(row, "item_id") > 0 ? DaoRow::integer(row, "item_id") : -1 });
                 break;
             }
         }

@@ -69,8 +69,8 @@ namespace InventoryComponent {
                 const ImVec2 c(a.x + TAB_SIZE * 0.5f, a.y + TAB_SIZE * 0.5f);
                 dl->AddCircleFilled(c, TAB_SIZE * 0.5f, selected ? GuiStyle::ACCENT : (hovered ? IM_COL32(60, 60, 78, 255) : GuiStyle::SURFACE), 40);
                 if (selected) dl->AddCircle(c, TAB_SIZE * 0.5f + 3.0f, GuiCards::SELECT, 40, 2.0f);
-                ItemIcon::category(dl, c, TAB_SIZE * 0.3f, ItemCategoryText::parse(data.categories[i].name));
-                if (hovered) ImGui::SetTooltip("%s", data.categories[i].label.c_str());
+                if (const Item* icon = data.item(data.categories[i].iconItemId)) ItemIcon::item(dl, c, TAB_SIZE * 0.3f, *icon, data);
+                if (hovered) ImGui::SetTooltip("%s", data.categories[i].name.c_str());
             }
         }
 
@@ -270,11 +270,11 @@ namespace InventoryComponent {
             detail::selectedItem = picked->item->id;
         }
 
-        GuiCards::text(dl, gridPos, IM_COL32(255, 255, 255, 255), category.label.c_str(), 1.2f);
+        GuiCards::text(dl, gridPos, IM_COL32(255, 255, 255, 255), category.name.c_str(), 1.2f);
         ImGui::SetCursorScreenPos(ImVec2(gridPos.x, gridPos.y + 34.0f));
         detail::drawGrid(data, list, ImVec2(gridWidth, height - 34.0f));
 
-        detail::drawDetail(data, storage, inventory, progress, picked ? picked->item : nullptr, category.label,
+        detail::drawDetail(data, storage, inventory, progress, picked ? picked->item : nullptr, category.name,
             ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));
 
         GuiCards::text(dl, ImVec2(detail::MARGIN, screen.y - detail::MARGIN), GuiStyle::MUTED, "Q / E: categoría     ESC: volver", 0.9f);

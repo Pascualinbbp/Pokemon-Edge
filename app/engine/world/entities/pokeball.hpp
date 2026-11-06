@@ -4,11 +4,11 @@
 #include "../../physics/body.hpp"
 
 // Aspecto de cada tipo de pokéball (por id de la base de datos). Es el único sitio donde se registra una pokéball nueva: su modelo
-// (assets/models/<model>.glb, con los nodos "fixed" y "movable" y la articulación en extras.janus) y sus parámetros. Todo lo demás
+// (assets/models/items/pokeballs/<id>.glb, con los nodos "fixed" y "movable" y la articulación en extras.janus) y sus parámetros. Todo lo demás
 // (lanzamiento, captura, cambio de pokémon, dibujo) funciona igual para cualquiera.
 namespace PokeballStyle {
     inline constexpr const char* LID_PART = "movable";   // nodo de la tapa en cualquier modelo de pokéball
-    inline constexpr const char* DEFAULT_MODEL = "pokeball/pokeball";
+    inline constexpr const char* DEFAULT_MODEL = "items/pokeballs/1";
 
     struct Look {
         DirectX::XMFLOAT3 color;   // color del tipo (iconos y, si el modelo es teñible, sus zonas rojas)
@@ -22,11 +22,11 @@ namespace PokeballStyle {
 
     inline const Look& look(int typeId) {
         static const Look pokeball  = { { 0.86f, 0.16f, 0.16f }, DEFAULT_MODEL, true, 0.0f, { 0.94f, 0.94f, 0.94f }, { 0.08f, 0.08f, 0.09f }, { 0.94f, 0.94f, 0.94f } };           // Poké Ball: roja
-        static const Look superBall = { { 0.16f, 0.39f, 0.90f }, "pokeball/superball", false, 0.0f, { 0.94f, 0.94f, 0.94f }, { 0.85f, 0.15f, 0.15f }, { 0.94f, 0.94f, 0.94f } };  // Super Ball: modelo propio
-        static const Look ultraBall = { { 0.12f, 0.12f, 0.14f }, "pokeball/ultraball", false, 0.0f, { 0.94f, 0.94f, 0.94f }, { 0.96f, 0.80f, 0.16f }, { 0.94f, 0.94f, 0.94f } };  // Ultra Ball: modelo propio
-        static const Look starter   = { { 0.88f, 0.42f, 0.16f }, "pokeball/starterball", false, 0.0f, { 0.84f, 0.72f, 0.52f }, { 0.55f, 0.58f, 0.66f }, { 0.78f, 0.80f, 0.86f } }; // Starter Ball: modelo propio (solo la lleva el pokémon inicial)
-        static const Look shinyBall = { { 0.10f, 0.95f, 0.95f }, "pokeball/shinyball", false, 0.0f, { 0.05f, 0.05f, 0.06f }, { 0.86f, 0.88f, 0.88f }, { 0.05f, 0.05f, 0.06f } };   // Shiny Ball: modelo propio
-        static const Look honorBall = { { 0.97f, 0.97f, 0.98f }, "pokeball/honorball", false, 0.0f, { 0.97f, 0.97f, 0.98f }, { 0.92f, 0.10f, 0.10f }, { 0.97f, 0.97f, 0.98f } };   // Honor Ball: modelo propio (regalo de la tienda)
+        static const Look superBall = { { 0.16f, 0.39f, 0.90f }, "items/pokeballs/2", false, 0.0f, { 0.94f, 0.94f, 0.94f }, { 0.85f, 0.15f, 0.15f }, { 0.94f, 0.94f, 0.94f } };  // Super Ball: modelo propio
+        static const Look ultraBall = { { 0.12f, 0.12f, 0.14f }, "items/pokeballs/3", false, 0.0f, { 0.94f, 0.94f, 0.94f }, { 0.96f, 0.80f, 0.16f }, { 0.94f, 0.94f, 0.94f } };  // Ultra Ball: modelo propio
+        static const Look starter   = { { 0.88f, 0.42f, 0.16f }, "items/pokeballs/4", false, 0.0f, { 0.84f, 0.72f, 0.52f }, { 0.55f, 0.58f, 0.66f }, { 0.78f, 0.80f, 0.86f } }; // Starter Ball: modelo propio (solo la lleva el pokémon inicial)
+        static const Look shinyBall = { { 0.10f, 0.95f, 0.95f }, "items/pokeballs/5", false, 0.0f, { 0.05f, 0.05f, 0.06f }, { 0.86f, 0.88f, 0.88f }, { 0.05f, 0.05f, 0.06f } };   // Shiny Ball: modelo propio
+        static const Look honorBall = { { 0.97f, 0.97f, 0.98f }, "items/pokeballs/6", false, 0.0f, { 0.97f, 0.97f, 0.98f }, { 0.92f, 0.10f, 0.10f }, { 0.97f, 0.97f, 0.98f } };   // Honor Ball: modelo propio (regalo de la tienda)
         static const Look unknown   = { { 0.70f, 0.70f, 0.70f }, DEFAULT_MODEL, true, 0.0f, { 0.94f, 0.94f, 0.94f }, { 0.08f, 0.08f, 0.09f }, { 0.94f, 0.94f, 0.94f } };
         switch (typeId) {
             case 1:  return pokeball;

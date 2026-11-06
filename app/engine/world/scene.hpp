@@ -22,7 +22,7 @@
 #include "rules/companionRules.hpp"
 #include "rules/damageRules.hpp"
 #include "entities/captureTarget.hpp"
-#include "rules/chestRules.hpp"
+#include "rules/rewardRules.hpp"
 #include "rules/evRules.hpp"
 #include "state/playerProgress.hpp"
 #include "rules/pokemonRules.hpp"
@@ -388,8 +388,8 @@ struct Scene {
             s.interactVerb = PICK_VERB;
             s.interactTarget = &GROUND_NAME;
             const GroundItem& item = groundItems.entities[m_interaction.index];
-            if (const GroundItemType* reward = item.reward() >= 0 ? &m_data->groundItems[item.reward()] : nullptr) {
-                if (const Item* found = m_data->item(reward->itemId)) s.interactTarget = &m_data->itemName(*found);
+            if (item.reward() >= 0) {
+                if (const Item* found = m_data->rewardItem(m_data->rewards[item.reward()])) s.interactTarget = &m_data->itemName(*found);
             }
         } else if (m_interaction.kind == Interaction::FRUIT) {
             s.interactVerb = PICK_VERB;
@@ -425,6 +425,7 @@ struct Scene {
         const Weather* current = context.weather.empty() ? nullptr : m_data->weather(context.weather.front().weatherId);
         s.habitatName = &m_data->habitats[habitat].name;
         s.weatherName = current ? &current->name : nullptr;
+        s.weatherId = current ? current->id : 1;
     }
 
     // Temperatura, altura, aire, región y ayudas inferiores.
@@ -643,10 +644,21 @@ struct Scene {
             if (use.evolved) {
                 if (onActive && storage.active()) m_itemEvolveUid = storage.active()->uid; // el efecto de evolución lo hace el acompañante en cuanto está fuera
                 else Sound::emit(Sound::Sfx::EVOLVE, player.body.position);
-            } else if (onCompanion && type && !type->model.empty()) {
-                potionFx = { type->model, type->rgb >= 0 ? StyleRegistry::unpack(type->rgb) : DirectX::XMFLOAT3{ 1.0f, 1.0f, 1.0f }, 0.0f, false };
-                player.act(PlayerAction::POTION);
+            } else if (onActive && type && storage.active()) {
+                m_pendingPotion = { type, storage.active()->uid, 6.0f }; // la usa en cuanto el pokémon está fuera (si salía otro, primero vuelve a su bola)
             } else Sound::emitGlobal(Sound::Sfx::HEAL);
+            (void)onCompanion;
+        }
+        if (m_pendingPotion.type) {
+            const OwnedPokemon* lead = storage.active();
+            m_pendingPotion.wait -= dt;
+            if (!lead || lead->uid != m_pendingPotion.uid || m_pendingPotion.wait <= 0.0f) m_pendingPotion.type = nullptr;
+            else if (lead->uid == m_shownUid && companion.active() && companion.speciesId() == lead->speciesId && !companion.changing() && !companion.tripActive() && potionFx.time < 0.0f) {
+                const TrainingItem& type = *m_pendingPotion.type;
+                potionFx = { type.asset, type.rgb >= 0 ? StyleRegistry::unpack(type.rgb) : DirectX::XMFLOAT3{ 1.0f, 1.0f, 1.0f }, 0.0f, false };
+                player.act(PlayerAction::POTION);
+                m_pendingPotion.type = nullptr;
+            }
         }
         if (potionFx.time < 0.0f) return;
         potionFx.time += dt;
@@ -1239,12 +1251,18 @@ struct Scene {
         showNotice(Notice::REWARD, std::move(text));
     }
 
-    // Abre el cofre: una recompensa al azar de las de su tipo, directa al inventario.
+    // Entrega una entrada de recompensa: unidades de un objeto o material al inventario.
+    void giveEntry(const RewardEntry& entry) {
+        if (const Item* item = m_data->rewardItem(entry)) giveReward(item->id, RewardRules::quantity(entry));
+        else if (entry.kind == RewardEntry::Kind::XP) gainXp(RewardRules::quantity(entry));
+    }
+
+    // Abre el cofre: una recompensa al azar de su grupo, directa al inventario.
     void openChest(Chest& chest) {
-        const ChestReward* reward = ChestRules::pickReward(m_data->chests[chest.typeIndex()]);
+        const RewardEntry* reward = RewardRules::pick(*m_data, m_data->chests[chest.typeIndex()].rewardId);
         chest.open();
         Sound::emit(Sound::Sfx::CHEST_OPEN, chest.body.position);
-        if (reward) giveReward(reward->itemId, RandomUtil::integer(reward->minQuantity, reward->maxQuantity));
+        if (reward) giveEntry(*reward);
         gainXp(Xp::CHEST);
     }
 
@@ -1433,8 +1451,7 @@ struct Scene {
     void collect(GroundItem& item) {
         if (!item.available()) return;
         if (item.reward() >= 0) {
-            const GroundItemType* reward = &m_data->groundItems[item.reward()];
-            giveReward(reward->itemId, RandomUtil::integer(reward->minQuantity, reward->maxQuantity));
+            giveEntry(m_data->rewards[item.reward()]);
             gainXp(Xp::PICK_UP);
         }
         item.take();
@@ -1674,7 +1691,7 @@ struct Scene {
     // Una bola que no tocó a ningún pokémon vuelve al inventario al desaparecer (la que alcanzó a uno se gasta).
     void returnBall(const Pokeball& ball) {
         if (ball.spent) return;
-        const Item* item = m_data->itemOf(ItemCategory::POKEBALL, ball.typeId);
+        const Item* item = m_data->item(ball.typeId);
         if (!item || !inventory.add(item->id, 1)) return;
         if (noticeTime <= 0.0f) showNotice(Notice::REWARD, "1x " + m_data->itemName(*item));
     }
@@ -1749,6 +1766,7 @@ struct Scene {
     float m_captureRest = 0.0f; // descanso del acompañante entre ataques en modo captura
     bool m_collecting = false;
     float m_holdClock = 0.0f;
+    struct PendingPotion { const TrainingItem* type = nullptr; int uid = 0; float wait = 0.0f; } m_pendingPotion; // poción o revivir a la espera de que el pokémon salga
     int m_itemEvolveUid = 0;   // pokémon que evoluciona por un objeto y aún no ha hecho el efecto (0 = ninguno)
     int m_shownUid = 0;        // pokémon (uid y especie) que está fuera o saliendo
     int m_shownSpecies = -1;

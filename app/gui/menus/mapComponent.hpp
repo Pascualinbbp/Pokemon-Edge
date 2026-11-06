@@ -63,9 +63,7 @@ namespace MapComponent {
         // Detalle del hábitat: climas, recursos y pokémon, todo como porcentajes dentro de ese hábitat.
         inline void drawHabitat(ImDrawList* dl, ImVec2 pos, float width, const GameData& data, const Habitat& habitat) {
             GuiCards::text(dl, pos, IM_COL32(255, 255, 255, 255), habitat.name.c_str(), 1.3f);
-            pos.y += ImGui::GetFontSize() * 1.3f + 4.0f;
-            GuiCards::text(dl, pos, GuiStyle::MUTED, habitat.description.c_str(), 0.85f);
-            pos.y += ImGui::GetFontSize() * 0.85f + 14.0f;
+            pos.y += ImGui::GetFontSize() * 1.3f + 14.0f;
 
             size_t hidden = 0;
             std::vector<Entry> weather;

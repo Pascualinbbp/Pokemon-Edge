@@ -5,14 +5,14 @@
 #include <DirectXMath.h>
 #include "../entities/chest.hpp"
 #include "../habitat/habitatMap.hpp"
-#include "../rules/chestRules.hpp"
+
 #include "../state/researchMachine.hpp"
 #include "../../../models/gameData.hpp"
 #include "../../../utils/core/randomUtil.hpp"
 
 // Cofres del mundo: no se crean al generar el mundo sino poco a poco, cerca del jugador. Cada zona de un hábitat admite a la vez
 // entre min_chests y max_chests (se sortea cada día) y cada hábitat tiene un tope de cofres nuevos por día (daily_chests).
-// Cuál es el tipo (rareza) de cada cofre es un sorteo aparte (ChestRules).
+// Cuál es el tipo (rareza) de cada cofre es un sorteo aparte .
 class ChestField {
     public:
     static constexpr float SPAWN_RADIUS = 70.0f;     // las zonas más cerca que esto del jugador pueden generar cofres
@@ -57,7 +57,7 @@ class ChestField {
             const float x = zone.x + u * zone.cosA - v * zone.sinA, z = zone.z + u * zone.sinA + v * zone.cosA;
             if (!valid(x, z, playerX, playerZ, world, habitats, zone.deep)) continue;
 
-            const int type = ChestRules::pickType(data.chests);
+            const int type = RandomUtil::weightedIndex(data.chests, [&](const ChestType& chest) { return data.spawnWeight(chest); });
             if (type < 0) return;
             const float y = zone.deep ? habitats.under().floorAt(x, z) : world.groundHeight(x, z);
             entities.emplace_back(zoneIndex, type, data.chests[type].rarity, DirectX::XMFLOAT3{ x, y, z }, RandomUtil::range(-3.14159265f, 3.14159265f));

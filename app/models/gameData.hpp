@@ -1,5 +1,7 @@
 #pragma once
+#include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 #include "pokemon/ability.hpp"
 #include "pokemon/dexReward.hpp"
@@ -7,7 +9,7 @@
 #include "pokemon/rarity.hpp"
 #include "pokemon/typeChart.hpp"
 #include "world/chestType.hpp"
-#include "world/groundItemType.hpp"
+#include "world/reward.hpp"
 #include "world/habitat.hpp"
 #include "world/weather.hpp"
 #include "items/item.hpp"
@@ -35,7 +37,7 @@ struct GameData {
     TypeChart typeChart;
     std::vector<Rarity> rarities;
     std::vector<Generation> generations;
-    std::vector<GroundItemType> groundItems;
+    std::vector<RewardEntry> rewards; // ordenadas por grupo
     std::vector<TrainingItem> trainingItems;
     std::vector<ChestType> chests;
     std::vector<ResourceNodeType> nodes;
@@ -60,6 +62,7 @@ struct GameData {
     const Rarity* rarity(int id) const { return find(rarities, id); }
     const Generation* generation(int id) const { return find(generations, id); }
     const Rarity* rarityOf(const PokemonSpecies& species) const { return rarity(species.rarityId); }
+    float spawnWeight(const ChestType& chest) const { const Rarity* r = rarity(chest.rarity); return r ? r->spawnMultiplier : 1.0f; }
     float spawnMultiplier(const PokemonSpecies& species) const { const Rarity* r = rarityOf(species); return r ? r->spawnMultiplier : 1.0f; }
     float xpMultiplier(const PokemonSpecies& species) const { const Rarity* r = rarityOf(species); return r ? r->xpMultiplier : 1.0f; }
     const PokemonSpecies* speciesById(int id) const { return find(species, id); }
@@ -115,14 +118,24 @@ struct GameData {
         return -1;
     }
 
-    // El objeto que representa una fila de la tabla de su categoría. nullptr si no está en la tabla item.
-    const Item* itemOf(ItemCategory category, int refId) const {
-        for (const Item& entry : items) if (entry.category == category && entry.refId == refId) return &entry;
-        return nullptr;
+    // El objeto del inventario de un material, de una herramienta o de un objeto con efecto (nullptr si no existe).
+    const Item* materialItem(int materialId) const { return item(MATERIAL_ITEM_BASE + materialId); }
+    const Item* toolItem(int toolId) const { return item(TOOL_ITEM_BASE + toolId); }
+
+    // Entradas de un grupo de recompensas (tabla reward).
+    std::pair<const RewardEntry*, const RewardEntry*> rewardGroup(int groupId) const {
+        const RewardEntry* begin = rewards.data();
+        const RewardEntry* end = begin + rewards.size();
+        const RewardEntry* first = std::find_if(begin, end, [&](const RewardEntry& e) { return e.groupId == groupId; });
+        const RewardEntry* last = first;
+        while (last != end && last->groupId == groupId) ++last;
+        return { first, last };
     }
 
-    const Item* materialItem(int materialId) const { return itemOf(ItemCategory::MATERIAL, materialId); }
-    const Item* toolItem(int toolId) const { return itemOf(ItemCategory::TOOL, toolId); }
+    // El objeto de inventario que da una entrada de recompensa (nullptr si es experiencia o no existe).
+    const Item* rewardItem(const RewardEntry& entry) const {
+        return entry.kind == RewardEntry::Kind::ITEM ? item(entry.targetId) : entry.kind == RewardEntry::Kind::MATERIAL ? materialItem(entry.targetId) : nullptr;
+    }
 
     // ¿Alguna de sus habilidades lo hace levitar?
     bool levitates(const PokemonSpecies& species) const {
@@ -141,40 +154,17 @@ struct GameData {
     // La herramienta que representa un objeto (nullptr si no es una herramienta).
     const Tool* toolOf(const Item& item) const { return item.category == ItemCategory::TOOL ? tool(item.refId) : nullptr; }
 
-    // Nombre y descripción del objeto: viven en la tabla de su categoría.
-    const std::string& itemName(const Item& item) const {
-        static const std::string unknown = "?";
-        switch (item.category) {
-            case ItemCategory::POKEBALL: if (const PokeballType* type = ball(item.refId)) return type->name; break;
-            case ItemCategory::MATERIAL: if (const Material* type = material(item.refId)) return type->name; break;
-            case ItemCategory::TOOL:     if (const Tool* type = tool(item.refId)) return type->name; break;
-            case ItemCategory::TRAINING: if (const TrainingItem* type = training(item.refId)) return type->name; break;
-            default: break;
-        }
-        return unknown;
-    }
+    const std::string& itemName(const Item& item) const { return item.name; }
 
     // Nombre que ve el jugador: el de la herramienta cambia con su nivel ('count' = unidades o nivel); el resto, su nombre.
     std::string itemTitle(const Item& item, int count) const {
         if (const Tool* found = toolOf(item)) return found->title(count);
-        return itemName(item);
+        return item.name;
     }
 
     std::string itemText(const Item& item, int count) const {
         if (const Tool* found = toolOf(item)) return found->effects(count);
-        return itemDescription(item);
-    }
-
-    const std::string& itemDescription(const Item& item) const {
-        static const std::string none;
-        switch (item.category) {
-            case ItemCategory::POKEBALL: if (const PokeballType* type = ball(item.refId)) return type->description; break;
-            case ItemCategory::MATERIAL: if (const Material* type = material(item.refId)) return type->description; break;
-            case ItemCategory::TOOL:     if (const Tool* type = tool(item.refId)) return type->description; break;
-            case ItemCategory::TRAINING: if (const TrainingItem* type = training(item.refId)) return type->description; break;
-            default: break;
-        }
-        return none;
+        return item.description;
     }
 
     private:

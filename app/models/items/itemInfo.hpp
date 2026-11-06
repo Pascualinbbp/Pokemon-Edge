@@ -6,12 +6,13 @@
 
 // Información derivada de las tablas de la base de datos para mostrar de un objeto: de dónde sale y para qué sirve.
 namespace ItemInfo {
-    // Probabilidad (%) de que un cofre dé este objeto al abrirse.
-    inline float chestChance(const ChestType& chest, int itemId) {
+    // Probabilidad (%) de que el grupo de recompensas dé este objeto.
+    inline float groupChance(const GameData& data, int groupId, const Item& item) {
+        const auto range = data.rewardGroup(groupId);
         float total = 0.0f, mine = 0.0f;
-        for (const ChestReward& reward : chest.rewards) {
-            total += reward.probability;
-            if (reward.itemId == itemId) mine += reward.probability;
+        for (const RewardEntry* e = range.first; e != range.second; ++e) {
+            total += e->probability;
+            if (const Item* found = data.rewardItem(*e); found && found->id == item.id) mine += e->probability;
         }
         return total > 0.0f ? mine / total * 100.0f : 0.0f;
     }
@@ -30,11 +31,9 @@ namespace ItemInfo {
         } else if (item.category == ItemCategory::TOOL) {
             lines.emplace_back("La tienes desde el inicio");
         }
-        for (const GroundItemType& ground : data.groundItems) {
-            if (ground.itemId == item.id) lines.emplace_back("Suelto por el mundo");
-        }
+        if (const float chance = groupChance(data, RewardGroup::GROUND, item); chance > 0.0f) lines.emplace_back("Suelto por el mundo");
         for (const ChestType& chest : data.chests) {
-            if (const float chance = chestChance(chest, item.id); chance > 0.0f) {
+            if (const float chance = groupChance(data, chest.rewardId, item); chance > 0.0f) {
                 std::snprintf(text, sizeof(text), "%s (%.0f %%)", chest.name.c_str(), chance);
                 lines.emplace_back(text);
             }

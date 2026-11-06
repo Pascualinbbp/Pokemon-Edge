@@ -395,7 +395,7 @@ namespace HudComponent {
             const float grow = 0.88f + 0.12f * fade; // aparece creciendo un poco
             dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(8, 10, 16, alpha(110)));
 
-            for (int slot = 0; slot < static_cast<int>(Radio::Wheel::SLOTS); ++slot) {
+            for (int slot = 0; slot < static_cast<int>(Radio::Wheel::slots()); ++slot) {
                 float ox, oy;
                 Radio::Wheel::slotCenter(slot, ox, oy);
                 const bool hovered = slot == status.radioHover;
@@ -407,7 +407,7 @@ namespace HudComponent {
                     dl->AddCircleFilled(p, r, IM_COL32(20, 22, 30, alpha(220)), 32);
                     dl->AddCircle(p, r * 0.78f, tint, 32, 3.0f);
                     dl->AddLine(ImVec2(p.x - r * 0.55f, p.y + r * 0.55f), ImVec2(p.x + r * 0.55f, p.y - r * 0.55f), tint, 3.0f);
-                } else if (const ImTextureID logo = HudIcons::image(Radio::station(slot).logo)) {
+                } else if (const ImTextureID logo = HudIcons::texture(Radio::logo(slot))) {
                     dl->AddImage(logo, ImVec2(p.x - r, p.y - r), ImVec2(p.x + r, p.y + r), ImVec2(0, 0), ImVec2(1, 1), tint);
                 } else {
                     dl->AddCircleFilled(p, r, hovered ? IM_COL32(60, 130, 200, alpha(255)) : IM_COL32(40, 44, 56, alpha(220)), 32);
