@@ -44,14 +44,14 @@ class ItemDao {
         else if (kind == "EVOLVE") { item.category = ItemCategory::STONE; item.typeId = DaoRow::integer(row, "type_id"); }
         else if (const TrainingItem::Effect* effect = trainingEffect(kind)) {
             item.category = ItemCategory::TRAINING;
-            data.trainingItems.push_back({ id, item.name, item.description, *effect, asset, DaoRow::rgb(row, "color"), DaoRow::integer(row, "amount") });
+            data.trainingItems.push_back({ id, item.name, item.description, *effect, asset, DaoRow::rgb(row, "color"), DaoRow::integer(row, "amount"), kind == "HEAL_PERCENT" });
         }
         data.items.push_back(std::move(item));
     }
 
     static const TrainingItem::Effect* trainingEffect(const std::string& kind) {
         static const TrainingItem::Effect LEVEL = TrainingItem::Effect::LEVEL, EV = TrainingItem::Effect::EV, HEAL = TrainingItem::Effect::HEAL, REVIVE = TrainingItem::Effect::REVIVE;
-        return kind == "LEVEL" ? &LEVEL : kind == "EV" ? &EV : kind == "HEAL" ? &HEAL : kind == "REVIVE" ? &REVIVE : nullptr;
+        return kind == "LEVEL" ? &LEVEL : kind == "EV" ? &EV : kind == "HEAL" || kind == "HEAL_PERCENT" ? &HEAL : kind == "REVIVE" ? &REVIVE : nullptr;
     }
 
     static constexpr const char* SELECT_ITEMS =

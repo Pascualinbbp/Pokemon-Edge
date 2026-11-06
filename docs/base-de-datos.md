@@ -8,7 +8,7 @@ Los datos de juego viven en **Neon (PostgreSQL)**. En cada compilación, GitHub 
 
 | Tabla | Columnas | Para qué |
 |---|---|---|
-| `effect` | `id`, `name`, `kind`, `type_id`, `multiplier`, `shiny_multiplier`, `hp_below`, `amount`, `color` | Efecto de una habilidad o de un objeto. `kind`: `TYPE_BOOST`, `FLOAT`, `WATER_BREATHING`, `CAPTURE`, `CAPTURE_EXCLUSIVE`, `HEAL`, `REVIVE`, `LEVEL`, `EV`, `EVOLVE`. Un efecto lo pueden usar varias habilidades u objetos |
+| `effect` | `id`, `name`, `kind`, `type_id`, `multiplier`, `shiny_multiplier`, `hp_below`, `amount`, `color` | Efecto de una habilidad o de un objeto. `kind`: `TYPE_BOOST`, `FLOAT`, `WATER_BREATHING`, `CAPTURE`, `CAPTURE_EXCLUSIVE`, `HEAL`, `HEAL_PERCENT` (`amount` = % de los PS máximos; la Max poción usa 100), `REVIVE`, `LEVEL`, `EV`, `EVOLVE`. Un efecto lo pueden usar varias habilidades u objetos |
 | `ability` | `id`, `name`, `description`, `effect_id` | Habilidades de los pokémon |
 | `rarity` | `id`, `name`, `spawn_weight`, `xp_multiplier` | Rareza de pokémon y cofres (probabilidad de aparecer y experiencia) |
 | `category` | `id`, `name` | Pestaña de la mochila (objetos, materiales y herramientas) |
@@ -30,7 +30,7 @@ Grupos de `reward`: 1-3 cofres, 10 objetos del suelo (`RewardGroup::GROUND`), 10
 
 ## Cómo se reparte `item` en el código
 
-Cada fila se clasifica por su efecto: `CAPTURE` → `PokeballType`; `HEAL`/`REVIVE`/`LEVEL`/`EV` → `TrainingItem`; `EVOLVE` → piedra evolutiva. Los materiales y las herramientas entran en el inventario con ids `1000 + id` y `2000 + id`. `CAPTURE_EXCLUSIVE` es la bola del pokémon inicial (no es un objeto).
+Cada fila se clasifica por su efecto: `CAPTURE` → `PokeballType`; `HEAL`/`HEAL_PERCENT`/`REVIVE`/`LEVEL`/`EV` → `TrainingItem`; `EVOLVE` → piedra evolutiva. Los materiales y las herramientas entran en el inventario con ids `1000 + id` y `2000 + id`. `CAPTURE_EXCLUSIVE` es la bola del pokémon inicial (no es un objeto).
 
 ## Assets según la base de datos
 

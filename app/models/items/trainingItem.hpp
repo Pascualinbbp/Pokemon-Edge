@@ -12,4 +12,5 @@ struct TrainingItem {
     std::string asset; // "items/<categoría>/<id>": modelo 3D y sprite (assets/models/ y assets/sprites/)
     int rgb = -1;      // color del chorro al usarlo (0xRRGGBB, color del efecto)
     int amount = 1;    // niveles, puntos de EV, PS que cura o % de PS con el que revive, según el efecto
+    bool percent = false; // HEAL: amount es un % de los PS máximos (la Max poción cura el 100 %)
 };

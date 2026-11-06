@@ -62,7 +62,7 @@ namespace ItemUse {
         switch (kind(data, item)) {
             case Kind::HEAL: {
                 const TrainingItem* type = data.training(item.refId);
-                storage.heal(place.inTeam, place.index, type->amount >= 99999 ? 0 : type->amount);
+                storage.heal(place.inTeam, place.index, type->percent ? (std::max)(1, storage.maxHp(owned) * type->amount / 100) : type->amount);
                 storage.noteMedicine(place.inTeam, place.index, type->id, false); // el mundo lo muestra sobre el acompañante
                 message = itemName + " usado en " + name;
                 break;
