@@ -57,21 +57,21 @@ namespace ItemUse {
         const PokemonSpecies* before = data.speciesById(owned.speciesId);
         const std::string name = before ? before->name : "El pokémon";
         const bool wasFainted = storage.fainted(owned);
+        const bool onCompanion = place.inTeam && place.index == storage.activeIndex() && !wasFainted; // regla única: sobre el acompañante no se cambia de pokémon
         const std::string itemName = data.itemTitle(item, 1);
         std::string message;
         switch (kind(data, item)) {
             case Kind::HEAL: {
                 const TrainingItem* type = data.training(item.refId);
                 storage.heal(place.inTeam, place.index, type->percent ? (std::max)(1, storage.maxHp(owned) * type->amount / 100) : type->amount);
-                storage.noteMedicine(place.inTeam, place.index, type->id, false); // el mundo lo muestra sobre el acompañante
+                storage.noteMedicine(place.inTeam, place.index, type->id, false, onCompanion); // el mundo lo muestra sobre el acompañante
                 message = itemName + " usado en " + name;
                 break;
             }
             case Kind::REVIVE: {
                 const TrainingItem* type = data.training(item.refId);
                 storage.revive(place.inTeam, place.index, type->amount >= 100);
-                if (place.inTeam) storage.setActive(place.index); // el revivido sale al mundo y el jugador se lo da
-                storage.noteMedicine(place.inTeam, place.index, type->id, false);
+                storage.noteMedicine(place.inTeam, place.index, type->id, false, onCompanion);
                 message = itemName + " usado en " + name;
                 break;
             }
@@ -81,8 +81,7 @@ namespace ItemUse {
                 message = result == PokemonStorage::LevelResult::EVOLVED && after ? "¡" + name + " ha evolucionado a " + after->name + "!" : name + " sube de nivel";
                 if (result == PokemonStorage::LevelResult::EVOLVED) {
                     if (wasFainted) storage.reviveEvolved(place.inTeam, place.index, EVOLVE_REVIVE_PERCENT);
-                    if (place.inTeam) storage.setActive(place.index);
-                    storage.noteMedicine(place.inTeam, place.index, -1, true);
+                    storage.noteMedicine(place.inTeam, place.index, -1, true, onCompanion);
                 }
                 break;
             }
@@ -90,13 +89,13 @@ namespace ItemUse {
                 const PokemonSpecies* after = storage.evolveWithStone(place.inTeam, place.index, item.id);
                 if (!after) return {};
                 if (wasFainted) storage.reviveEvolved(place.inTeam, place.index, EVOLVE_REVIVE_PERCENT);
-                if (place.inTeam) storage.setActive(place.index);
-                storage.noteMedicine(place.inTeam, place.index, -1, true);
+                storage.noteMedicine(place.inTeam, place.index, -1, true, onCompanion);
                 message = "¡" + name + " ha evolucionado a " + after->name + "!";
                 break;
             }
             default: return {};
         }
+        if (place.inTeam && !onCompanion) storage.setActive(place.index); // otro pokémon: el acompañante vuelve a su bola y sale el elegido
         inventory.add(item.id, -1);
         return message;
     }

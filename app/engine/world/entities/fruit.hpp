@@ -4,11 +4,11 @@
 #include <DirectXMath.h>
 #include "../../physics/physicsWorld.hpp"
 
-// Fruto caído de un árbol (coco de palmera, plátano de árbol de jungla). Cae, rueda por el suelo con su inercia y, si nadie lo coge,
+// Fruto caído de un árbol (coco de palmera, plátano de árbol de jungla, cereza de cerezo). Cae, rueda por el suelo con su inercia y, si nadie lo coge,
 // se pudre pasado un buen rato. Lo recogen el jugador (tiene prioridad), su acompañante o un pokémon salvaje (que se lo come).
 class Fruit {
     public:
-    enum class Kind { COCONUT, BANANA };
+    enum class Kind { COCONUT, BANANA, CHERRY };
     static constexpr float RADIUS         = 0.13f;
     static constexpr float INTERACT_RANGE = 1.8f;
     static constexpr float LIFETIME       = 420.0f; // segundos en el suelo antes de pudrirse
@@ -23,8 +23,8 @@ class Fruit {
         body.groundOffset = RADIUS;
         body.collisionRadius = RADIUS;
         body.collisionHeight = RADIUS * 2.0f;
-        body.restitution = kind == Kind::COCONUT ? 0.35f : 0.12f;
-        body.groundDrag = kind == Kind::COCONUT ? 0.55f : 1.6f; // el coco rueda lejos; el plátano se queda cerca
+        body.restitution = kind == Kind::COCONUT ? 0.35f : kind == Kind::CHERRY ? 0.2f : 0.12f;
+        body.groundDrag = kind == Kind::COCONUT ? 0.55f : kind == Kind::CHERRY ? 1.2f : 1.6f; // el coco rueda lejos; plátano y cereza se quedan cerca
         body.rolls = kind == Kind::COCONUT;
     }
 

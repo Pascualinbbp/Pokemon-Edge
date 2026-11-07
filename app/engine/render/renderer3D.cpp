@@ -1547,7 +1547,7 @@ void Renderer3D::addNode(const ResourceNode& node) {
 }
 
 // Objeto suelto: semiesfera blanca que brilla y late. No proyecta sombra.
-// Fruto caído: coco (esfera marrón con tres "ojos") o plátano (media luna amarilla); gira al rodar.
+// Fruto caído: coco (esfera marrón con tres "ojos"), plátano (media luna amarilla) o cereza (pareja roja); gira al rodar.
 void Renderer3D::addFruit(const Fruit& fruit) {
     const float k = fruit.scale();
     if (k <= 0.001f) return;
@@ -1557,6 +1557,12 @@ void Renderer3D::addFruit(const Fruit& fruit) {
         const XMMATRIX at = XMMatrixRotationX(fruit.spin()) * XMMatrixTranslation(p.x, p.y, p.z);
         add(m_sphere, XMMatrixScaling(r, r, r) * at, { 0.36f, 0.24f, 0.12f, 0.0f });
         add(m_cube, XMMatrixScaling(r * 0.35f, r * 0.35f, r * 0.2f) * XMMatrixTranslation(0.0f, r * 0.55f, r * 0.8f) * at, { 0.12f, 0.08f, 0.05f, 0.0f }, false);
+    } else if (fruit.kind() == Fruit::Kind::CHERRY) { // pareja de cerezas con rabillo
+        const XMMATRIX at = XMMatrixRotationY(static_cast<float>(fruit.id()) * 1.7f) * XMMatrixTranslation(p.x, p.y - Fruit::RADIUS * 0.3f * k, p.z);
+        const float c = r * 0.7f;
+        add(m_sphere, XMMatrixScaling(c, c, c) * XMMatrixTranslation(-c * 0.9f, 0.0f, 0.0f) * at, { 0.85f, 0.05f, 0.12f, 0.0f });
+        add(m_sphere, XMMatrixScaling(c, c, c) * XMMatrixTranslation(c * 0.9f, 0.0f, c * 0.3f) * at, { 0.85f, 0.05f, 0.12f, 0.0f });
+        add(m_cube, XMMatrixScaling(r * 0.1f, r * 1.1f, r * 0.1f) * XMMatrixTranslation(0.0f, c * 1.4f, 0.0f) * at, { 0.20f, 0.45f, 0.15f, 0.0f }, false);
     } else {
         const XMMATRIX at = XMMatrixRotationY(static_cast<float>(fruit.id()) * 1.7f) * XMMatrixTranslation(p.x, p.y - Fruit::RADIUS * 0.4f * k, p.z);
         add(m_cube, XMMatrixScaling(r * 0.7f, r * 0.7f, r * 2.2f) * at, { 0.97f, 0.84f, 0.18f, 0.0f });

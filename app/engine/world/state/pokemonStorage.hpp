@@ -103,8 +103,8 @@ class PokemonStorage {
         return true;
     }
     // Poción usada con éxito desde el menú: el mundo la recoge (takeMedicine) para mostrarla sobre el acompañante.
-    struct MedicineUse { bool inTeam = false; int index = 0; int trainingId = -1; bool evolved = false; }; // trainingId: objeto de training_item usado (-1 si fue una evolución)
-    void noteMedicine(bool inTeam, int index, int trainingId, bool evolved) { m_medicine = { inTeam, index, trainingId, evolved }; m_medicinePending = true; }
+    struct MedicineUse { bool inTeam = false; int index = 0; int trainingId = -1; bool evolved = false; bool onCompanion = false; }; // trainingId: objeto de training_item usado (-1 si fue una evolución)
+    void noteMedicine(bool inTeam, int index, int trainingId, bool evolved, bool onCompanion) { m_medicine = { inTeam, index, trainingId, evolved, onCompanion }; m_medicinePending = true; }
     bool takeMedicine(MedicineUse& out) { if (!m_medicinePending) return false; m_medicinePending = false; out = m_medicine; return true; }
     // Revivir: solo a uno debilitado. Deja la mitad de sus PS (redondeando a la baja) o todos.
     bool revive(bool inTeam, int index, bool full) {

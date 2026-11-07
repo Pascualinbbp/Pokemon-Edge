@@ -639,15 +639,14 @@ struct Scene {
         PokemonStorage::MedicineUse use;
         if (storage.takeMedicine(use)) {
             const bool onActive = use.inTeam && use.index == storage.activeIndex();
-            const bool onCompanion = onActive && companion.active();
             const TrainingItem* type = m_data->training(use.trainingId);
+            if (use.onCompanion && storage.active()) m_shownUid = storage.active()->uid; // sobre el acompañante nunca se recoge ni vuelve a salir
             if (use.evolved) {
                 if (onActive && storage.active()) m_itemEvolveUid = storage.active()->uid; // el efecto de evolución lo hace el acompañante en cuanto está fuera
                 else Sound::emit(Sound::Sfx::EVOLVE, player.body.position);
             } else if (onActive && type && storage.active()) {
                 m_pendingPotion = { type, storage.active()->uid, 6.0f }; // la usa en cuanto el pokémon está fuera (si salía otro, primero vuelve a su bola)
             } else Sound::emitGlobal(Sound::Sfx::HEAL);
-            (void)onCompanion;
         }
         if (m_pendingPotion.type) {
             const OwnedPokemon* lead = storage.active();
@@ -899,9 +898,6 @@ struct Scene {
         const OwnedPokemon* lead = storage.active();
         const PokemonSpecies* species = lead ? m_data->speciesById(lead->speciesId) : nullptr;
         if (!lead && companion.active()) companion.set(-1, false, false, player.body.position, camera.yaw());
-        else if (lead && species && lead->uid != m_shownUid && lead->speciesId == m_shownSpecies && companion.active() && !companion.changing() && !uidExists(m_shownUid)) {
-            m_shownUid = lead->uid; // el mismo pokémon con otra identidad interna: sigue fuera, no vuelve a su bola ni sale otra vez
-        }
         else if (lead && species && (lead->uid != m_shownUid || (lead->speciesId != m_shownSpecies && lead->uid != m_itemEvolveUid))) {
             m_shownUid = lead->uid; // otro pokémon (o ha evolucionado): vuelve el que está fuera y sale su pokéball
             m_shownSpecies = lead->speciesId;
@@ -1287,14 +1283,21 @@ struct Scene {
         gainXp(Xp::GATHER);
     }
 
-    // --- Frutos: cocos de palmera y plátanos del árbol de jungla ---
+    // --- Frutos: cocos de palmera, plátanos del árbol de jungla y cerezas del cerezo ---
     static constexpr int   MAX_FRUITS = 10;          // como mucho en el suelo a la vez
     static constexpr float FRUIT_DROP_MIN = 7.0f, FRUIT_DROP_MAX = 16.0f; // segundos entre caídas
     static constexpr float FRUIT_RANGE = 55.0f;      // solo caen en árboles cercanos al jugador
-    static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13;
+    static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13, CHERRY_TYPE = 11;
 
-    inline static const std::string COCONUT_NAME = "Coco", BANANA_NAME = "Plátano";
-    static const std::string& fruitName(Fruit::Kind kind) { return kind == Fruit::Kind::COCONUT ? COCONUT_NAME : BANANA_NAME; }
+    inline static const std::string COCONUT_NAME = "Coco", BANANA_NAME = "Plátano", CHERRY_NAME = "Cereza";
+    static const std::string& fruitName(Fruit::Kind kind) { return kind == Fruit::Kind::COCONUT ? COCONUT_NAME : kind == Fruit::Kind::CHERRY ? CHERRY_NAME : BANANA_NAME; }
+    static bool fruitKind(int treeType, Fruit::Kind& kind) {
+        if (treeType == PALM_TYPE) kind = Fruit::Kind::COCONUT;
+        else if (treeType == JUNGLE_TYPE) kind = Fruit::Kind::BANANA;
+        else if (treeType == CHERRY_TYPE) kind = Fruit::Kind::CHERRY;
+        else return false;
+        return true;
+    }
 
     const Item* fruitItem(Fruit::Kind kind) const {
         for (const Material& material : m_data->materials) {
@@ -1332,7 +1335,8 @@ struct Scene {
         if (static_cast<int>(fruits.size()) >= MAX_FRUITS || player.body.underground) return;
         std::vector<const ResourceNode*> trees;
         for (const ResourceNode& node : nodes) {
-            if ((node.typeId() != PALM_TYPE && node.typeId() != JUNGLE_TYPE) || node.growing() || node.body.underground) continue;
+            Fruit::Kind treeKind;
+            if (!fruitKind(node.typeId(), treeKind) || node.growing() || node.body.underground) continue;
             if (nearPlayer(node.body.position, FRUIT_RANGE)) trees.push_back(&node);
         }
         if (trees.empty()) return;
@@ -1341,7 +1345,8 @@ struct Scene {
         ResourceStyle::hitbox(ResourceStyle::look(tree.typeId()), tree.growth(), half, height);
         const float angle = RandomUtil::range(0.0f, 6.2831853f), out = RandomUtil::range(0.8f, 1.8f);
         const DirectX::XMFLOAT3& at = tree.body.position;
-        const Fruit::Kind kind = tree.typeId() == PALM_TYPE ? Fruit::Kind::COCONUT : Fruit::Kind::BANANA;
+        Fruit::Kind kind = Fruit::Kind::BANANA;
+        fruitKind(tree.typeId(), kind);
         fruits.emplace_back(kind, ++m_fruitId, DirectX::XMFLOAT3{ at.x + std::sin(angle) * 0.5f, at.y + height * 0.9f, at.z + std::cos(angle) * 0.5f },
                             std::sin(angle) * out, std::cos(angle) * out);
     }
@@ -1771,11 +1776,6 @@ struct Scene {
     float m_holdClock = 0.0f;
     struct PendingPotion { const TrainingItem* type = nullptr; int uid = 0; float wait = 0.0f; } m_pendingPotion; // poción o revivir a la espera de que el pokémon salga
     int m_itemEvolveUid = 0;   // pokémon que evoluciona por un objeto y aún no ha hecho el efecto (0 = ninguno)
-    bool uidExists(int uid) const {
-        for (const OwnedPokemon& o : storage.team()) if (o.uid == uid) return true;
-        for (const OwnedPokemon& o : storage.pc()) if (o.uid == uid) return true;
-        return false;
-    }
     int m_shownUid = 0;        // pokémon (uid y especie) que está fuera o saliendo
     int m_shownSpecies = -1;
     int m_missingSkill = -1;   // habilidad que falta para el recurso cercano (-1 = ninguna)
