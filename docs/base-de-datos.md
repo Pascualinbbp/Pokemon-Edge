@@ -26,7 +26,11 @@ Los datos de juego viven en **Neon (PostgreSQL)**. En cada compilación, GitHub 
 | `habitat`, `weather`, `habitat_weather`, `weather_fusion` | | Hábitats y clima |
 | `radio` | `id`, `name`, `genre` | Emisoras |
 
-Grupos de `reward`: 1-3 cofres, 10 objetos del suelo (`RewardGroup::GROUND`), 100+ hitos de la Pokédex, 200 regalo de la tienda.
+Grupos de `reward`: 1-4 cofres (4 = legendario, rareza 7: pocas unidades, lo mejor), 10 objetos del suelo (`RewardGroup::GROUND`, el común), 11-14 objetos del suelo por clima (templado, frío, árido, húmedo), 100+ hitos de la Pokédex, 200 regalo de la tienda.
+
+Objetos del suelo: aparecen por todo el mundo cerca del jugador (`GroundField`). Su grupo es `habitat.ground_reward_id` del hábitat dominante en ese punto (NULL = grupo 10). Así las semillas varían por clima (la fresa no sale en el árido).
+
+Equipables (categoría 9): efectos `HOLD_EXP_SHARE`, `HOLD_QUICK_CLAW`, `HOLD_RAZOR_CLAW`, `HOLD_FOCUS_BAND`, `HOLD_LEFTOVERS`, `HOLD_LIFE_ORB`; `amount` es el porcentaje de cada uno. Cultivos: materiales de semillas (categoría 10) cuyo nombre debe coincidir con `Crops::LIST` y nodos 24-26 (`waterable`, `ephemeral`, no están en `habitat_resource`; se siembran en las parcelas del inicio).
 
 ## Cómo se reparte `item` en el código
 

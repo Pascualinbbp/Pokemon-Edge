@@ -25,7 +25,7 @@ class HabitatDao {
     std::vector<Habitat> findHabitats() const {
         std::vector<Habitat> habitats;
         for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, min_zones, max_zones, min_radius, max_radius, min_stretch, max_stretch, min_altitude, max_altitude, roughness, placement, beside_id, warmth, altitude_cooling, friction, min_chests, max_chests, daily_chests, min_wild, max_wild, min_nodes, max_nodes, "
-                                                         "min_weather_wait, max_weather_wait FROM habitat ORDER BY id;")) {
+                                                         "min_weather_wait, max_weather_wait, ground_reward_id FROM habitat ORDER BY id;")) {
             Habitat habitat;
             habitat.id = DaoRow::integer(row, "id");
             habitat.name = DaoRow::text(row, "name");
@@ -46,6 +46,7 @@ class HabitatDao {
             habitat.minChests = DaoRow::integer(row, "min_chests");
             habitat.maxChests = DaoRow::integer(row, "max_chests");
             habitat.dailyChests = DaoRow::integer(row, "daily_chests");
+            habitat.groundRewardId = DaoRow::integer(row, "ground_reward_id") > 0 ? DaoRow::integer(row, "ground_reward_id") : -1;
             habitat.minWild = DaoRow::integer(row, "min_wild");
             habitat.maxWild = DaoRow::integer(row, "max_wild");
             habitat.minNodes = DaoRow::integer(row, "min_nodes");

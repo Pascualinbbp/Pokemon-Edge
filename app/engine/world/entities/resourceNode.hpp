@@ -6,7 +6,7 @@
 
 // Aspecto de cada tipo de nodo (por id de la base de datos). Es el único sitio donde se define su forma y color.
 namespace ResourceStyle {
-    enum class Shape { TREE, CONIFER, PALM, JUNGLE, ACACIA, ROCK, BUSH, FLOWER, TULIP, SUNFLOWER, CORAL, KELP };
+    enum class Shape { TREE, CONIFER, PALM, JUNGLE, ACACIA, ROCK, BUSH, FLOWER, TULIP, SUNFLOWER, CORAL, KELP, CROP };
 
     struct Look {
         Shape shape;
@@ -40,6 +40,9 @@ namespace ResourceStyle {
             case 21: return { Shape::KELP, { 0.15f, 0.45f, 0.22f }, { 0.30f, 0.65f, 0.28f }, false, 0.3f, 2.4f };    // alga
             case 22: return { Shape::ROCK, { 0.62f, 0.82f, 0.92f }, { 0.85f, 0.97f, 1.00f }, true, 0.85f, 1.1f };    // cristal de hielo
             case 23: return { Shape::ROCK, { 0.45f, 0.45f, 0.48f }, { 0.99f, 0.82f, 0.18f }, true, 0.85f, 1.1f };  // filón de oro
+            case 24: return { Shape::CROP, { 0.22f, 0.55f, 0.18f }, { 0.96f, 0.50f, 0.10f }, true, 0.30f, 0.5f };   // zanahoria
+            case 25: return { Shape::CROP, { 0.20f, 0.50f, 0.18f }, { 0.88f, 0.10f, 0.16f }, true, 0.30f, 0.45f };  // fresa
+            case 26: return { Shape::CROP, { 0.55f, 0.62f, 0.20f }, { 0.92f, 0.76f, 0.26f }, false, 0.30f, 1.0f };  // trigo
             case 4:  return { Shape::ROCK, { 0.42f, 0.42f, 0.45f }, { 0.07f, 0.07f, 0.08f }, true,  0.85f, 1.1f }; // filón de carbón
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca
         }
@@ -89,7 +92,7 @@ class ResourceNode {
     static constexpr float TEAM_WINDOW  = 1.5f;   // segundos durante los que cuenta que el otro siga trabajándolo
     static constexpr float TEAM_BONUS   = 2.0f;   // velocidad al trabajarlo jugador y pokémon a la vez
     static constexpr float VEIN_REACH   = 2.9f;   // las vetas de pared se alcanzan desde el centro del paso
-    static constexpr float WATER_STEP   = 0.08f;  // fracción de crecimiento que da cada riego (con velocidad 1)
+    static constexpr float WATER_STEP   = 0.3f;   // fracción de crecimiento que da un riego (con velocidad 1): cada planta se riega una sola vez por quien riega, hasta que crece
 
     Physics::Body body;
 
@@ -106,9 +109,18 @@ class ResourceNode {
     float goneTime() const { return m_goneTime; }
     void respawn(int typeIndex, int typeId, int hitsNeeded, float growSeconds, const DirectX::XMFLOAT3& position, float yaw, bool underground) {
         m_type = typeIndex; m_typeId = typeId; m_need = hitsNeeded; m_yaw = yaw; m_regrowSeconds = (std::max)(1.0f, growSeconds);
-        m_growth = 0.0f; m_hits = 0; m_gone = false; m_goneTime = 0.0f; m_harvested = false; m_plant = true; m_waterable = false; m_ephemeral = true;
+        m_growth = 0.0f; m_hits = 0; m_wateredByPlayer = m_wateredByCompanion = false; m_gone = false; m_goneTime = 0.0f; m_harvested = false; m_plant = true; m_waterable = false; m_ephemeral = true;
         body.position = position;
         body.underground = underground;
+    }
+
+    // Parcela de cultivo: el nodo existe siempre, pero vacío (gone) hasta que se siembra; el hábitat nunca lo reutiliza para flores.
+    void makePlot() { m_plot = true; m_gone = true; m_goneTime = 0.0f; m_plant = true; m_waterable = true; m_ephemeral = true; }
+    bool plot() const { return m_plot; }
+    void sow(int typeIndex, int typeId, int hitsNeeded, float growSeconds, float yaw) {
+        m_type = typeIndex; m_typeId = typeId; m_need = hitsNeeded; m_yaw = yaw; m_regrowSeconds = (std::max)(1.0f, growSeconds);
+        m_growth = 0.0f; m_hits = 0; m_wateredByPlayer = m_wateredByCompanion = false; m_gone = false; m_goneTime = 0.0f; m_harvested = false;
+        m_plant = true; m_waterable = true; m_ephemeral = true;
     }
 
     int typeIndex() const { return m_type; }
@@ -120,6 +132,9 @@ class ResourceNode {
     float growth() const { return m_growth; }
     // ¿Se puede trabajar ahora? (no una flor o alga que aún crece sola, ni un nodo agotado)
     bool workable() const { return !depleted() && !(m_plant && growing() && !m_waterable); }
+    // ¿Puede quien trabaja (jugador o su pokémon) hacerlo ahora? Una planta que crece solo se riega una vez por cada uno hasta que termina de crecer.
+    bool canWork(bool byPlayer) const { return workable() && !(m_plant && growing() && (byPlayer ? m_wateredByPlayer : m_wateredByCompanion)); }
+    int hits() const { return m_hits; } // golpes ya dados al extraerlo (0 = sin empezar)
 
     // Distancia máxima (desde el centro) a la que el jugador puede golpearlo.
     float reach() const { return m_vein ? VEIN_REACH : INTERACT_RANGE + ResourceStyle::look(m_typeId).half; }
@@ -138,9 +153,17 @@ class ResourceNode {
     bool work(bool byPlayer, float speed = 1.0f) {
         if (depleted() || m_cooldown > 0.0f) return false;
         if (m_plant && growing() && !m_waterable) return false; // las flores y algas crecen solas: no se riegan
+        if (m_plant && growing()) { // regar: una vez por jugador y una por pokémon hasta que crezca (si no, las cosechas serían infinitas)
+            bool& watered = byPlayer ? m_wateredByPlayer : m_wateredByCompanion;
+            if (watered) return false;
+            watered = true;
+        }
         (byPlayer ? m_playerTimer : m_companionTimer) = TEAM_WINDOW;
         const float rate = teamBonus(byPlayer) * speed;
-        if (growing()) m_growth = (std::min)(1.0f, m_growth + WATER_STEP * rate);
+        if (growing()) {
+            m_growth = (std::min)(1.0f, m_growth + WATER_STEP * rate);
+            if (m_growth >= 1.0f) m_wateredByPlayer = m_wateredByCompanion = false;
+        }
         else if (++m_hits >= m_need) {
             m_hits = 0;
             m_harvested = true;
@@ -166,7 +189,10 @@ class ResourceNode {
         m_cooldown = (std::max)(0.0f, m_cooldown - dt);
         m_shake = (std::max)(0.0f, m_shake - dt);
         if (m_gone) m_goneTime += dt;
-        else if (growing()) m_growth = (std::min)(1.0f, m_growth + dt / m_regrowSeconds);
+        else if (growing()) {
+            m_growth = (std::min)(1.0f, m_growth + dt / m_regrowSeconds);
+            if (m_growth >= 1.0f) m_wateredByPlayer = m_wateredByCompanion = false; // crecida: se podrá volver a regar una vez cada uno
+        }
         m_playerTimer = (std::max)(0.0f, m_playerTimer - dt);
         m_companionTimer = (std::max)(0.0f, m_companionTimer - dt);
     }
@@ -191,7 +217,9 @@ class ResourceNode {
     float m_growth;                // 0..1; 1 = listo
     bool m_waterable = true;       // regarla acelera su crecimiento (solo arbustos)
     bool m_ephemeral = false;      // al recogerse desaparece
+    bool m_wateredByPlayer = false, m_wateredByCompanion = false; // ya regada por el jugador / por su pokémon en este crecimiento
     bool m_vein = false;           // mineral incrustado en una pared
+    bool m_plot = false;           // parcela de cultivo (ver makePlot)
     bool m_gone = false;
     float m_goneTime = 0.0f;
     int m_hits = 0;

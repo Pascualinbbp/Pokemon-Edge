@@ -22,7 +22,7 @@ class SpawnField {
     void update(float dt, float delay, Step step, Make make) {
         for (Entity& entity : entities) {
             step(entity);
-            if (entity.finished()) m_timers[entity.spot()] = delay;
+            if (entity.finished() && entity.spot() >= 0 && entity.spot() < static_cast<int>(m_timers.size())) m_timers[entity.spot()] = delay; // spot < 0: entidad dinámica, sin punto fijo
         }
         entities.erase(std::remove_if(entities.begin(), entities.end(), [](const Entity& e) { return e.finished(); }), entities.end());
 

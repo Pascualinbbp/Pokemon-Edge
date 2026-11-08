@@ -42,11 +42,22 @@ class ItemDao {
                    DaoRow::text(row, "gift_reward_id").empty() ? -1 : DaoRow::integer(row, "gift_reward_id") };
         if (kind == "CAPTURE") item.category = ItemCategory::POKEBALL;
         else if (kind == "EVOLVE") { item.category = ItemCategory::STONE; item.typeId = DaoRow::integer(row, "type_id"); }
+        else if (const HeldItem::Effect* held = heldEffect(kind)) {
+            item.category = ItemCategory::HELD;
+            data.heldItems.push_back({ id, item.name, item.description, *held, DaoRow::integer(row, "amount"), DaoRow::rgb(row, "color") });
+        }
         else if (const TrainingItem::Effect* effect = trainingEffect(kind)) {
             item.category = ItemCategory::TRAINING;
             data.trainingItems.push_back({ id, item.name, item.description, *effect, asset, DaoRow::rgb(row, "color"), DaoRow::integer(row, "amount"), kind == "HEAL_PERCENT" });
         }
         data.items.push_back(std::move(item));
+    }
+
+    static const HeldItem::Effect* heldEffect(const std::string& kind) {
+        using E = HeldItem::Effect;
+        static const E SHARE = E::EXP_SHARE, QUICK = E::QUICK_CLAW, RAZOR = E::RAZOR_CLAW, BAND = E::FOCUS_BAND, LEFT = E::LEFTOVERS, ORB = E::LIFE_ORB;
+        return kind == "HOLD_EXP_SHARE" ? &SHARE : kind == "HOLD_QUICK_CLAW" ? &QUICK : kind == "HOLD_RAZOR_CLAW" ? &RAZOR : kind == "HOLD_FOCUS_BAND" ? &BAND :
+               kind == "HOLD_LEFTOVERS" ? &LEFT : kind == "HOLD_LIFE_ORB" ? &ORB : nullptr;
     }
 
     static const TrainingItem::Effect* trainingEffect(const std::string& kind) {

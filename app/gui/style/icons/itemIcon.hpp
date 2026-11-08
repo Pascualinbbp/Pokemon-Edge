@@ -127,8 +127,41 @@ namespace ItemIcon {
     }
 
     // Icono de cualquier objeto del inventario, según su categoría.
+    // Objeto equipable: medallón del color de su efecto con un símbolo en blanco (reparto, garra, cinta, baya, esfera).
+    inline void held(ImDrawList* dl, const ImVec2& c, float r, const HeldItem& type, float alpha = 1.0f) {
+        const int a = static_cast<int>(255.0f * alpha);
+        const int rgb = type.rgb >= 0 ? type.rgb : 0x8C8CA0;
+        const ImU32 base = IM_COL32((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, a), dark = IM_COL32(0, 0, 0, static_cast<int>(90.0f * alpha)), white = IM_COL32(255, 255, 255, a);
+        dl->AddCircleFilled(c, r, base, 28);
+        dl->AddCircle(c, r, dark, 28, r * 0.12f);
+        const float t = (std::max)(1.5f, r * 0.12f);
+        switch (type.effect) {
+            case HeldItem::Effect::EXP_SHARE:
+                dl->AddCircle(ImVec2(c.x - r * 0.22f, c.y), r * 0.38f, white, 20, t);
+                dl->AddCircle(ImVec2(c.x + r * 0.22f, c.y), r * 0.38f, white, 20, t);
+                break;
+            case HeldItem::Effect::QUICK_CLAW:
+            case HeldItem::Effect::RAZOR_CLAW:
+                for (int i = -1; i <= 1; ++i) dl->AddLine(ImVec2(c.x + i * r * 0.32f - r * 0.12f, c.y - r * 0.5f), ImVec2(c.x + i * r * 0.32f + r * 0.12f, c.y + r * 0.5f), white, type.effect == HeldItem::Effect::RAZOR_CLAW ? t * 1.4f : t);
+                break;
+            case HeldItem::Effect::FOCUS_BAND:
+                dl->AddLine(ImVec2(c.x - r * 0.55f, c.y), ImVec2(c.x + r * 0.55f, c.y), white, t * 2.2f);
+                dl->AddLine(ImVec2(c.x - r * 0.55f, c.y - r * 0.28f), ImVec2(c.x + r * 0.55f, c.y - r * 0.28f), white, t * 0.8f);
+                break;
+            case HeldItem::Effect::LEFTOVERS:
+                dl->AddCircleFilled(ImVec2(c.x, c.y + r * 0.1f), r * 0.38f, white, 18);
+                dl->AddLine(ImVec2(c.x, c.y - r * 0.3f), ImVec2(c.x + r * 0.2f, c.y - r * 0.6f), white, t);
+                break;
+            case HeldItem::Effect::LIFE_ORB:
+                dl->AddCircleFilled(c, r * 0.45f, white, 20);
+                dl->AddCircleFilled(ImVec2(c.x - r * 0.15f, c.y - r * 0.15f), r * 0.15f, base, 12);
+                break;
+        }
+    }
+
     inline void item(ImDrawList* dl, const ImVec2& c, float r, const Item& item, const GameData& data, float alpha = 1.0f) {
         switch (item.category) {
+            case ItemCategory::HELD:     if (const HeldItem* type = data.held(item.refId)) held(dl, c, r, *type, alpha); break;
             case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::look(type->id), alpha); break;
             case ItemCategory::MATERIAL: material(dl, c, r, item.refId, alpha); break;
             case ItemCategory::STONE:    stone(dl, c, r, item, alpha); break;
@@ -146,6 +179,7 @@ namespace ItemIcon {
             case ItemCategory::STONE:    return IM_COL32(190, 70, 110, 255);
             case ItemCategory::TOOL:     return IM_COL32(120, 76, 190, 255);
             case ItemCategory::TRAINING: return IM_COL32(40, 150, 120, 255);
+            case ItemCategory::HELD:     return IM_COL32(200, 150, 40, 255);
             default:                     return IM_COL32(90, 90, 100, 255);
         }
     }

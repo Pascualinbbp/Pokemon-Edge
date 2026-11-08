@@ -209,7 +209,7 @@ namespace ResourceSpawn {
     inline bool regrowFlower(std::vector<ResourceNode>& nodes, const GameData& data, const HabitatMap& habitats, const Physics::World& world,
                              float px, float pz, std::vector<float>& weights) {
         ResourceNode* slot = nullptr;
-        for (ResourceNode& node : nodes) if (node.gone() && node.goneTime() >= FLOWER_DELAY && !node.body.underground) { slot = &node; break; }
+        for (ResourceNode& node : nodes) if (node.gone() && !node.plot() && node.goneTime() >= FLOWER_DELAY && !node.body.underground) { slot = &node; break; }
         if (!slot) return false;
         for (int attempt = 0; attempt < 12; ++attempt) {
             const float a = RandomUtil::range(0.0f, 6.2831853f), r = RandomUtil::range(FLOWER_MIN_RANGE, FLOWER_MAX_RANGE);

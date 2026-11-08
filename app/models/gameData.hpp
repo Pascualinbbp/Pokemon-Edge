@@ -22,6 +22,7 @@
 #include "pokemon/skill.hpp"
 #include "items/tool.hpp"
 #include "items/trainingItem.hpp"
+#include "items/heldItem.hpp"
 
 // Todos los datos de juego que viven en la base de datos, cargados una sola vez al arrancar.
 struct GameData {
@@ -39,6 +40,7 @@ struct GameData {
     std::vector<Generation> generations;
     std::vector<RewardEntry> rewards; // ordenadas por grupo
     std::vector<TrainingItem> trainingItems;
+    std::vector<HeldItem> heldItems;
     std::vector<ChestType> chests;
     std::vector<ResourceNodeType> nodes;
     std::vector<DexReward> dexRewards;
@@ -57,6 +59,7 @@ struct GameData {
     const Skill* skill(int id) const { return find(skills, id); }
     const Item* item(int id) const { return find(items, id); }
     const TrainingItem* training(int id) const { return find(trainingItems, id); }
+    const HeldItem* held(int id) const { return id < 0 ? nullptr : find(heldItems, id); }
     const Ability* ability(int id) const { return find(abilities, id); }
     const PokemonType* type(int id) const { return find(types, id); }
     const Rarity* rarity(int id) const { return find(rarities, id); }

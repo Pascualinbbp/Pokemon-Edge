@@ -23,6 +23,7 @@ struct OwnedPokemon {
     EvRules::Evs evCaps = {};       // EVs máximos con los que salió (su potencial)
     int xp = 0;                     // experiencia hacia el siguiente nivel (no se guarda)
     int hp = -1;                    // PS actuales (-1 = al máximo); 0 = debilitado
+    int heldItemId = -1;            // objeto equipable que lleva (id de item; -1 = ninguno)
 };
 
 // Resultado de un análisis de la máquina de investigación.
@@ -296,6 +297,18 @@ class PokemonStorage {
         return result;
     }
 
+    // --- Objetos equipables ---
+    const HeldItem* heldOf(const OwnedPokemon& owned) const { return m_data->held(owned.heldItemId); }
+    bool holds(const OwnedPokemon& owned, HeldItem::Effect effect) const { const HeldItem* held = heldOf(owned); return held && held->effect == effect; }
+    // Equipa 'itemId' (o -1 para quitarlo) y devuelve el que llevaba antes (-1 si ninguno).
+    int setHeld(bool inTeam, int index, int itemId) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned) return -1;
+        const int previous = owned->heldItemId;
+        owned->heldItemId = itemId;
+        return previous;
+    }
+
     // Modo de todo el equipo (qué hace el pokémon que acompaña al jugador; no se guarda).
     CompanionRules::Mode mode = CompanionRules::Mode::COLLECT;
     void cycleMode() { mode = CompanionRules::next(mode); }
@@ -430,10 +443,12 @@ class PokemonStorage {
         for (const OwnedPokemon& owned : list) {
             const PokemonSpecies* species = m_data->speciesById(owned.speciesId);
             const PokeballType* ball = m_data->ball(owned.ballId);
+            const HeldItem* held = m_data->held(owned.heldItemId);
             if (!species) continue;
             result.push_back(species->name + SEPARATOR + std::to_string(owned.level) + SEPARATOR + (owned.shiny ? "1" : "0") + SEPARATOR +
                              (ball ? ball->name : std::string()) + SEPARATOR + (owned.analyzed ? "1" : "0") + SEPARATOR +
-                             join(owned.evs) + SEPARATOR + join(owned.evCaps) + SEPARATOR + std::to_string(owned.hp));
+                             join(owned.evs) + SEPARATOR + join(owned.evCaps) + SEPARATOR + std::to_string(owned.hp) + SEPARATOR +
+                             (held ? held->name : std::string()));
         }
         return result;
     }
@@ -462,6 +477,7 @@ class PokemonStorage {
         owned.evCaps = field(6).empty() ? EvRules::Evs{} : split(field(6));
         for (int i = 0; i < BaseStats::COUNT; ++i) owned.evs[i] = (std::min)(owned.evs[i], owned.evCaps[i]);
         owned.hp = field(7).empty() ? -1 : std::atoi(field(7).c_str());
+        for (const HeldItem& held : m_data->heldItems) if (!field(8).empty() && held.name == field(8)) owned.heldItemId = held.id;
         list.push_back(owned);
     }
 

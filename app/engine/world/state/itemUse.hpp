@@ -99,4 +99,26 @@ namespace ItemUse {
         inventory.add(item.id, -1);
         return message;
     }
+
+    // Objetos equipables: se dan al pokémon de 'place' (el que llevaba otro lo devuelve a la mochila). No cambia al acompañante ni lleva animación.
+    inline bool isHeld(const Item& item) { return item.category == ItemCategory::HELD; }
+
+    inline std::string equip(const GameData& data, PokemonStorage& storage, Inventory& inventory, const Item& item, const Place& place) {
+        const std::vector<OwnedPokemon>& list = place.inTeam ? storage.team() : storage.pc();
+        if (!isHeld(item) || place.index < 0 || place.index >= static_cast<int>(list.size()) || inventory.count(item.id) <= 0 || list[place.index].heldItemId == item.id) return {};
+        const PokemonSpecies* species = data.speciesById(list[place.index].speciesId);
+        const int previous = storage.setHeld(place.inTeam, place.index, item.id);
+        inventory.add(item.id, -1);
+        if (previous >= 0) inventory.add(previous, 1);
+        return data.itemTitle(item, 1) + " equipado a " + (species ? species->name : std::string("un pokémon"));
+    }
+
+    inline std::string unequip(const GameData& data, PokemonStorage& storage, Inventory& inventory, const Place& place) {
+        const std::vector<OwnedPokemon>& list = place.inTeam ? storage.team() : storage.pc();
+        if (place.index < 0 || place.index >= static_cast<int>(list.size()) || list[place.index].heldItemId < 0) return {};
+        const int previous = storage.setHeld(place.inTeam, place.index, -1);
+        inventory.add(previous, 1);
+        const Item* item = data.item(previous);
+        return (item ? data.itemTitle(*item, 1) : std::string("Objeto")) + " devuelto a la mochila";
+    }
 }

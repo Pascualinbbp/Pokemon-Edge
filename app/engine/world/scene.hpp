@@ -29,6 +29,7 @@
 #include "state/researchMachine.hpp"
 #include "state/professor.hpp"
 #include "spawn/groundSpawn.hpp"
+#include "spawn/groundField.hpp"
 #include "dayCycle.hpp"
 #include "habitat/habitatMap.hpp"
 #include "habitat/weatherSystem.hpp"
@@ -47,6 +48,7 @@
 #include "entities/pokeball.hpp"
 #include "state/pokemonStorage.hpp"
 #include "spawn/resourceSpawn.hpp"
+#include "spawn/cropField.hpp"
 #include "state/playerHealth.hpp"
 #include "spawn/spawnField.hpp"
 
@@ -84,7 +86,8 @@ struct Scene {
     WeatherSystem weather;    // clima de cada hábitat
     Inventory inventory;
     ChestField chests;        // cofres: aparecen dinámicamente según el hábitat
-    std::vector<ResourceNode> nodes; // materiales de recolección, colocados al generar el mundo
+    std::vector<ResourceNode> nodes; // materiales de recolección, colocados al generar el mundo (al final, los nodos vacíos de las parcelas)
+    std::vector<Crops::Plot> plots;  // parcelas de cultivo junto al inicio
     Exploration exploration;  // lo que el jugador ha explorado (el mapa grande lo muestra)
     Fishing fishing;          // pesca: corcho, picada y pokémon enganchado
     SpawnField<GroundItem> groundItems;
@@ -129,6 +132,7 @@ struct Scene {
             { { -7.0f, BASE + 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
         };
         nodes = ResourceSpawn::generate(gameData, habitats, worldSeed, world);
+        plots = Crops::generate(gameData, world, nodes);
         m_home = player.body.position;
         for (const Skill& skill : gameData.skills) if (PlayerActions::parse(skill.animation) == PlayerAction::FISH) m_fishSkill = skill.id;
     }
@@ -236,8 +240,10 @@ struct Scene {
         groundItems.update(dt, GroundSpawn::DELAY,
             [&](GroundItem& item) { world.step(item.body, dt); item.update(dt); },
             [&](int spot) { return GroundSpawn::make(*m_data, spot); });
+        GroundField::update(dt, m_groundTimer, player.body.position.x, player.body.position.z, player.body.underground, *m_data, habitats, world, groundItems.entities);
         updateFruits(dt);
         updateCompanion(dt);
+        updateHeldItems(dt);
         updateForage(dt);
         updateFootprints(dt);
         updateStrikes(dt);
@@ -376,6 +382,10 @@ struct Scene {
         } else if (m_interaction.kind == Interaction::CHEST) {
             s.interactVerb = CHEST_VERB;
             s.interactTarget = &m_data->chests[chests.entities[m_interaction.index].typeIndex()].name;
+        } else if (m_interaction.kind == Interaction::PLOT) {
+            const Crops::Plot& plot = plots[m_interaction.index];
+            s.interactVerb = PLANT_VERB;
+            s.interactTarget = &m_data->nodes[nodes[plot.node].typeIndex()].name;
         } else if (m_interaction.kind == Interaction::NODE) {
             const ResourceNode& node = nodes[m_interaction.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -544,6 +554,7 @@ struct Scene {
         switch (m_interaction.kind) {
             case Interaction::CHEST:   return above(chests.entities[m_interaction.index].body, Chest::HEIGHT + 0.5f);
             case Interaction::NODE:    return nodeAnchor(nodes[m_interaction.index]);
+            case Interaction::PLOT:    return { plots[m_interaction.index].position.x, plots[m_interaction.index].position.y + 0.9f, plots[m_interaction.index].position.z };
             case Interaction::GROUND:  return above(groundItems.entities[m_interaction.index].body, 0.9f);
             case Interaction::FRUIT:   return above(fruits[m_interaction.index].body, 0.7f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
@@ -848,6 +859,7 @@ struct Scene {
         if (evolveReady && storage.active() && storage.active()->speciesId != companion.speciesId()) { // evolución por objeto: cambia de especie en pleno destello
             const PokemonSpecies* next = m_data->speciesById(storage.active()->speciesId);
             m_shownSpecies = storage.active()->speciesId;
+            m_itemEvolveUid = 0; // evolución por objeto terminada: de ahí en adelante un cambio de especie sí cambiaría de pokémon
             if (next) companion.morph(next->id, m_data->levitates(*next));
         } else if (evolveReady && storage.active()) { // en lo alto de la cascada, en pleno destello
             const std::string before = storage.active()->speciesId >= 0 ? m_data->speciesById(storage.active()->speciesId)->name : std::string();
@@ -904,8 +916,8 @@ struct Scene {
             companion.swap(species->id, m_data->levitates(*species), lead->ballId, lead->shiny, player.body.position, camera.yaw());
         }
         if (m_itemEvolveUid != 0 && lead && lead->uid == m_itemEvolveUid && companion.active() && !companion.changing() && !companion.tripActive()) {
-            m_itemEvolveUid = 0;
-            companion.beginEvolve(); // el destello cambia la especie (updateWaterfall); si ya salió con la nueva, solo brilla
+            if (companion.speciesId() == lead->speciesId) m_itemEvolveUid = 0; // ya sale con la nueva especie: solo brilla
+            companion.beginEvolve(); // el destello cambia la especie (updateWaterfall) y entonces termina la evolución por objeto
         }
         if (companion.changing() || companion.tripActive()) species = nullptr; // durante el cambio o el intento de subir la cascada no trabaja
         updateDuel(dt, lead, species);
@@ -922,9 +934,19 @@ struct Scene {
         const auto inRange = [&](const DirectX::XMFLOAT3& at) { return nearPlayer(at, Companion::SEARCH_RANGE); };
         const CompanionRules::Mode mode = storage.mode;
         tickCollectWindow(dt);
-        if (species && mode == CompanionRules::Mode::COLLECT && m_collecting) {
+        // Lo que ya empezó (un árbol a medio talar, una roca a medio picar) lo termina aunque se cierre la ventana de recolección, pero no encadena el siguiente.
+        if (m_taskNode >= 0) {
+            ResourceNode& task = nodes[static_cast<size_t>(m_taskNode)];
+            const ResourceNodeType& type = m_data->nodes[task.typeIndex()];
+            if (species && mode == CompanionRules::Mode::COLLECT && task.workable() && !task.plant() && task.hits() > 0 && inRange(task.body.position)) {
+                nodeTarget = &task;
+                best = distance2(task.body.position);
+                level = (std::max)(1, species->levelIn(type.skillId));
+            } else m_taskNode = -1;
+        }
+        if (!nodeTarget && species && mode == CompanionRules::Mode::COLLECT && m_collecting) {
             for (ResourceNode& node : nodes) {
-                if (!node.workable() || !inRange(node.body.position)) continue;
+                if (!node.canWork(false) || !inRange(node.body.position)) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
                 const int skillLevel = species->levelIn(type.skillId);
                 if (node.growing() || !node.plant()) {
@@ -997,7 +1019,9 @@ struct Scene {
         else if (fightTarget) {
             if (m_duelTurn == DuelTurn::COMPANION) { // combate por turnos: pega uno y luego el otro, así ninguno se pasa la pelea huyendo del otro
                 strike(*fightTarget);
-                m_duelTurn = DuelTurn::WILD;
+                const HeldItem* held = leadHeld();
+                const bool again = held && held->effect == HeldItem::Effect::QUICK_CLAW && chance(held->amount); // Garra rápida: vuelve a pegar antes de que responda
+                m_duelTurn = again ? DuelTurn::COMPANION : DuelTurn::WILD;
                 m_turnClock = 0.0f;
             }
         }
@@ -1041,7 +1065,13 @@ struct Scene {
             const DamageRules::Hit hit = DamageRules::compute(*m_data, *attacker, foe.level(), *species, lead->level, foe.hpFraction());
             if (hit.lands()) {
                 strikes.push_back({ foe.center(), companion.center(), hit.typeId, hit.style == DamageRules::Style::RANGED, 0.0f });
-                storage.hurt(*mine, (std::max)(1, static_cast<int>(hit.fraction * WILD_DAMAGE_SCALE * static_cast<float>(storage.maxHp(*mine)))));
+                int damage = (std::max)(1, static_cast<int>(hit.fraction * WILD_DAMAGE_SCALE * static_cast<float>(storage.maxHp(*mine))));
+                const HeldItem* held = storage.heldOf(*mine);
+                if (held && held->effect == HeldItem::Effect::FOCUS_BAND && damage >= storage.hpOf(*mine) && storage.hpOf(*mine) > 1 && chance(held->amount)) {
+                    damage = storage.hpOf(*mine) - 1; // Cinta focus: aguanta con 1 PS
+                    showNotice(Notice::REWARD, species->name + " aguantó con la Cinta focus");
+                }
+                storage.hurt(*mine, damage);
             }
             m_duelTurn = DuelTurn::COMPANION;
         } else if (m_turnClock >= WILD_TURN_TIMEOUT) {
@@ -1120,6 +1150,31 @@ struct Scene {
         return DamageRules::compute(*m_data, *attacker, lead->level, *defender, target.level());
     }
 
+    static bool chance(int percent) { return RandomUtil::range(0.0f, 100.0f) < static_cast<float>(percent); }
+    const HeldItem* leadHeld() const { const OwnedPokemon* lead = storage.active(); return lead ? storage.heldOf(*lead) : nullptr; }
+
+    // Repartir experiencia: los demás del equipo que lo llevan (y no están debilitados) se llevan un % de la experiencia del combate.
+    void shareExperience(int xp) {
+        for (int i = 0; i < static_cast<int>(storage.team().size()); ++i) {
+            if (i == storage.activeIndex()) continue;
+            const OwnedPokemon& member = storage.team()[i];
+            const HeldItem* held = storage.heldOf(member);
+            if (!held || held->effect != HeldItem::Effect::EXP_SHARE || storage.fainted(member)) continue;
+            storage.addXp(i, (std::max)(1, xp * held->amount / 100), progress.levelCap());
+        }
+    }
+
+    // Restos: el equipo que los lleva recupera PS poco a poco, también fuera de combate.
+    void updateHeldItems(float dt) {
+        if ((m_leftoversTimer -= dt) > 0.0f) return;
+        m_leftoversTimer = LEFTOVERS_INTERVAL;
+        for (int i = 0; i < static_cast<int>(storage.team().size()); ++i) {
+            const OwnedPokemon& member = storage.team()[i];
+            const HeldItem* held = storage.heldOf(member);
+            if (held && held->effect == HeldItem::Effect::LEFTOVERS && !storage.fainted(member)) storage.heal(true, i, (std::max)(1, storage.maxHp(member) * held->amount / 100));
+        }
+    }
+
     void updateStrikes(float dt) {
         for (Strike& strike : strikes) strike.age += dt;
         strikes.erase(std::remove_if(strikes.begin(), strikes.end(), [](const Strike& s) { return s.age >= STRIKE_TIME; }), strikes.end());
@@ -1135,10 +1190,19 @@ struct Scene {
         if (!hit.lands()) return;
         strikes.push_back({ companion.center(), target.center(), hit.typeId, hit.style == DamageRules::Style::RANGED, 0.0f });
         const std::string name = attacker->name;
-        if (!target.damage(hit.fraction)) return;
+        float fraction = hit.fraction;
+        if (const HeldItem* held = leadHeld()) {
+            if (held->effect == HeldItem::Effect::RAZOR_CLAW && chance(held->amount)) { fraction *= CRITICAL_MULTIPLIER; showNotice(Notice::REWARD, "¡Golpe crítico!"); }
+            else if (held->effect == HeldItem::Effect::LIFE_ORB) {
+                fraction *= 1.0f + static_cast<float>(held->amount) / 100.0f;
+                if (OwnedPokemon* mine = storage.activeMut()) storage.hurt(*mine, (std::max)(1, storage.maxHp(*mine) / LIFE_ORB_RECOIL_DIVISOR)); // la Vidasfera cobra su precio
+            }
+        }
+        if (!target.damage((std::min)(fraction, DamageRules::MAX_HIT))) return;
 
         const int xp = PokemonRules::battleXp(target.level());
         const PokemonStorage::XpResult result = storage.addXp(storage.activeIndex(), xp, progress.levelCap());
+        shareExperience(xp);
         std::string text = name + "  +" + std::to_string(xp) + " PX";
         if (result.levels > 0) text += "   ¡Nivel " + std::to_string(storage.active()->level) + "!";
         if (result.evolved) Sound::emit(Sound::Sfx::EVOLVE, companion.center());
@@ -1193,7 +1257,7 @@ struct Scene {
             best = d2;
             m_interaction = { Interaction::PROFESSOR, 0 };
         }
-        if (const int i = nearestIn(nodes, [](const ResourceNode& n) { return n.workable(); }, best); i >= 0) {
+        if (const int i = nearestIn(nodes, [](const ResourceNode& n) { return n.canWork(true); }, best); i >= 0) {
             const ResourceNode& node = nodes[i];
             if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
             else {
@@ -1203,7 +1267,31 @@ struct Scene {
                 m_missingPos = nodeAnchor(node);
             }
         }
+        for (int i = 0; i < static_cast<int>(plots.size()); ++i) { // parcela vacía y con semillas de su cultivo: se puede sembrar
+            const Crops::Plot& plot = plots[i];
+            if (!nodes[plot.node].gone() || !seedItem(plot.crop) || inventory.count(seedItem(plot.crop)->id) <= 0) continue;
+            const float dx = plot.position.x - player.body.position.x, dz = plot.position.z - player.body.position.z, d2 = dx * dx + dz * dz;
+            if (d2 <= Crops::REACH * Crops::REACH && d2 < best) { best = d2; m_interaction = { Interaction::PLOT, i }; }
+        }
         if (m_weak) m_interaction = { Interaction::WEAKENED, 0 }; // capturar al debilitado tiene prioridad
+    }
+
+    // Semillas de un cultivo (como objeto del inventario).
+    const Item* seedItem(int crop) const {
+        for (const Material& material : m_data->materials) if (material.name == Crops::LIST[crop].seedName) return m_data->materialItem(material.id);
+        return nullptr;
+    }
+
+    void sow(const Crops::Plot& plot) {
+        const Item* seeds = seedItem(plot.crop);
+        ResourceNode& node = nodes[plot.node];
+        if (!seeds || inventory.count(seeds->id) <= 0 || !node.gone()) return;
+        const int typeIndex = node.typeIndex();
+        const ResourceNodeType& type = m_data->nodes[typeIndex];
+        inventory.add(seeds->id, -1);
+        node.sow(typeIndex, type.id, type.hits, static_cast<float>(type.growSeconds), RandomUtil::range(0.0f, 6.2831853f));
+        player.act(PlayerAction::PICK);
+        Sound::emit(Sound::Sfx::PICK, node.body.position);
     }
 
     // En modo captura, el salvaje más cercano que el acompañante ha dejado debilitado (con la vida en o bajo CAPTURE_STOP_HP) y que se
@@ -1232,6 +1320,7 @@ struct Scene {
             if (needsStarter()) starterRequested = true;
             else showNotice(Notice::REWARD, std::string(Professor::NAME) + ": ¡Cuida bien de tu compañero!");
         }
+        else if (m_interaction.kind == Interaction::PLOT) sow(plots[m_interaction.index]);
         else if (m_interaction.kind == Interaction::NODE) {
             ResourceNode& node = nodes[m_interaction.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -1277,14 +1366,20 @@ struct Scene {
     void workNode(ResourceNode& node, bool byPlayer, float speed = 1.0f) {
         if (!node.work(byPlayer, speed)) return;
         nodeSound(node);
+        if (!byPlayer && !node.plant() && node.hits() > 0) m_taskNode = static_cast<int>(&node - nodes.data()); // el pokémon ya empezó: lo termina
         if (!node.takeHarvest()) return;
+        if (!byPlayer && m_taskNode == static_cast<int>(&node - nodes.data())) { // terminó: descansa antes de ir a por otra cosa
+            m_taskNode = -1;
+            m_collecting = false;
+            m_collectClock = RandomUtil::range(COLLECT_WAIT_MIN, COLLECT_WAIT_MAX);
+        }
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
         if (const Item* item = m_data->materialItem(type.materialId)) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
         gainXp(Xp::GATHER);
     }
 
     // --- Frutos: cocos de palmera, plátanos del árbol de jungla y cerezas del cerezo ---
-    static constexpr int   MAX_FRUITS = 10;          // como mucho en el suelo a la vez
+    static constexpr int   MAX_FRUITS = 15, MAX_PER_KIND = 5; // como mucho en el suelo a la vez (en total y de cada clase: así los cocos no tapan a los plátanos)
     static constexpr float FRUIT_DROP_MIN = 7.0f, FRUIT_DROP_MAX = 16.0f; // segundos entre caídas
     static constexpr float FRUIT_RANGE = 55.0f;      // solo caen en árboles cercanos al jugador
     static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13, CHERRY_TYPE = 11;
@@ -1333,14 +1428,18 @@ struct Scene {
         if ((m_fruitTimer -= dt) > 0.0f) return;
         m_fruitTimer = RandomUtil::range(FRUIT_DROP_MIN, FRUIT_DROP_MAX);
         if (static_cast<int>(fruits.size()) >= MAX_FRUITS || player.body.underground) return;
-        std::vector<const ResourceNode*> trees;
+        int onGround[3] = { 0, 0, 0 };
+        for (const Fruit& fruit : fruits) if (fruit.available()) ++onGround[static_cast<int>(fruit.kind())];
+        std::vector<const ResourceNode*> trees[3]; // árboles cercanos por clase de fruto
         for (const ResourceNode& node : nodes) {
             Fruit::Kind treeKind;
             if (!fruitKind(node.typeId(), treeKind) || node.growing() || node.body.underground) continue;
-            if (nearPlayer(node.body.position, FRUIT_RANGE)) trees.push_back(&node);
+            if (nearPlayer(node.body.position, FRUIT_RANGE)) trees[static_cast<int>(treeKind)].push_back(&node);
         }
-        if (trees.empty()) return;
-        const ResourceNode& tree = *trees[static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(trees.size()) - 1))];
+        int pick = -1; // la clase con menos frutos en el suelo entre las que tienen árbol cerca
+        for (int k = 0; k < 3; ++k) if (!trees[k].empty() && onGround[k] < MAX_PER_KIND && (pick < 0 || onGround[k] < onGround[pick])) pick = k;
+        if (pick < 0) return;
+        const ResourceNode& tree = *trees[pick][static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(trees[pick].size()) - 1))];
         float half, height;
         ResourceStyle::hitbox(ResourceStyle::look(tree.typeId()), tree.growth(), half, height);
         const float angle = RandomUtil::range(0.0f, 6.2831853f), out = RandomUtil::range(0.8f, 1.8f);
@@ -1705,7 +1804,7 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PROFESSOR, WEAKENED, FRUIT } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PROFESSOR, WEAKENED, FRUIT, PLOT } kind = NONE;
         int index = -1;
     };
 
@@ -1715,6 +1814,7 @@ struct Scene {
     }
 
     static constexpr const char* CHEST_VERB = "Abrir";
+    static constexpr const char* PLANT_VERB = "Plantar";
     static constexpr const char* CAPTURE_VERB = "Capturar";
     static constexpr float FOOTPRINT_RANGE = 70.0f; // solo las criaturas cercanas dejan huellas
     static constexpr float RADIO_FADE_IN = 0.18f, RADIO_FADE_OUT = 0.35f, RADIO_PICK_HOLD = 0.25f; // la rueda aparece rápido y se va despacio
@@ -1732,6 +1832,7 @@ struct Scene {
     static constexpr float FLOWER_CHECK_SECONDS = 2.0f; // cada cuánto se intenta hacer brotar una flor
     float m_flowerTimer = 0.0f;
     std::vector<float> m_flowerWeights;
+    float m_groundTimer = 0.0f; // reloj de aparición de los objetos sueltos del mundo
     float m_clock = 0.0f;       // segundos de partida (marea)
     static constexpr float RESPAWN_TIME = 3.4f; // duración de la pantalla de carga tras desmayarse (s)
     float m_respawn = 0.0f;
@@ -1769,10 +1870,14 @@ struct Scene {
     static constexpr float WILD_DAMAGE_SCALE = 0.8f;   // los salvajes pegan algo menos que el compañero
     DuelTurn m_duelTurn = DuelTurn::COMPANION;
     float m_turnClock = 0.0f;
+    float m_leftoversTimer = 0.0f;
+    static constexpr float CRITICAL_MULTIPLIER = 1.5f, LEFTOVERS_INTERVAL = 6.0f;
+    static constexpr int LIFE_ORB_RECOIL_DIVISOR = 20; // la Vidasfera quita 1/20 de los PS máximos en cada golpe
     float m_healAcc = 0.0f;                            // PS fraccionarios acumulados al curarse poco a poco
     CaptureTarget* m_engaged = nullptr; // salvaje al que el acompañante está atacando ahora
     float m_captureRest = 0.0f; // descanso del acompañante entre ataques en modo captura
     bool m_collecting = false;
+    int m_taskNode = -1; // índice del nodo que el acompañante ha empezado a extraer (-1 = ninguno)
     float m_holdClock = 0.0f;
     struct PendingPotion { const TrainingItem* type = nullptr; int uid = 0; float wait = 0.0f; } m_pendingPotion; // poción o revivir a la espera de que el pokémon salga
     int m_itemEvolveUid = 0;   // pokémon que evoluciona por un objeto y aún no ha hecho el efecto (0 = ninguno)

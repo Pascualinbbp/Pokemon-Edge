@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <mutex>
 #include <vector>
+#include <chrono>
 #include "radioSource.hpp"
+#include "radioStream.hpp"
 #include "wav.hpp"
 
 namespace Audio {
@@ -68,42 +70,47 @@ namespace Audio {
             m_voices.push_back(make(request));
         }
 
-        // Emisora de radio: suena sobre el oyente, en estéreo y leída poco a poco de su fuente (streaming). nullptr = apagada. 'start' es el
-        // fotograma por el que empieza (para retomar la emisora donde se dejó). Entra con un fundido corto.
-        void setRadio(RadioPtr source, float volume, size_t start = 0) {
+        // Emisora de radio: suena sobre el oyente, en estéreo. La lee un hilo aparte (RadioStream); 'open' la abre allí y 'clock' dice en qué punto de la
+        // emisión está en ese momento (todas las emisoras van a la vez). Entra con un fundido corto.
+        void tuneRadio(int station, RadioStream::Opener open, RadioStream::Clock clock, float volume) {
             std::lock_guard<std::mutex> guard(m_lock);
             m_radioVolume = volume;
-            if (source == m_radio) return;
-            m_radio = std::move(source);
-            m_ring.clear();
             m_ringPos = 0.0;
             m_radioFade = 0.0f;
-            if (m_radio) m_radio->seek(start);
+            m_stream.start();
+            m_stream.tune(station, std::move(open), std::move(clock));
         }
 
-        // Fotograma de la emisora que suena ahora mismo (la fuente va por delante: lo que ya está leído y aún no sonó se descuenta).
-        size_t radioPosition() const {
+        void radioOff() {
             std::lock_guard<std::mutex> guard(m_lock);
-            if (!m_radio) return 0;
-            const size_t length = m_radio->length();
-            if (length == 0) return 0;
-            const size_t ahead = static_cast<size_t>((std::max)(0.0, static_cast<double>(m_ring.size() / 2) - m_ringPos)); // en fotogramas de la fuente
-            return (m_radio->position() + length - ahead % length) % length;
+            m_ringPos = 0.0;
+            m_radioFade = 0.0f;
+            m_stream.off();
         }
+
+        RadioStream& radio() { return m_stream; }
+        void shutdownRadio() { m_stream.stop(); }
 
         int activeVoices() const {
             std::lock_guard<std::mutex> guard(m_lock);
-            return static_cast<int>(m_voices.size()) + (m_radio ? 1 : 0);
+            return static_cast<int>(m_voices.size()) + (m_stream.playing() ? 1 : 0);
         }
 
         // Rellena 'frames' fotogramas estéreo entrelazados.
         void render(int16_t* out, int frames) {
+            const auto t0 = std::chrono::steady_clock::now();
             std::lock_guard<std::mutex> guard(m_lock);
             m_mix.assign(static_cast<size_t>(frames) * 2, 0.0f);
             for (Voice& voice : m_voices) mixVoice(voice, frames);
-            if (m_radio) mixRadio(frames);
+            mixRadio(frames);
             m_voices.erase(std::remove_if(m_voices.begin(), m_voices.end(), [](const Voice& v) { return v.done; }), m_voices.end());
             for (int i = 0; i < frames * 2; ++i) out[i] = static_cast<int16_t>(std::tanh(m_mix[static_cast<size_t>(i)]) * 32000.0f); // limitador suave
+            const uint32_t us = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count());
+            RadioStats& stats = m_stream.stats;
+            stats.renders.fetch_add(1, std::memory_order_relaxed);
+            stats.renderTotalUs.fetch_add(us, std::memory_order_relaxed);
+            uint32_t seen = stats.renderMaxUs.load(std::memory_order_relaxed);
+            while (us > seen && !stats.renderMaxUs.compare_exchange_weak(seen, us, std::memory_order_relaxed)) {}
         }
 
         private:
@@ -173,33 +180,32 @@ namespace Audio {
             v.lastR = tr;
         }
 
-        // La emisora: lee de la fuente lo que haga falta (a su frecuencia) y lo remuestrea a RATE con interpolación lineal.
+        // La emisora: toma del anillo del lector lo que haga falta (a la frecuencia de la fuente) y lo remuestrea a RATE con interpolación lineal.
         void mixRadio(int frames) {
-            const double step = static_cast<double>(m_radio->rate()) / RATE;
-            const size_t need = static_cast<size_t>(std::ceil(frames * step)) + 2;
-            size_t have = m_ring.size() / 2;
-            if (have < static_cast<size_t>(m_ringPos) + need) {
-                const size_t drop = static_cast<size_t>(m_ringPos); // lo ya sonado se descarta
-                m_ring.erase(m_ring.begin(), m_ring.begin() + static_cast<long>(drop * 2));
-                m_ringPos -= static_cast<double>(drop);
-                have = m_ring.size() / 2;
-                const size_t want = (std::max)(need + 1, static_cast<size_t>(2048));
-                m_ring.resize((have + want) * 2);
-                const size_t got = m_radio->read(m_ring.data() + have * 2, want);
-                m_ring.resize((have + got) * 2);
-                if (got == 0) return;
-            }
-            const size_t avail = m_ring.size() / 2;
+            if (!m_stream.playing()) return;
+            const double step = static_cast<double>(m_stream.rate()) / RATE;
+            const size_t need = static_cast<size_t>(std::ceil(m_ringPos + frames * step)) + 2;
             const float fadeStep = 1.0f / (RATE * 0.25f);
-            for (int i = 0; i < frames; ++i) {
-                const size_t a = static_cast<size_t>(m_ringPos);
-                if (a + 1 >= avail) break;
-                const float f = static_cast<float>(m_ringPos - static_cast<double>(a));
-                const float gain = m_radioVolume * m_radioFade * (1.0f / 32768.0f);
-                m_mix[static_cast<size_t>(i) * 2] += (m_ring[a * 2] * (1.0f - f) + m_ring[(a + 1) * 2] * f) * gain;
-                m_mix[static_cast<size_t>(i) * 2 + 1] += (m_ring[a * 2 + 1] * (1.0f - f) + m_ring[(a + 1) * 2 + 1] * f) * gain;
-                m_ringPos += step;
-                m_radioFade = (std::min)(1.0f, m_radioFade + fadeStep);
+            size_t consumed = 0;
+            const RadioStream::Result result = m_stream.consume(need, [&](const int16_t* ring, size_t head, size_t capacity) {
+                double pos = m_ringPos;
+                for (int i = 0; i < frames; ++i) {
+                    const size_t a = static_cast<size_t>(pos);
+                    const size_t ia = (head + a) % capacity, ib = (head + a + 1) % capacity;
+                    const float f = static_cast<float>(pos - static_cast<double>(a));
+                    const float gain = m_radioVolume * m_radioFade * (1.0f / 32768.0f);
+                    m_mix[static_cast<size_t>(i) * 2] += (ring[ia * 2] * (1.0f - f) + ring[ib * 2] * f) * gain;
+                    m_mix[static_cast<size_t>(i) * 2 + 1] += (ring[ia * 2 + 1] * (1.0f - f) + ring[ib * 2 + 1] * f) * gain;
+                    pos += step;
+                    m_radioFade = (std::min)(1.0f, m_radioFade + fadeStep);
+                }
+                const size_t whole = static_cast<size_t>(pos);
+                m_ringPos = pos - static_cast<double>(whole);
+                return whole;
+            }, consumed);
+            if (result == RadioStream::Result::UNDERRUN) { // el lector no llegó a tiempo: este búfer sale en silencio (queda anotado para los logs)
+                m_stream.stats.underruns.fetch_add(1, std::memory_order_relaxed);
+                m_stream.stats.missingFrames.fetch_add(static_cast<uint64_t>(frames), std::memory_order_relaxed);
             }
         }
 
@@ -207,9 +213,8 @@ namespace Audio {
         Listener m_listener;
         std::vector<Voice> m_voices;
         std::vector<float> m_mix;
-        RadioPtr m_radio;
-        std::vector<int16_t> m_ring; // lo leído de la emisora y aún sin sonar (estéreo entrelazado)
-        double m_ringPos = 0.0;      // fotograma del anillo por el que va la salida
+        RadioStream m_stream;
+        double m_ringPos = 0.0;      // fracción de fotograma por la que va la salida respecto a la cabeza del anillo
         float m_radioFade = 0.0f;
         float m_radioVolume = 0.5f;
     };

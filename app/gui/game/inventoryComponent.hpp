@@ -125,11 +125,13 @@ namespace InventoryComponent {
         // Precios (pokémonedas) y venta de las unidades que se tienen. Las herramientas no se venden.
         inline std::string useMessage; // resultado del último uso (se borra al cambiar de objeto)
         inline int useMessageItem = -1;
+        inline int vitaminTarget = -1; // pokémon del equipo elegido para la vitamina (luego se elige la estadística)
 
         // Objetos que se usan sobre un pokémon (pociones, revivir, caramelo, piedras evolutivas): el equipo, y al pulsar uno se usa sobre él.
         inline void drawUse(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, const Item& item, int count) {
-            if (ItemUse::kind(data, item) == ItemUse::Kind::NONE) return;
-            if (useMessageItem != item.id) { useMessage.clear(); useMessageItem = item.id; }
+            const TrainingItem* vitamin = item.category == ItemCategory::TRAINING && data.training(item.refId) && data.training(item.refId)->effect == TrainingItem::Effect::EV ? data.training(item.refId) : nullptr;
+            if (ItemUse::kind(data, item) == ItemUse::Kind::NONE && !vitamin) return;
+            if (useMessageItem != item.id) { useMessage.clear(); useMessageItem = item.id; vitaminTarget = -1; }
             heading("Usar sobre");
             ImDrawList* dl = ImGui::GetWindowDrawList();
             constexpr float R = 24.0f;
@@ -143,13 +145,64 @@ namespace InventoryComponent {
                 const bool clicked = ImGui::InvisibleButton("##target", ImVec2(R * 2.0f + 6.0f, R * 2.0f + 14.0f));
                 const bool hovered = ImGui::IsItemHovered();
                 ImGui::PopID();
-                const bool works = count > 0 && ItemUse::applies(data, storage, progress, item, team[i]);
+                bool works = count > 0 && ItemUse::applies(data, storage, progress, item, team[i]);
+                if (vitamin) {
+                    works = false;
+                    for (int stat = 0; stat < 6; ++stat) works = works || (count > 0 && team[i].evs[stat] < team[i].evCaps[stat]);
+                }
                 const ImVec2 c(at.x + R + 3.0f, at.y + R + 10.0f);
                 TeamCircle::draw(dl, c, R, data, *species, team[i].level, team[i].shiny, team[i].ballId, hovered && works, 0, works ? 1.0f : 0.35f, storage.fainted(team[i]));
-                if (clicked && works) { useMessage = ItemUse::apply(data, storage, inventory, progress, item, { true, i }); useMessageItem = item.id; }
+                if (vitamin) {
+                    if (clicked && works) { vitaminTarget = i; useMessage.clear(); }
+                    if (vitaminTarget == i) dl->AddCircle(c, R + 3.0f, IM_COL32(255, 190, 80, 255), 32, 2.5f);
+                } else if (clicked && works) { useMessage = ItemUse::apply(data, storage, inventory, progress, item, { true, i }); useMessageItem = item.id; }
+            }
+            if (vitamin && vitaminTarget >= 0 && vitaminTarget < static_cast<int>(team.size())) {
+                const OwnedPokemon& target = team[vitaminTarget];
+                ImGui::Dummy(ImVec2(0.0f, 4.0f));
+                for (int stat = 0; stat < 6; ++stat) {
+                    const int missing = target.evCaps[stat] - target.evs[stat];
+                    char label[64];
+                    std::snprintf(label, sizeof(label), "%s  %d/%d", BaseStats::name(stat), target.evs[stat], target.evCaps[stat]);
+                    ImGui::PushID(3000 + stat);
+                    if (GuiCards::button("##vit", label, ImVec2(150.0f, 28.0f), missing > 0 && inventory.count(item.id) > 0, IM_COL32(230, 140, 40, 255)) && storage.train(true, vitaminTarget, stat, vitamin->amount)) {
+                        inventory.add(item.id, -1);
+                        useMessage = std::string(BaseStats::name(stat)) + " entrenado";
+                    }
+                    ImGui::PopID();
+                    if (stat % 2 == 0) ImGui::SameLine();
+                }
             }
             if (!useMessage.empty()) GuiCards::muted(useMessage.c_str());
+            else if (vitamin && count > 0) GuiCards::muted("Elige un pokémon y después la estadística a entrenar.");
             else if (count > 0) GuiCards::muted("Elige un pokémon del equipo (los apagados no sacan provecho).");
+        }
+
+        // Objetos equipables: el equipo; al pulsar un pokémon se lo equipa (el que llevaba otro objeto lo devuelve a la mochila). No cambia al acompañante.
+        inline void drawEquip(const GameData& data, PokemonStorage& storage, Inventory& inventory, const Item& item, int count) {
+            if (!ItemUse::isHeld(item)) return;
+            if (useMessageItem != item.id) { useMessage.clear(); useMessageItem = item.id; vitaminTarget = -1; }
+            heading("Equipar en");
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            constexpr float R = 24.0f;
+            const std::vector<OwnedPokemon>& team = storage.team();
+            for (int i = 0; i < static_cast<int>(team.size()); ++i) {
+                const PokemonSpecies* species = data.speciesById(team[i].speciesId);
+                if (!species) continue;
+                if (i > 0) ImGui::SameLine();
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                ImGui::PushID(4000 + i);
+                const bool clicked = ImGui::InvisibleButton("##holder", ImVec2(R * 2.0f + 6.0f, R * 2.0f + 14.0f));
+                const bool hovered = ImGui::IsItemHovered();
+                ImGui::PopID();
+                const bool works = count > 0 && team[i].heldItemId != item.id;
+                const ImVec2 c(at.x + R + 3.0f, at.y + R + 10.0f);
+                TeamCircle::draw(dl, c, R, data, *species, team[i].level, team[i].shiny, team[i].ballId, hovered && works, 0, works ? 1.0f : 0.35f, storage.fainted(team[i]));
+                if (const HeldItem* carried = storage.heldOf(team[i])) ItemIcon::held(dl, ImVec2(c.x + R * 0.75f, c.y + R * 0.75f), 8.0f, *carried);
+                if (clicked && works) { useMessage = ItemUse::equip(data, storage, inventory, item, { true, i }); useMessageItem = item.id; }
+            }
+            if (!useMessage.empty()) GuiCards::muted(useMessage.c_str());
+            else if (count > 0) GuiCards::muted("Elige un pokémon del equipo. Se quita desde su ficha.");
         }
 
         inline void drawTrade(const GameData& data, Inventory& inventory, const Item& item, int count) {
@@ -218,6 +271,7 @@ namespace InventoryComponent {
             }
 
             drawUse(data, storage, inventory, progress, *item, count);
+            drawEquip(data, storage, inventory, *item, count);
             drawTrade(data, inventory, *item, count);
 
             if (const std::vector<std::string> sources = ItemInfo::sources(data, *item); !sources.empty()) {

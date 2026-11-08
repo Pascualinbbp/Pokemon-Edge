@@ -122,6 +122,7 @@ class Renderer3D {
     void addGeysers(const Scene& scene, float time);
     void addUnderground(const Scene& scene); // decorado de las galerías cercanas (estalactitas, raíles, lámparas...) y sus luces
     void addChest(const Chest& chest);
+    void addPlot(const Crops::Plot& plot);
     void addNode(const ResourceNode& node);
     void addGroundItem(const GroundItem& item);
     void addFruit(const Fruit& fruit);

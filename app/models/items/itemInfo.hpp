@@ -31,7 +31,12 @@ namespace ItemInfo {
         } else if (item.category == ItemCategory::TOOL) {
             lines.emplace_back("La tienes desde el inicio");
         }
-        if (const float chance = groupChance(data, RewardGroup::GROUND, item); chance > 0.0f) lines.emplace_back("Suelto por el mundo");
+        bool onGround = groupChance(data, RewardGroup::GROUND, item) > 0.0f;
+        for (const Habitat& habitat : data.habitats) {
+            if (onGround) break;
+            if (habitat.groundRewardId > 0 && groupChance(data, habitat.groundRewardId, item) > 0.0f) onGround = true;
+        }
+        if (onGround) lines.emplace_back("Suelto por el mundo");
         for (const ChestType& chest : data.chests) {
             if (const float chance = groupChance(data, chest.rewardId, item); chance > 0.0f) {
                 std::snprintf(text, sizeof(text), "%s (%.0f %%)", chest.name.c_str(), chance);

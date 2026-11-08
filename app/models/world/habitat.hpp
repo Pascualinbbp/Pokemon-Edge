@@ -46,6 +46,7 @@ struct Habitat {
     int minChests = 0;       // cofres a la vez por zona (se sortea cada día)
     int maxChests = 2;
     int dailyChests = 2;     // tope de cofres que genera por día
+    int groundRewardId = -1; // grupo de la tabla reward de sus objetos sueltos (-1 = el común, RewardGroup::GROUND)
     int minWild = 2;   // pokémon salvajes por chunk
     int maxWild = 5;
     int minNodes = 3;  // materiales de recolección por chunk

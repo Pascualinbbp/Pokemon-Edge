@@ -2,7 +2,7 @@
 #include <string>
 
 // Comportamiento de un objeto en el código; sale del efecto de su fila en item (o de ser material / herramienta).
-enum class ItemCategory { UNKNOWN, POKEBALL, MATERIAL, STONE, TOOL, TRAINING };
+enum class ItemCategory { UNKNOWN, POKEBALL, MATERIAL, STONE, TOOL, TRAINING, HELD };
 
 // ¿Su ref_id apunta a la tabla material? (solo los materiales)
 inline bool usesMaterialTable(ItemCategory category) { return category == ItemCategory::MATERIAL; }
@@ -16,7 +16,7 @@ struct Item {
     int id = -1;
     ItemCategory category = ItemCategory::UNKNOWN;
     int categoryId = -1;   // id en la tabla category (para agrupar en la mochila)
-    int refId = -1;        // POKEBALL: id de la bola · TRAINING / STONE: id del objeto · MATERIAL / TOOL: id en su tabla
+    int refId = -1;        // POKEBALL: id de la bola · TRAINING / STONE / HELD: id del objeto · MATERIAL / TOOL: id en su tabla
     int typeId = -1;       // piedras evolutivas: tipo de la piedra
     std::string name;
     std::string description;

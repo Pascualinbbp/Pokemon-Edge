@@ -344,7 +344,7 @@ namespace PokemonComponent {
 
         // --- Ficha ---
         // Gráfico hexagonal: estadísticas base (azul) y, encima, su crecimiento por EVs (naranja). En cada vértice: nombre y
-        // base, EV actual / máximo con el que salió y un "+" que gasta una vitamina con las disponibles / necesarias para llegar al máximo.
+        // base y EV actual / máximo con el que salió. Las vitaminas se gastan desde la mochila.
         inline void drawStats(const GameData& data, PokemonStorage& storage, Inventory& inventory, const OwnedPokemon& owned,
                               const PokemonSpecies& species, const ImVec2& area, float avail) {
             constexpr int ORDER[6] = { 0, 1, 3, 5, 4, 2 }; // vértices de arriba en sentido horario (índices de BaseStats)
@@ -360,9 +360,6 @@ namespace PokemonComponent {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             GuiCards::radar(dl, center, radius, base, GuiStyle::ACCENT, &grown, IM_COL32(255, 160, 40, 255));
 
-            const TrainingItem* vitamin = data.trainingWith(TrainingItem::Effect::EV);
-            const Item* vitaminItem = vitamin ? data.item(vitamin->id) : nullptr;
-            const int count = vitaminItem ? inventory.count(vitaminItem->id) : 0;
             char line[48];
             for (int i = 0; i < 6; ++i) {
                 const float angle = -PI * 0.5f + static_cast<float>(i) * PI / 3.0f;
@@ -378,22 +375,6 @@ namespace PokemonComponent {
                 std::snprintf(line, sizeof(line), "%d/%d", owned.evs[stat], owned.evCaps[stat]);
                 GuiCards::text(dl, ImVec2(x, y + lineH), IM_COL32(255, 170, 60, 255), line, 0.85f);
 
-                const int missing = owned.evCaps[stat] - owned.evs[stat];
-                const int needed = vitamin ? (missing + vitamin->amount - 1) / vitamin->amount : 0;
-                const bool usable = missing > 0 && count > 0;
-                const ImVec2 button(x + 11.0f, y + lineH * 2.0f + 12.0f);
-                ImGui::SetCursorScreenPos(ImVec2(button.x - 11.0f, button.y - 11.0f));
-                ImGui::PushID(stat);
-                const bool pressed = ImGui::InvisibleButton("##ev", ImVec2(22.0f, 22.0f)) && usable;
-                ImGui::PopID();
-                const bool hot = usable && (ImGui::IsItemHovered() || ImGui::IsItemFocused());
-                dl->AddCircleFilled(button, 11.0f, usable ? (hot ? IM_COL32(255, 190, 80, 255) : IM_COL32(230, 140, 40, 255)) : IM_COL32(70, 70, 80, 200), 20);
-                dl->AddLine(ImVec2(button.x - 5.0f, button.y), ImVec2(button.x + 5.0f, button.y), IM_COL32(255, 255, 255, usable ? 255 : 120), 2.0f);
-                dl->AddLine(ImVec2(button.x, button.y - 5.0f), ImVec2(button.x, button.y + 5.0f), IM_COL32(255, 255, 255, usable ? 255 : 120), 2.0f);
-                if (missing > 0) std::snprintf(line, sizeof(line), "%d/%d", count, needed);
-                else std::snprintf(line, sizeof(line), "MAX");
-                GuiCards::text(dl, ImVec2(button.x + 16.0f, button.y - ImGui::GetFontSize() * 0.4f), usable ? IM_COL32(255, 255, 255, 255) : GuiStyle::MUTED, line, 0.85f);
-                if (pressed && storage.train(selection.inTeam, selection.index, stat, vitamin->amount)) inventory.add(vitaminItem->id, -1);
             }
         }
 
@@ -465,7 +446,7 @@ namespace PokemonComponent {
             if (storage.bound(owned)) GuiCards::chip(dl, chipAt, "Inicial", IM_COL32(120, 70, 190, 255), 0.8f);
             if (const PokeballType* ball = data.ball(owned.ballId)) ItemIcon::ball(dl, ImVec2(pos.x + size.x - 26.0f, pos.y + 26.0f), 12.0f, PokeballStyle::look(ball->id));
 
-            // PS (barra) y medicinas: pociones curan, revivir reanima a un debilitado. Cada botón es el objeto con las unidades que quedan.
+            // PS (barra). Los objetos se usan solo desde la mochila.
             {
                 const int maxHp = storage.maxHp(owned), hp = storage.hpOf(owned);
                 const ImVec2 bar(pos.x + 108.0f, pos.y + 92.0f);
@@ -475,46 +456,18 @@ namespace PokemonComponent {
                 if (f > 0.0f) dl->AddRectFilled(bar, ImVec2(bar.x + barW * f, bar.y + 16.0f), f > 0.5f ? IM_COL32(90, 210, 110, 255) : f > 0.2f ? IM_COL32(235, 200, 60, 255) : IM_COL32(230, 70, 70, 255), 8.0f);
                 std::snprintf(text, sizeof(text), hp > 0 ? "PS %d/%d" : "PS 0/%d  (debilitado)", hp > 0 ? hp : maxHp, maxHp);
                 GuiCards::text(dl, ImVec2(bar.x + 8.0f, bar.y + 1.0f), IM_COL32(255, 255, 255, 245), text, 0.75f);
-                float bx = pos.x + 16.0f;
-                int index = 0;
-                // Un botón por objeto que se puede usar sobre este pokémon: pociones y revivir (siempre, apagados si no valen) y las piedras evolutivas que le sirven.
-                const auto button = [&](const Item& medItem, const std::function<void(ImDrawList*, const ImVec2&)>& icon, const std::string& tip) {
-                    const int count = inventory.count(medItem.id);
-                    const bool usable = count > 0 && ItemUse::applies(data, storage, progress, medItem, owned);
-                    const ImVec2 a(bx, pos.y + headerHeight - 28.0f), b(a.x + 46.0f, a.y + 24.0f);
-                    ImGui::SetCursorScreenPos(a);
-                    ImGui::PushID(1000 + index++);
-                    const bool clicked = ImGui::InvisibleButton("##med", ImVec2(46.0f, 24.0f));
-                    const bool hovered = ImGui::IsItemHovered();
-                    ImGui::PopID();
-                    dl->AddRectFilled(a, b, IM_COL32(0, 0, 0, hovered && usable ? 150 : 90), 6.0f);
-                    icon(dl, ImVec2(a.x + 12.0f, a.y + 13.0f));
-                    std::snprintf(text, sizeof(text), "%d", count);
-                    GuiCards::text(dl, ImVec2(a.x + 25.0f, a.y + 6.0f), usable ? IM_COL32(255, 255, 255, 255) : IM_COL32(180, 180, 190, 180), text, 0.85f);
-                    if (hovered) ImGui::SetTooltip("%s", tip.c_str());
-                    if (clicked && usable) message = ItemUse::apply(data, storage, inventory, progress, medItem, selection);
-                    bx += 50.0f;
-                };
-                for (const TrainingItem& med : data.trainingItems) {
-                    if (med.effect != TrainingItem::Effect::HEAL && med.effect != TrainingItem::Effect::REVIVE) continue;
-                    if (const Item* medItem = data.item(med.id)) {
-                        const float alpha = ItemUse::applies(data, storage, progress, *medItem, owned) && inventory.count(medItem->id) > 0 ? 1.0f : 0.4f;
-                        button(*medItem, [&](ImDrawList* d, const ImVec2& c) { ItemIcon::training(d, c, 9.0f, med, alpha); }, med.name + "\n" + med.description);
-                    }
-                }
-                for (const Item& stone : data.items) {
-                    if (ItemUse::kind(data, stone) != ItemUse::Kind::STONE || !ItemUse::applies(data, storage, progress, stone, owned)) continue;
-                    button(stone, [&](ImDrawList* d, const ImVec2& c) { ItemIcon::item(d, c, 9.0f, stone, data); }, data.itemTitle(stone, 1) + "\nHace evolucionar a " + species->name);
-                }
-            }
 
-            // Caramelo: sube un nivel (sin pasar del límite del jugador).
-            if (const TrainingItem* candy = data.trainingWith(TrainingItem::Effect::LEVEL)) if (const Item* item = data.item(candy->id)) {
-                const int count = inventory.count(item->id);
-                std::snprintf(text, sizeof(text), "NIVEL +1  x%d", count);
-                ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 150.0f, pos.y + 44.0f));
-                if (GuiCards::button("##candy", text, ImVec2(134.0f, 26.0f), count > 0 && ItemUse::applies(data, storage, progress, *item, owned), IM_COL32(40, 150, 120, 255))) {
-                    message = ItemUse::apply(data, storage, inventory, progress, *item, selection);
+                // Objeto equipable: se da desde la mochila; aquí se ve y se puede quitar (vuelve a la mochila).
+                const ImVec2 slot(pos.x + 16.0f, pos.y + headerHeight - 30.0f);
+                if (const HeldItem* held = storage.heldOf(owned)) {
+                    ItemIcon::held(dl, ImVec2(slot.x + 12.0f, slot.y + 13.0f), 11.0f, *held);
+                    GuiCards::text(dl, ImVec2(slot.x + 30.0f, slot.y + 5.0f), IM_COL32(255, 255, 255, 235), held->name.c_str(), 0.85f);
+                    const float nameWidth = ImGui::CalcTextSize(held->name.c_str()).x * 0.85f;
+                    ImGui::SetCursorScreenPos(ImVec2(slot.x + 38.0f + nameWidth, slot.y));
+                    if (GuiCards::button("##unequip", "QUITAR", ImVec2(70.0f, 24.0f), true, IM_COL32(150, 70, 70, 255))) message = ItemUse::unequip(data, storage, inventory, selection);
+                    if (ImGui::IsMouseHoveringRect(slot, ImVec2(slot.x + 30.0f + nameWidth, slot.y + 26.0f))) ImGui::SetTooltip("%s", held->description.c_str());
+                } else {
+                    GuiCards::text(dl, ImVec2(slot.x, slot.y + 5.0f), GuiStyle::MUTED, "Sin objeto equipado (se da desde la mochila)", 0.8f);
                 }
             }
 

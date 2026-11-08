@@ -1088,6 +1088,7 @@ void Renderer3D::collect(const Scene& scene) {
     }
 
     for (const Chest& chest : scene.chests.entities) addChest(chest);
+    for (const Crops::Plot& plot : scene.plots) addPlot(plot);
     for (const ResourceNode& node : scene.nodes) {
         const float dx = node.body.position.x - p.x, dz = node.body.position.z - p.z;
         if (!node.gone() && dx * dx + dz * dz <= kNodeDrawRange * kNodeDrawRange) addNode(node);
@@ -1499,6 +1500,33 @@ void Renderer3D::addNode(const ResourceNode& node) {
         return;
     }
 
+    if (look.shape == Shape::CROP) { // cultivo: crece desde brotes hasta su tamaño; al madurar enseña lo que se recoge
+        const float k = std::clamp(0.2f + 0.8f * g, 0.0f, 1.0f), ripe = std::clamp((g - 0.7f) / 0.3f, 0.0f, 1.0f);
+        if (node.typeId() == 26) { // trigo: espigas que pasan de verde a doradas
+            const XMFLOAT3 stalk = { look.body.x + (look.accent.x - look.body.x) * ripe, look.body.y + (look.accent.y - look.body.y) * ripe, look.body.z + (look.accent.z - look.body.z) * ripe };
+            for (int i = 0; i < 9; ++i) {
+                const float ox = ((i % 3) - 1) * 0.28f + 0.05f * (i % 2), oz = ((i / 3) - 1) * 0.28f - 0.04f * (i % 3), h = look.height * k * (0.85f + 0.15f * ((i * 7) % 3) / 2.0f);
+                part({ 0.035f, h, 0.035f }, 0.0f, { ox, h * 0.5f, oz }, stalk, 0.0f);
+                if (ripe > 0.0f) part({ 0.07f, 0.2f * ripe, 0.07f }, 0.0f, { ox, h + 0.05f, oz }, look.accent, 0.1f);
+            }
+            return;
+        }
+        const bool carrot = node.typeId() == 24;
+        const int leaves = carrot ? 6 : 5;
+        for (int i = 0; i < leaves; ++i) { // hojas en abanico
+            const float a = static_cast<float>(i) * 6.2831853f / leaves, h = (carrot ? 0.42f : 0.2f) * k;
+            part({ carrot ? 0.04f : 0.2f * k, h, carrot ? 0.04f : 0.14f * k }, a, { std::cos(a) * 0.12f * k, h * 0.5f + 0.03f, std::sin(a) * 0.12f * k }, look.body, 0.0f);
+        }
+        if (ripe > 0.0f) {
+            if (carrot) part({ 0.14f * ripe, 0.1f * ripe, 0.14f * ripe }, 0.0f, { 0.0f, 0.04f, 0.0f }, look.accent, 0.2f); // la zanahoria asoma de la tierra
+            else for (int i = 0; i < 4; ++i) {
+                const float a = static_cast<float>(i) * 1.5708f + 0.4f, f = 0.11f * ripe;
+                part({ f, f * 1.2f, f }, a, { std::cos(a) * 0.22f, 0.08f, std::sin(a) * 0.22f }, look.accent, 0.3f); // fresas rojas entre las hojas
+            }
+        }
+        return;
+    }
+
     if (look.shape == Shape::BUSH) {
         part({ 1.0f, 0.6f, 1.0f }, 0.3f, { 0.0f, 0.3f, 0.0f }, look.body, 0.0f);
         part({ 0.7f, 0.5f, 0.7f }, 0.9f, { 0.15f, 0.65f, -0.1f }, look.body, 0.0f);
@@ -1640,6 +1668,13 @@ void Renderer3D::addMachine() {
 }
 
 // Cofre: cuerpo, cerradura y tapa con bisagra atrás; al abrirse suelta chispas del color de su rareza.
+// Tierra labrada de una parcela de cultivo: un cuadrado oscuro con surcos más claros.
+void Renderer3D::addPlot(const Crops::Plot& plot) {
+    const XMMATRIX at = XMMatrixTranslation(plot.position.x, plot.position.y, plot.position.z);
+    add(m_cube, XMMatrixScaling(Crops::PLOT_SIZE, 0.12f, Crops::PLOT_SIZE) * XMMatrixTranslation(0.0f, 0.06f, 0.0f) * at, { 0.30f, 0.19f, 0.11f, 0.0f });
+    for (int i = -1; i <= 1; ++i) add(m_cube, XMMatrixScaling(Crops::PLOT_SIZE * 0.92f, 0.03f, 0.1f) * XMMatrixTranslation(0.0f, 0.125f, i * 0.42f) * at, { 0.40f, 0.27f, 0.16f, 0.0f });
+}
+
 void Renderer3D::addChest(const Chest& chest) {
     const ChestStyle::Look look = ChestStyle::look(chest.rarity());
     const float baseH = Chest::HEIGHT * Chest::BASE_RATIO;
