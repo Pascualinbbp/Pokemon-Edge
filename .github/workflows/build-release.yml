@@ -40,6 +40,18 @@ jobs:
         run: |
           $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest es MUCHO más rápido sin barra de progreso
 
+          # Descarga con reintentos: GitHub y otros servidores devuelven a veces errores 5xx pasajeros.
+          function Get-File($uri, $out) {
+              for ($try = 1; $try -le 6; $try++) {
+                  try { Invoke-WebRequest -Uri $uri -OutFile $out -ErrorAction Stop; return }
+                  catch {
+                      Write-Host "[LOG] Intento $try/6 fallido para ${uri}: $($_.Exception.Message.Substring(0, [Math]::Min(120, $_.Exception.Message.Length)))"
+                      if ($try -eq 6) { throw }
+                      Start-Sleep -Seconds (5 * $try)
+                  }
+              }
+          }
+
           if (-not (Test-Path "dependencies.json")) { throw "dependencies.json no existe en la raíz." }
           $dep = Get-Content dependencies.json -Raw | ConvertFrom-Json
 
@@ -58,12 +70,12 @@ jobs:
               Write-Host "[LOG] Archivo: $($f.url) -> $($f.dest)"
               $dir = Split-Path $f.dest
               if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-              Invoke-WebRequest -Uri $f.url -OutFile $f.dest
+              Get-File $f.url $f.dest
           }
 
           foreach ($z in $dep.zips) {
               Write-Host "[LOG] ZIP: $($z.url)"
-              Invoke-WebRequest -Uri $z.url -OutFile "temp_dl.zip"
+              Get-File $z.url "temp_dl.zip"
               Expand-Archive -Path "temp_dl.zip" -DestinationPath $z.extract_path -Force
               Copy-Mappings $z.mappings
               Remove-Item "temp_dl.zip" -Force
@@ -95,7 +107,7 @@ jobs:
           $psql = (Get-Command psql -ErrorAction SilentlyContinue).Source
           if (-not $psql) { $psql = (Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName }
           if (-not $psql) { throw "No se encontró psql en el runner." }
-          Invoke-WebRequest -Uri "https://www.sqlite.org/2024/sqlite-tools-win-x64-3460000.zip" -OutFile "sqlite-tools.zip"
+          Get-File "https://www.sqlite.org/2024/sqlite-tools-win-x64-3460000.zip" "sqlite-tools.zip"
           Expand-Archive -Path "sqlite-tools.zip" -DestinationPath "sqlite-tools" -Force
           $sqlite = (Get-ChildItem "sqlite-tools" -Recurse -Filter sqlite3.exe | Select-Object -First 1).FullName
 
