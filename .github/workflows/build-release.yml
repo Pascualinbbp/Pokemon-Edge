@@ -103,6 +103,18 @@ jobs:
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $env:PGCLIENTENCODING = "UTF8"
 
+          # Descarga con reintentos: los servidores devuelven a veces errores 5xx pasajeros.
+          function Get-File($uri, $out) {
+              for ($try = 1; $try -le 6; $try++) {
+                  try { Invoke-WebRequest -Uri $uri -OutFile $out -ErrorAction Stop; return }
+                  catch {
+                      Write-Host "[LOG] Intento $try/6 fallido para ${uri}: $($_.Exception.Message.Substring(0, [Math]::Min(120, $_.Exception.Message.Length)))"
+                      if ($try -eq 6) { throw }
+                      Start-Sleep -Seconds (5 * $try)
+                  }
+              }
+          }
+
           # psql viene en la imagen de Windows de GitHub; sqlite3 se descarga (herramientas oficiales).
           $psql = (Get-Command psql -ErrorAction SilentlyContinue).Source
           if (-not $psql) { $psql = (Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName }
