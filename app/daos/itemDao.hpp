@@ -11,7 +11,7 @@ class ItemDao {
     public:
     void load(GameData& data) const {
         for (const auto& row : SqliteUtil::executeSelect(SELECT_CATEGORIES)) {
-            data.categories.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), -1 });
+            data.categories.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::text(row, "section").empty() ? "Otros" : DaoRow::text(row, "section"), -1 });
         }
         for (const auto& row : SqliteUtil::executeSelect(SELECT_ITEMS)) addItem(data, row);
         if (data.items.empty()) Logger::logError("ITEM_DAO", "Las tablas de objetos no existen o están vacías.");
@@ -69,5 +69,5 @@ class ItemDao {
         "SELECT i.id, i.name, i.description, i.category_id, c.name AS category, i.buy_price, i.sell_price, i.gift_every, i.gift_reward_id, "
         "e.kind, e.type_id, e.multiplier, e.shiny_multiplier, e.amount, e.color "
         "FROM item i JOIN category c ON c.id = i.category_id LEFT JOIN effect e ON e.id = i.effect_id ORDER BY i.id;";
-    static constexpr const char* SELECT_CATEGORIES = "SELECT id, name FROM category ORDER BY id;";
+    static constexpr const char* SELECT_CATEGORIES = "SELECT id, name, section FROM category ORDER BY id;";
 };

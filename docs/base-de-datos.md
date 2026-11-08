@@ -50,3 +50,7 @@ assets/
 ## Cambiar la base de datos
 
 `neon_cambios.sql` migra una base antigua a este esquema en una sola sentencia `DO $$ … $$;` (ejecutar en el editor SQL de Neon con **Run**). Si ya está migrada no hace nada.
+
+Mochila: `category.section` agrupa las categorías en apartados (Pokémon, Herramientas, Recursos); la interfaz muestra primero los apartados y debajo las categorías del elegido. Un apartado nuevo basta con escribir su nombre en esa columna.
+
+Parcelas de cultivo: cualquier parcela admite cualquier cultivo; junto a una parcela, Q / E cambia las semillas que se siembran (solo se ofrecen las que se tienen).

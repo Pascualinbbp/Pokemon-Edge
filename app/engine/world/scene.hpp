@@ -21,6 +21,7 @@
 #include "rules/captureRules.hpp"
 #include "rules/companionRules.hpp"
 #include "rules/damageRules.hpp"
+#include "rules/deathRules.hpp"
 #include "entities/captureTarget.hpp"
 #include "rules/rewardRules.hpp"
 #include "rules/evRules.hpp"
@@ -156,6 +157,7 @@ struct Scene {
         const bool wheel = updateRadioWheel(dt, input); // con la rueda abierta la mira y el lanzamiento quedan bloqueados
         if (input.ballSwitch != 0 && !wheel) {
             if (m_aiming) inventory.cycle(input.ballSwitch);
+            else if (m_interaction.kind == Interaction::PLOT && availableSeeds().size() > 1) cycleSeed(input.ballSwitch); // junto a una parcela: elige la semilla
             else storage.cycleActive(input.ballSwitch); // fuera del modo captura cambia el pokémon que acompaña
         }
         if (input.modeSwitch) {
@@ -339,6 +341,8 @@ struct Scene {
         GameStatus s;
         s.aimBlend = camera.aimBlend();
         s.loading = loadingFade();
+        s.deathTitle = &m_deathTitle;
+        s.deathDetail = &m_deathDetail;
         s.playerLevel = progress.level();
         s.playerXp = progress.xpFraction();
         s.levelCap = progress.levelCap();
@@ -383,9 +387,9 @@ struct Scene {
             s.interactVerb = CHEST_VERB;
             s.interactTarget = &m_data->chests[chests.entities[m_interaction.index].typeIndex()].name;
         } else if (m_interaction.kind == Interaction::PLOT) {
-            const Crops::Plot& plot = plots[m_interaction.index];
             s.interactVerb = PLANT_VERB;
-            s.interactTarget = &m_data->nodes[nodes[plot.node].typeIndex()].name;
+            const Material* seeds = m_seedCrop >= 0 ? seedMaterial(m_seedCrop) : nullptr;
+            s.interactTarget = seeds ? &seeds->name : &GROUND_NAME;
         } else if (m_interaction.kind == Interaction::NODE) {
             const ResourceNode& node = nodes[m_interaction.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -522,6 +526,7 @@ struct Scene {
                 if (m_castHint) add(PromptAction::INTERACT, "Pescar");
                 break;
         }
+        if (m_interaction.kind == Interaction::PLOT && availableSeeds().size() > 1) add(PromptAction::BALL_SWITCH, "Cambiar de semilla");
     }
 
     // Nombre y nivel sobre cada pokémon visible (los salvajes y el acompañante).
@@ -578,13 +583,15 @@ struct Scene {
         const DirectX::XMFLOAT3& at = player.body.position;
         const bool cloud = habitats.cloudFloor(at.x, at.z, player.body.feet()), bounce = habitats.cloudFloor(at.x, at.z, player.body.feet(), true); // rebota solo en el suelo de nube; en toda la isla no hay daño
         if (bounce && impact >= HealthRules::CLOUD_BOUNCE_MIN) player.body.velocity.y = impact * HealthRules::CLOUD_BOUNCE; // la nube rebota según lo alto que se cayó y cada rebote es menor
-        if (!cloud) health.hurt(HealthRules::fallDamage(impact)); // el suelo de nube no hace daño
-        if (player.drowning()) health.hurt(HealthRules::DROWN_PER_SECOND * dt);
+        if (!cloud) health.hurt(HealthRules::fallDamage(impact), DeathRules::Cause::FALL); // el suelo de nube no hace daño
+        if (player.drowning()) health.hurt(HealthRules::DROWN_PER_SECOND * dt, DeathRules::Cause::DROWN);
         updateBurn(dt);
         updateSpring(dt);
         if (m_respawn <= 0.0f && (health.dead() || storage.teamWiped())) { // desmayado: pantalla de carga y, ya a oscuras, vuelta al inicio
             m_respawn = RESPAWN_TIME;
             m_respawnMoved = false;
+            m_deathTitle = DeathRules::title(health.dead() ? health.lastCause() : DeathRules::Cause::TEAM);
+            m_deathDetail = DeathRules::detail(RESPAWN_PLACE);
             showNotice(Notice::FAINTED);
         }
         if (m_respawn <= 0.0f) return;
@@ -608,7 +615,7 @@ struct Scene {
     void updateBurn(float dt) {
         const DirectX::XMFLOAT3& at = player.body.position;
         if (world.inLava(at.x, at.z, player.body.feet())) {
-            health.hurt(HealthRules::LAVA_PER_SECOND * dt);
+            health.hurt(HealthRules::LAVA_PER_SECOND * dt, DeathRules::Cause::LAVA);
             health.ignite();
         } else if (health.burning() && (player.sliding() || world.waterDepth(at.x, at.z, player.body.feet()) > 0.2f)) {
             health.extinguish();
@@ -626,7 +633,7 @@ struct Scene {
             health.heal(HealthRules::SPRING_HEAL_PER_SECOND * dt);
             healCompanion(HealthRules::SPRING_HEAL_PER_SECOND * 0.01f * dt); // el compañero también se cura en el agua caliente
         }
-        else health.hurt(HealthRules::SPRING_HURT_PER_SECOND * dt);
+        else health.hurt(HealthRules::SPRING_HURT_PER_SECOND * dt, DeathRules::Cause::SPRING);
     }
 
     bool concealsPlayer(const ResourceNode& node) const {
@@ -1267,28 +1274,57 @@ struct Scene {
                 m_missingPos = nodeAnchor(node);
             }
         }
-        for (int i = 0; i < static_cast<int>(plots.size()); ++i) { // parcela vacía y con semillas de su cultivo: se puede sembrar
-            const Crops::Plot& plot = plots[i];
-            if (!nodes[plot.node].gone() || !seedItem(plot.crop) || inventory.count(seedItem(plot.crop)->id) <= 0) continue;
-            const float dx = plot.position.x - player.body.position.x, dz = plot.position.z - player.body.position.z, d2 = dx * dx + dz * dz;
+        if (availableSeeds().empty()) m_seedCrop = -1;
+        else for (int i = 0; i < static_cast<int>(plots.size()); ++i) { // parcela vacía y con alguna semilla: se puede sembrar lo que se elija
+            if (!nodes[plots[i].node].gone()) continue;
+            const float dx = plots[i].position.x - player.body.position.x, dz = plots[i].position.z - player.body.position.z, d2 = dx * dx + dz * dz;
             if (d2 <= Crops::REACH * Crops::REACH && d2 < best) { best = d2; m_interaction = { Interaction::PLOT, i }; }
+        }
+        if (m_interaction.kind == Interaction::PLOT) {
+            const std::vector<int> seeds = availableSeeds();
+            if (std::find(seeds.begin(), seeds.end(), m_seedCrop) == seeds.end()) m_seedCrop = seeds.front();
         }
         if (m_weak) m_interaction = { Interaction::WEAKENED, 0 }; // capturar al debilitado tiene prioridad
     }
 
-    // Semillas de un cultivo (como objeto del inventario).
-    const Item* seedItem(int crop) const {
-        for (const Material& material : m_data->materials) if (material.name == Crops::LIST[crop].seedName) return m_data->materialItem(material.id);
+    // Material de las semillas de un cultivo, y esas semillas como objeto del inventario.
+    const Material* seedMaterial(int crop) const {
+        for (const Material& material : m_data->materials) if (material.name == Crops::LIST[crop].seedName) return &material;
         return nullptr;
+    }
+    const Item* seedItem(int crop) const {
+        const Material* material = seedMaterial(crop);
+        return material ? m_data->materialItem(material->id) : nullptr;
+    }
+
+    // Cultivos de los que el jugador tiene semillas.
+    std::vector<int> availableSeeds() const {
+        std::vector<int> crops;
+        for (int crop = 0; crop < Crops::COUNT; ++crop) {
+            const Item* seeds = seedItem(crop);
+            if (seeds && inventory.count(seeds->id) > 0 && Crops::typeIndexOf(*m_data, crop) >= 0) crops.push_back(crop);
+        }
+        return crops;
+    }
+
+    // Q / E junto a una parcela: cambia las semillas que se van a sembrar.
+    void cycleSeed(int direction) {
+        const std::vector<int> seeds = availableSeeds();
+        if (seeds.size() < 2) return;
+        const auto at = std::find(seeds.begin(), seeds.end(), m_seedCrop);
+        const int index = at == seeds.end() ? 0 : static_cast<int>(at - seeds.begin());
+        m_seedCrop = seeds[(index + (direction > 0 ? 1 : static_cast<int>(seeds.size()) - 1)) % seeds.size()];
     }
 
     void sow(const Crops::Plot& plot) {
-        const Item* seeds = seedItem(plot.crop);
+        const std::vector<int> seeds = availableSeeds();
+        if (std::find(seeds.begin(), seeds.end(), m_seedCrop) == seeds.end()) return;
         ResourceNode& node = nodes[plot.node];
-        if (!seeds || inventory.count(seeds->id) <= 0 || !node.gone()) return;
-        const int typeIndex = node.typeIndex();
+        const Item* item = seedItem(m_seedCrop);
+        if (!node.gone()) return;
+        const int typeIndex = Crops::typeIndexOf(*m_data, m_seedCrop);
         const ResourceNodeType& type = m_data->nodes[typeIndex];
-        inventory.add(seeds->id, -1);
+        inventory.add(item->id, -1);
         node.sow(typeIndex, type.id, type.hits, static_cast<float>(type.growSeconds), RandomUtil::range(0.0f, 6.2831853f));
         player.act(PlayerAction::PICK);
         Sound::emit(Sound::Sfx::PICK, node.body.position);
@@ -1832,10 +1868,13 @@ struct Scene {
     static constexpr float FLOWER_CHECK_SECONDS = 2.0f; // cada cuánto se intenta hacer brotar una flor
     float m_flowerTimer = 0.0f;
     std::vector<float> m_flowerWeights;
+    int m_seedCrop = -1;       // cultivo cuyas semillas se siembran al interactuar con una parcela
     float m_groundTimer = 0.0f; // reloj de aparición de los objetos sueltos del mundo
     float m_clock = 0.0f;       // segundos de partida (marea)
     static constexpr float RESPAWN_TIME = 3.4f; // duración de la pantalla de carga tras desmayarse (s)
     float m_respawn = 0.0f;
+    std::string m_deathTitle, m_deathDetail; // lo que cuenta la pantalla de carga tras desmayarse
+    static constexpr const char* RESPAWN_PLACE = "el punto de inicio"; // pasará a ser el último centro pokémon visitado
     bool m_respawnMoved = false;
     float m_swimLatch = 0.0f;
     float m_swimLogTime = 0.0f;

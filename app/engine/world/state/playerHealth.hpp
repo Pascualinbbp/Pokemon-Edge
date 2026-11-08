@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include "../rules/deathRules.hpp"
 #include "../rules/healthRules.hpp"
 
 // Vida del jugador: el daño la reduce, y tras un rato sin recibirlo se cura sola.
@@ -9,13 +10,16 @@ class PlayerHealth {
     float fraction() const { return m_health / HealthRules::MAX_HEALTH; }
     bool full() const { return m_health >= HealthRules::MAX_HEALTH; }
     bool dead() const { return m_health <= 0.0f; }
+    DeathRules::Cause lastCause() const { return m_cause; }
     // 0..1 mientras dura el destello de dolor.
     float hurtFlash() const { return (std::clamp)(m_flash / HealthRules::HURT_FLASH, 0.0f, 1.0f) * m_power; }
     // 0..1 mientras se está curando (aguas termales, regeneración): la interfaz lo muestra igual que el daño.
     float healFlash() const { return (std::clamp)(m_glow / HealthRules::HEAL_FLASH, 0.0f, 1.0f); }
 
-    void hurt(float amount) {
+    // 'cause': de dónde viene el daño; la última recibida es la de la derrota.
+    void hurt(float amount, DeathRules::Cause cause = DeathRules::Cause::UNKNOWN) {
         if (amount <= 0.0f || dead()) return;
+        m_cause = cause;
         m_health = (std::max)(0.0f, m_health - amount);
         m_quiet = 0.0f;
         // Todo daño se ve igual: un golpe fuerte da un destello intenso y el daño continuo (lava, ahogo, quemadura, agua termal) uno suave y constante.
@@ -34,7 +38,7 @@ class PlayerHealth {
         if (glow) m_glow = HealthRules::HEAL_FLASH;
     }
     void update(float dt) {
-        if (m_burn > 0.0f) { m_burn = (std::max)(0.0f, m_burn - dt); hurt(HealthRules::BURN_PER_SECOND * dt); }
+        if (m_burn > 0.0f) { m_burn = (std::max)(0.0f, m_burn - dt); hurt(HealthRules::BURN_PER_SECOND * dt, DeathRules::Cause::BURN); }
         m_flash = (std::max)(0.0f, m_flash - dt);
         m_glow = (std::max)(0.0f, m_glow - dt);
         m_quiet += dt;
@@ -49,4 +53,5 @@ class PlayerHealth {
     float m_power = 1.0f; // intensidad del último daño (0..1)
     float m_glow = 0.0f;  // segundos de brillo de curación que quedan
     float m_burn = 0.0f; // segundos de quemadura que quedan
+    DeathRules::Cause m_cause = DeathRules::Cause::UNKNOWN;
 };

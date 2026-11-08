@@ -5,8 +5,8 @@
 #include "resourceSpawn.hpp"
 #include "../state/researchMachine.hpp"
 
-// Parcelas de cultivo junto al punto de partida: tres zonas (zanahoria, fresa y trigo) de cuatro parcelas. Cada parcela es un ResourceNode vacío que
-// se siembra con las semillas de su cultivo (no hay que arar: el suelo ya está preparado). El cultivo crece solo y se riega una vez por jugador y por
+// Parcelas de cultivo junto al punto de partida: tres zonas de cuatro parcelas. Cualquier parcela admite cualquier cultivo: el jugador elige qué semillas
+// sembrar. Cada parcela es un ResourceNode vacío (no hay que arar: el suelo ya está preparado). El cultivo crece solo y se riega una vez por jugador y por
 // pokémon (ver ResourceNode); recogido, la parcela vuelve a quedar libre para sembrar.
 namespace Crops {
     struct Crop { int nodeId; const char* seedName; }; // nodo del cultivo (tabla resource_node) y material de sus semillas (tabla material)
@@ -21,11 +21,16 @@ namespace Crops {
     struct Plot {
         DirectX::XMFLOAT3 position{};
         int node = -1;  // índice en Scene::nodes
-        int crop = 0;   // índice en LIST
     };
 
     inline int cropOf(int nodeId) {
         for (int i = 0; i < COUNT; ++i) if (LIST[i].nodeId == nodeId) return i;
+        return -1;
+    }
+
+    // Índice en data.nodes del nodo de un cultivo (-1 si la base de datos no lo tiene).
+    inline int typeIndexOf(const GameData& data, int crop) {
+        for (size_t i = 0; i < data.nodes.size(); ++i) if (data.nodes[i].id == LIST[crop].nodeId) return static_cast<int>(i);
         return -1;
     }
 
@@ -34,9 +39,8 @@ namespace Crops {
         std::vector<Plot> plots;
         const float away = std::atan2(ResearchMachine::POSITION.z, ResearchMachine::POSITION.x) + 1.0472f;
         for (int zone = 0; zone < COUNT; ++zone) {
-            int typeIndex = -1;
-            for (size_t i = 0; i < data.nodes.size(); ++i) if (data.nodes[i].id == LIST[zone].nodeId) typeIndex = static_cast<int>(i);
-            if (typeIndex < 0) continue; // la base de datos aún no tiene este cultivo
+            const int typeIndex = typeIndexOf(data, 0); // el tipo real lo fija la siembra (Plot vacío)
+            if (typeIndex < 0) continue; // la base de datos aún no tiene los cultivos
             const float angle = away + zone * 2.0944f;
             const float cx = std::cos(angle) * ZONE_DISTANCE, cz = std::sin(angle) * ZONE_DISTANCE;
             for (int k = 0; k < PLOTS_PER_ZONE; ++k) {
@@ -45,7 +49,7 @@ namespace Crops {
                 nodes.emplace_back(typeIndex, type.id, type.hits, true, static_cast<float>(type.growSeconds), 0.0f,
                                    DirectX::XMFLOAT3{ x, ResourceSpawn::seat(world, x, z, PLOT_SIZE * 0.5f), z }, 0.0f, true, true);
                 nodes.back().makePlot();
-                plots.push_back({ { x, nodes.back().body.position.y, z }, static_cast<int>(nodes.size()) - 1, zone });
+                plots.push_back({ { x, nodes.back().body.position.y, z }, static_cast<int>(nodes.size()) - 1 });
             }
         }
         return plots;

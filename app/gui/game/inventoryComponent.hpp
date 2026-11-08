@@ -22,7 +22,8 @@
 namespace InventoryComponent {
     namespace detail {
         inline constexpr float MARGIN = 48.0f;
-        inline constexpr float TAB_SIZE = 60.0f;
+        inline constexpr float TAB_SIZE = 52.0f;
+        inline constexpr float SECTION_HEIGHT = 36.0f;
         inline constexpr float DETAIL_WIDTH = 400.0f;
         inline constexpr float TILE_WIDTH = 96.0f;
         inline constexpr float TILE_HEIGHT = 108.0f;
@@ -52,25 +53,61 @@ namespace InventoryComponent {
             ImGui::PopStyleColor();
         }
 
-        inline void drawTabs(const GameData& data, const ImVec2& origin) {
+        // Orden de la mochila: las categorías agrupadas por apartado (en el orden en que aparece cada apartado) y por id dentro de cada uno.
+        inline std::vector<int> order(const GameData& data) {
+            std::vector<std::string> sections;
+            for (const ItemCategoryInfo& category : data.categories) if (std::find(sections.begin(), sections.end(), category.section) == sections.end()) sections.push_back(category.section);
+            std::vector<int> list;
+            for (const std::string& section : sections) {
+                for (size_t i = 0; i < data.categories.size(); ++i) if (data.categories[i].section == section) list.push_back(static_cast<int>(i));
+            }
+            return list;
+        }
+
+        // Fila superior: los apartados (una pastilla cada uno); debajo, las categorías del apartado elegido (la elegida con su nombre, el resto solo con el icono).
+        inline void drawTabs(const GameData& data, const ImVec2& origin, float width) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            for (size_t i = 0; i < data.categories.size(); ++i) {
-                const ImVec2 a(origin.x, origin.y + static_cast<float>(i) * (TAB_SIZE + GAP));
-                ImGui::SetCursorScreenPos(a);
-                ImGui::PushID(static_cast<int>(i));
-                if (ImGui::InvisibleButton("##tab", ImVec2(TAB_SIZE, TAB_SIZE))) {
-                    tab = static_cast<int>(i);
-                    selectedItem = -1;
-                }
+            const std::vector<int> sequence = order(data);
+            const std::string& current = data.categories[tab].section;
+
+            float x = origin.x;
+            std::vector<std::string> done;
+            for (const int index : sequence) {
+                const std::string& section = data.categories[index].section;
+                if (std::find(done.begin(), done.end(), section) != done.end()) continue;
+                done.push_back(section);
+                const float w = GuiCards::textWidth(section.c_str(), 1.0f) + 36.0f;
+                ImGui::SetCursorScreenPos(ImVec2(x, origin.y));
+                ImGui::PushID(static_cast<int>(done.size()) + 500);
+                const bool clicked = ImGui::InvisibleButton("##section", ImVec2(w, SECTION_HEIGHT));
                 const bool hovered = ImGui::IsItemHovered();
                 ImGui::PopID();
+                const bool selected = section == current;
+                dl->AddRectFilled(ImVec2(x, origin.y), ImVec2(x + w, origin.y + SECTION_HEIGHT), selected ? GuiStyle::ACCENT : (hovered ? IM_COL32(60, 60, 78, 255) : GuiStyle::SURFACE), SECTION_HEIGHT * 0.5f);
+                GuiCards::centeredText(dl, ImVec2(x + w * 0.5f, origin.y + SECTION_HEIGHT * 0.5f), IM_COL32(255, 255, 255, selected ? 255 : 190), section.c_str(), 1.0f);
+                if (clicked && !selected) { tab = index; selectedItem = -1; }
+                x += w + 10.0f;
+            }
 
-                const bool selected = static_cast<int>(i) == tab;
-                const ImVec2 c(a.x + TAB_SIZE * 0.5f, a.y + TAB_SIZE * 0.5f);
-                dl->AddCircleFilled(c, TAB_SIZE * 0.5f, selected ? GuiStyle::ACCENT : (hovered ? IM_COL32(60, 60, 78, 255) : GuiStyle::SURFACE), 40);
-                if (selected) dl->AddCircle(c, TAB_SIZE * 0.5f + 3.0f, GuiCards::SELECT, 40, 2.0f);
-                if (const Item* icon = data.item(data.categories[i].iconItemId)) ItemIcon::item(dl, c, TAB_SIZE * 0.3f, *icon, data);
-                if (hovered) ImGui::SetTooltip("%s", data.categories[i].name.c_str());
+            x = origin.x;
+            const float y = origin.y + SECTION_HEIGHT + 12.0f;
+            for (const int index : sequence) {
+                if (data.categories[index].section != current) continue;
+                const ItemCategoryInfo& category = data.categories[index];
+                const bool selected = index == tab;
+                const float w = selected ? TAB_SIZE + GuiCards::textWidth(category.name.c_str(), 1.0f) + 22.0f : TAB_SIZE;
+                if (x + w > origin.x + width) break;
+                ImGui::SetCursorScreenPos(ImVec2(x, y));
+                ImGui::PushID(index + 1000);
+                if (ImGui::InvisibleButton("##tab", ImVec2(w, TAB_SIZE))) { tab = index; selectedItem = -1; }
+                const bool hovered = ImGui::IsItemHovered();
+                ImGui::PopID();
+                dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + TAB_SIZE), selected ? GuiStyle::ACCENT : (hovered ? IM_COL32(60, 60, 78, 255) : GuiStyle::SURFACE), TAB_SIZE * 0.5f);
+                if (selected) dl->AddRect(ImVec2(x - 2.0f, y - 2.0f), ImVec2(x + w + 2.0f, y + TAB_SIZE + 2.0f), GuiCards::SELECT, TAB_SIZE * 0.5f + 2.0f, 0, 2.0f);
+                if (const Item* icon = data.item(category.iconItemId)) ItemIcon::item(dl, ImVec2(x + TAB_SIZE * 0.5f, y + TAB_SIZE * 0.5f), TAB_SIZE * 0.3f, *icon, data);
+                if (selected) GuiCards::text(dl, ImVec2(x + TAB_SIZE + 2.0f, y + TAB_SIZE * 0.5f - ImGui::GetFontSize() * 0.5f), IM_COL32(255, 255, 255, 255), category.name.c_str(), 1.0f);
+                else if (hovered) ImGui::SetTooltip("%s", category.name.c_str());
+                x += w + 10.0f;
             }
         }
 
@@ -296,8 +333,12 @@ namespace InventoryComponent {
             return;
         }
         detail::tab = (std::clamp)(detail::tab, 0, categories - 1);
-        if (ImGui::IsKeyPressed(ImGuiKey_Q, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) { detail::tab = (detail::tab + categories - 1) % categories; detail::selectedItem = -1; }
-        if (ImGui::IsKeyPressed(ImGuiKey_E, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) { detail::tab = (detail::tab + 1) % categories; detail::selectedItem = -1; }
+        {
+            const std::vector<int> sequence = detail::order(data); // Q / E recorren las categorías en el orden de la pantalla, pasando de un apartado al siguiente
+            const int at = static_cast<int>(std::find(sequence.begin(), sequence.end(), detail::tab) - sequence.begin());
+            if (ImGui::IsKeyPressed(ImGuiKey_Q, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) { detail::tab = sequence[(at + categories - 1) % categories]; detail::selectedItem = -1; }
+            if (ImGui::IsKeyPressed(ImGuiKey_E, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) { detail::tab = sequence[(at + 1) % categories]; detail::selectedItem = -1; }
+        }
 
         const ImVec2 screen = ImGui::GetIO().DisplaySize;
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -310,10 +351,10 @@ namespace InventoryComponent {
         std::snprintf(money, sizeof(money), "Pokémonedas: %d", inventory.money());
         GuiCards::text(dl, ImVec2(screen.x - detail::MARGIN - GuiCards::textWidth(money, 1.2f), detail::MARGIN - 4.0f), IM_COL32(255, 215, 90, 255), money, 1.2f);
 
-        detail::drawTabs(data, ImVec2(detail::MARGIN, top));
+        const float gridWidth = screen.x - detail::MARGIN * 2.0f - detail::DETAIL_WIDTH - 28.0f;
+        detail::drawTabs(data, ImVec2(detail::MARGIN, top), gridWidth);
 
-        const ImVec2 gridPos(detail::MARGIN + detail::TAB_SIZE + 36.0f, top);
-        const float gridWidth = screen.x - gridPos.x - detail::DETAIL_WIDTH - detail::MARGIN - 28.0f;
+        const ImVec2 gridPos(detail::MARGIN, top + detail::SECTION_HEIGHT + 12.0f + detail::TAB_SIZE + 16.0f);
         const ItemCategoryInfo& category = data.categories[detail::tab];
         const std::vector<detail::Entry> list = detail::entries(inventory, category.id);
 
@@ -324,9 +365,8 @@ namespace InventoryComponent {
             detail::selectedItem = picked->item->id;
         }
 
-        GuiCards::text(dl, gridPos, IM_COL32(255, 255, 255, 255), category.name.c_str(), 1.2f);
-        ImGui::SetCursorScreenPos(ImVec2(gridPos.x, gridPos.y + 34.0f));
-        detail::drawGrid(data, list, ImVec2(gridWidth, height - 34.0f));
+        ImGui::SetCursorScreenPos(gridPos);
+        detail::drawGrid(data, list, ImVec2(gridWidth, top + height - gridPos.y));
 
         detail::drawDetail(data, storage, inventory, progress, picked ? picked->item : nullptr, category.name,
             ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));

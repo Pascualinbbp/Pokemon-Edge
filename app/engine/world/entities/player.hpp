@@ -204,7 +204,7 @@ class Player {
     // Al llegar arriba suelta al jugador con algo de impulso y cae con la física normal. Devuelve si sigue volando.
     bool updateStream(float dt, const Physics::World& world) {
         if (!m_streaming) {
-            const Physics::World::Updraft* found = world.updraftAt(body.position.x, body.position.z);
+            const Physics::World::Updraft* found = world.updraftAt(body.position.x, body.position.z, body.feet());
             if (!found) return false;
             m_streaming = true;
             m_stream = *found;

@@ -505,6 +505,8 @@ namespace PokemonComponent {
                 ImGui::TextUnformatted(message.c_str());
                 ImGui::PopStyleColor();
             }
+            // Los textos de arriba mueven el cursor con SetCursorScreenPos; sin un elemento al final ImGui aborta al cerrar la ventana.
+            ImGui::Dummy(ImVec2(0.0f, 0.0f));
         }
     }
 

@@ -335,22 +335,27 @@ namespace HudComponent {
             }
         }
 
-        // Pantalla de carga al desmayarse: negro con una pokéball que gira y "Cargando...".
-        inline void drawLoading(ImDrawList* dl, float fade) {
+        // Pantalla de carga al desmayarse: negro con la causa, una pokéball que gira (un anillo) y dónde se despierta.
+        inline void drawLoading(ImDrawList* dl, float fade, const std::string* title, const std::string* detail) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
             const int alpha = static_cast<int>(255.0f * (std::clamp)(fade, 0.0f, 1.0f));
             dl->AddRectFilled(ImVec2(0.0f, 0.0f), screen, IM_COL32(6, 8, 14, alpha));
             const float time = static_cast<float>(ImGui::GetTime());
-            const ImVec2 c(screen.x * 0.5f, screen.y * 0.5f - 10.0f);
+            const ImVec2 c(screen.x * 0.5f, screen.y * 0.5f + 6.0f);
             const float r = 26.0f;
             const int a = static_cast<int>(235.0f * fade);
             ringArc(dl, c, r, 0.0f, 1.0f, IM_COL32(255, 255, 255, a / 6), 4.0f);
             const float from = std::fmod(time * 0.9f, 1.0f);
             ringArc(dl, c, r, from, from + 0.28f, IM_COL32(255, 255, 255, a), 4.0f);
-            char text[32];
-            std::snprintf(text, sizeof(text), "Cargando%.*s", static_cast<int>(std::fmod(time * 2.0f, 4.0f)), "...");
-            const ImVec2 size = ImGui::CalcTextSize("Cargando...");
-            dl->AddText(ImVec2(c.x - size.x * 0.5f, c.y + r + 18.0f), IM_COL32(255, 255, 255, a), text);
+            if (title && !title->empty()) {
+                const float scale = 1.7f;
+                const ImVec2 size = ImGui::CalcTextSize(title->c_str());
+                dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * scale, ImVec2(c.x - size.x * scale * 0.5f, c.y - r - 22.0f - ImGui::GetFontSize() * scale), IM_COL32(255, 255, 255, a), title->c_str());
+            }
+            if (detail && !detail->empty()) {
+                const ImVec2 size = ImGui::CalcTextSize(detail->c_str());
+                dl->AddText(ImVec2(c.x - size.x * 0.5f, c.y + r + 20.0f), IM_COL32(190, 195, 210, a), detail->c_str());
+            }
         }
 
         // Nivel del jugador, justo debajo del círculo.
@@ -483,7 +488,7 @@ namespace HudComponent {
         detail::drawWorldPrompts(dl, status, device);
         detail::drawPrompts(dl, status, device);
 
-        if (status.loading > 0.0f) detail::drawLoading(dl, status.loading);
+        if (status.loading > 0.0f) detail::drawLoading(dl, status.loading, status.deathTitle, status.deathDetail);
 
         if (status.notice != Notice::NONE && status.loading <= 0.0f) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;

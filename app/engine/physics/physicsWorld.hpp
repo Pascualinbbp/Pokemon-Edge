@@ -182,8 +182,11 @@ namespace Physics {
             return nullptr;
         }
 
-        // Corriente ascendente que abarca el punto (nullptr = ninguna).
-        const Updraft* updraftAt(float x, float z) const {
+        // Corriente ascendente que abarca el punto (nullptr = ninguna). Solo atrapa desde su base, a ras del mar: quien cae de una isla del cielo
+        // y cruza la columna a media altura no es devuelto a la isla. y = altura de los pies.
+        static constexpr float UPDRAFT_REACH = 14.0f;
+        const Updraft* updraftAt(float x, float z, float y = 0.0f) const {
+            if (y > UPDRAFT_REACH) return nullptr;
             for (const Updraft& u : updrafts) {
                 const float dx = x - u.x, dz = z - u.z;
                 if (dx * dx + dz * dz <= u.radius * u.radius) return &u;
