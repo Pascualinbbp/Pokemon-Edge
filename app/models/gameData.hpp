@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 #include "pokemon/ability.hpp"
+#include "pokemon/move.hpp"
 #include "pokemon/dexReward.hpp"
 #include "pokemon/generation.hpp"
 #include "pokemon/rarity.hpp"
@@ -34,6 +35,8 @@ struct GameData {
     std::vector<Skill> skills;
     std::vector<PokemonSpecies> species;
     std::vector<Ability> abilities;
+    std::vector<Move> moves;
+    std::vector<MoveTag> moveTags;
     std::vector<PokemonType> types;
     TypeChart typeChart;
     std::vector<Rarity> rarities;
@@ -61,6 +64,8 @@ struct GameData {
     const TrainingItem* training(int id) const { return find(trainingItems, id); }
     const HeldItem* held(int id) const { return id < 0 ? nullptr : find(heldItems, id); }
     const Ability* ability(int id) const { return find(abilities, id); }
+    const Move* move(int id) const { return id < 0 ? nullptr : find(moves, id); }
+    const Move* moveByName(const std::string& name) const { for (const Move& m : moves) if (m.name == name) return &m; return nullptr; }
     const PokemonType* type(int id) const { return find(types, id); }
     const Rarity* rarity(int id) const { return find(rarities, id); }
     const Generation* generation(int id) const { return find(generations, id); }

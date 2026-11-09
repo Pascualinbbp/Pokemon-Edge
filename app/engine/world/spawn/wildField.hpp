@@ -108,6 +108,14 @@ class WildField {
             }
         }
 
+        if (m_foeActive) { // el pokémon de un entrenador en duelo: fuera de los chunks, siempre presente hasta que cae
+            if (m_foe.gone()) m_foeActive = false;
+            else {
+                m_foe.fade(dt, true);
+                if (m_foe.shown()) m_loaded.push_back(&m_foe);
+            }
+        }
+
         if (m_hookActive) {
             if (m_hooked.gone()) m_hookActive = false; // capturado o ido
             else {
@@ -117,7 +125,18 @@ class WildField {
         }
     }
 
-    WildField() { m_hooked.discard(); }
+    WildField() { m_hooked.discard(); m_foe.discard(); }
+
+    // --- Duelo con un entrenador: un único pokémon rival, fuera de los chunks ---
+    void spawnFoe(float x, float y, float z, float yaw, int speciesIndex, int speciesId, int level) {
+        m_foe.place(x, y, z, yaw);
+        m_foe.setSpecies(speciesIndex, speciesId, level, false);
+        m_foeActive = true;
+    }
+    void dismissFoe() { m_foeActive = false; m_foe.discard(); }
+    bool foeActive() const { return m_foeActive; }
+    CaptureTarget* foe() { return m_foeActive ? &m_foe : nullptr; }
+    bool foeDefeated() const { return m_foeActive && m_foe.gone(); }
 
     // --- Pesca: un único pokémon picado, fuera de los chunks ---
     // Hace picar a un pokémon en el punto del agua (lo elige 'assign'); false si ahí no pica ninguno.
@@ -150,6 +169,9 @@ class WildField {
 
     static constexpr float DEEP_OUTSIDE_RADIUS = 22.0f; // desde fuera, las galerías solo se pueblan y cargan a esta distancia (junto a la boca)
     bool deepAllowed(float chunkDistance) const { return m_playerUnder || chunkDistance <= DEEP_OUTSIDE_RADIUS; }
+
+    CaptureTarget m_foe;
+    bool m_foeActive = false;
 
     struct Chunk {
         std::vector<CaptureTarget> wilds;

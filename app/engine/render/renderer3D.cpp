@@ -1038,7 +1038,7 @@ void Renderer3D::collect(const Scene& scene) {
     }
 
     const XMFLOAT3& p = scene.player.body.position;
-    addPlayer(scene);
+    if (!scene.battle) addPlayer(scene); // en el combate por turnos solo se ven los pokémon
     const float time = scene.dayCycle.lighting().time;
     m_clock = std::fmod(std::chrono::duration<float>(std::chrono::steady_clock::now() - kStart).count(), 3600.0f);
     addSky(scene, time);
@@ -1063,7 +1063,7 @@ void Renderer3D::collect(const Scene& scene) {
         const float dx = at.x - eye.x, dy = at.y - eye.y, dz = at.z - eye.z;
         petInTheWay = dx * dx + dy * dy + dz * dz < 5.0f * 5.0f;
     }
-    if (scene.companion.active() && !petInTheWay) {
+    if (scene.companion.active() && !petInTheWay && !scene.battle) {
         const Companion& pet = scene.companion;
         const float size = Companion::SIZE * pet.scale() * pet.evolveScale();
         if (size > 0.001f) {
@@ -1098,6 +1098,8 @@ void Renderer3D::collect(const Scene& scene) {
     addFootprints(scene);
     addMachine();
     addProfessor(scene);
+    addTrainers(scene);
+    if (scene.battle) addBattle(scene);
 
     for (const Pokeball& ball : scene.balls) addBall(ball);
 }
@@ -1653,6 +1655,52 @@ void Renderer3D::addProfessor(const Scene& scene) {
     part({ 0.33f, 0.12f, 0.33f }, { 0.0f, 1.83f, -0.02f }, hair);                  // pelo
 }
 
+// Entrenadores de prueba: como el profesor (cubos), con la ropa de su color, siempre mirando al jugador.
+void Renderer3D::addTrainers(const Scene& scene) {
+    const XMFLOAT3& you = scene.player.body.position;
+    for (const Trainer& trainer : scene.trainers) {
+        const XMFLOAT3& p = trainer.body.position;
+        const XMMATRIX place = XMMatrixRotationY(trainer.yawToward(you.x, you.z)) * XMMatrixTranslation(p.x, p.y, p.z);
+        const auto part = [&](const XMFLOAT3& size, const XMFLOAT3& at, const XMFLOAT3& color) {
+            add(m_cube, XMMatrixScaling(size.x, size.y, size.z) * XMMatrixTranslation(at.x, at.y, at.z) * place, { color.x, color.y, color.z, 0.0f });
+        };
+        const XMFLOAT3 skin = { 0.93f, 0.76f, 0.60f }, pants = { 0.22f, 0.24f, 0.32f }, hat = { trainer.outfit.x * 0.7f, trainer.outfit.y * 0.7f, trainer.outfit.z * 0.7f };
+        part({ 0.17f, 0.80f, 0.20f }, { 0.12f, 0.40f, 0.0f }, pants);
+        part({ 0.17f, 0.80f, 0.20f }, { -0.12f, 0.40f, 0.0f }, pants);
+        part({ 0.50f, 0.66f, 0.28f }, { 0.0f, 1.13f, 0.0f }, trainer.outfit);          // chaqueta
+        part({ 0.14f, 0.60f, 0.16f }, { 0.33f, 1.10f, 0.0f }, trainer.outfit);          // brazos
+        part({ 0.14f, 0.60f, 0.16f }, { -0.33f, 1.10f, 0.0f }, trainer.outfit);
+        part({ 0.30f, 0.30f, 0.30f }, { 0.0f, 1.63f, 0.0f }, skin);                     // cabeza
+        part({ 0.34f, 0.12f, 0.34f }, { 0.0f, 1.82f, 0.0f }, hat);                      // gorra
+        part({ 0.34f, 0.05f, 0.16f }, { 0.0f, 1.76f, 0.22f }, hat);                     // visera
+    }
+}
+
+// Combate por turnos: los dos pokémon frente a frente (con la embestida del que ataca, el temblor del que recibe y el destello del golpe).
+void Renderer3D::addBattle(const Scene& scene) {
+    const Battle& battle = *scene.battle;
+    const float size = Companion::SIZE * 1.15f;
+    for (int side = 0; side < 2; ++side) {
+        const Battle::Fighter& f = battle.fighter(side);
+        const Battle::Message* shown = battle.hasMessage() ? &battle.front() : nullptr;
+        const int hp = shown ? shown->hp[side] : f.hp;
+        const int species = shown ? shown->speciesId[side] : f.speciesId;
+        if (hp <= 0 && !(scene.battleFx.attacker == side)) continue; // el debilitado desaparece
+        const XMFLOAT3 spot = scene.battleSpot(side), off = scene.battleOffset(side);
+        const float yaw = scene.battleYaw() + (side == 0 ? 0.0f : 3.14159265f);
+        addCreature({ spot.x + off.x, spot.y + size * 0.5f, spot.z + off.z }, size, yaw, species, shown ? shown->shiny[side] : f.shiny);
+    }
+    const Scene::BattleFx& fx = scene.battleFx;
+    if (fx.attacker >= 0 && fx.hit && fx.time > 0.2f && fx.time < 0.6f) {
+        const int defender = 1 - fx.attacker;
+        int r = 255, g = 255, b = 255;
+        if (battle.hasMessage() && battle.front().moveType >= 0) PokemonStyle::typeRgb(battle.front().moveType, r, g, b);
+        const float t = (fx.time - 0.2f) / 0.4f, k = size * (0.6f + 1.4f * t), fade = 1.0f - t;
+        const XMFLOAT3 at = scene.battleSpot(defender);
+        add(m_sphere, XMMatrixScaling(k, k, k) * XMMatrixTranslation(at.x, at.y + size * 0.5f, at.z), { r / 255.0f, g / 255.0f, b / 255.0f, 1.0f * fade }, false, DrawKind::GLOW);
+    }
+}
+
 void Renderer3D::addMachine() {
     const XMMATRIX place = XMMatrixRotationY(ResearchMachine::YAW) *
                            XMMatrixTranslation(ResearchMachine::POSITION.x, ResearchMachine::POSITION.y, ResearchMachine::POSITION.z);
@@ -1683,6 +1731,15 @@ void Renderer3D::addChest(const Chest& chest) {
     const float s = chest.scale();
     const XMMATRIX place = XMMatrixScaling(s, s, s) * XMMatrixRotationY(chest.yaw()) * XMMatrixTranslation(p.x, p.y, p.z);
 
+    // Modelo .glb del cofre (base "fixed" y tapa "movable" con su bisagra): ajustado al tamaño de la física, apoyado en el suelo. Sin archivo, cubos.
+    const ChestModel& model = chestModel(look.model);
+    if (model.model) {
+        const XMFLOAT3 c = model.model->center();
+        const float k = Chest::HEIGHT / (std::max)(0.001f, model.model->height());
+        ModelPose pose;
+        pose.set(model.lid, chest.lidAngle() / Chest::LID_ANGLE);
+        addModel(*model.model, XMMatrixTranslation(-c.x, -model.model->boundsMin.y, -c.z) * XMMatrixScaling(k, k, k) * place, { 1.0f, 1.0f, 1.0f, look.glow * 0.5f }, pose);
+    } else {
     add(m_cube, XMMatrixScaling(Chest::WIDTH, baseH, Chest::DEPTH) * XMMatrixTranslation(0.0f, baseH * 0.5f, 0.0f) * place,
         { ChestStyle::BODY.x, ChestStyle::BODY.y, ChestStyle::BODY.z, 0.0f });
     add(m_cube, XMMatrixScaling(0.16f, 0.2f, 0.06f) * XMMatrixTranslation(0.0f, baseH, Chest::DEPTH * 0.5f) * place,
@@ -1692,6 +1749,7 @@ void Renderer3D::addChest(const Chest& chest) {
     add(m_cube, XMMatrixScaling(Chest::WIDTH, lidH, Chest::DEPTH) * XMMatrixTranslation(0.0f, lidH * 0.5f, Chest::DEPTH * 0.5f) *
         XMMatrixRotationX(-chest.lidAngle()) * XMMatrixTranslation(0.0f, baseH, -Chest::DEPTH * 0.5f) * place,
         { look.lid.x, look.lid.y, look.lid.z, look.glow });
+    }
 
     for (int i = 0; i < look.sparkles; ++i) {
         XMFLOAT3 position;
@@ -1702,6 +1760,16 @@ void Renderer3D::addChest(const Chest& chest) {
                 { look.lid.x * 0.5f + 0.5f, look.lid.y * 0.5f + 0.5f, look.lid.z * 0.5f + 0.5f, 1.0f }, false);
         }
     }
+}
+
+// Modelo de un cofre (ChestStyle::look): se carga una vez; model = nullptr si falta el archivo.
+const Renderer3D::ChestModel& Renderer3D::chestModel(const char* name) {
+    const auto found = m_chestModels.find(name);
+    if (found != m_chestModels.end()) return found->second;
+    ChestModel entry;
+    entry.model = m_models.get(m_device, name, false);
+    entry.lid = entry.model ? entry.model->part(ChestStyle::LID_PART) : -1;
+    return m_chestModels[name] = entry;
 }
 
 // Modelo de la pokéball de un tipo: el de su aspecto (PokeballStyle::look), o el de la Poké Ball si falta el archivo. Se carga una vez.
@@ -2024,6 +2092,7 @@ void Renderer3D::cleanup() {
     m_draws.clear();
     m_models.clear();
     m_ballModels.clear();
+    m_chestModels.clear();
     m_beam = {};
     m_modelSampler.Reset();
     m_additiveBlend.Reset();

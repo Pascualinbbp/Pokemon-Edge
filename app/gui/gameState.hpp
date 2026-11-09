@@ -17,6 +17,9 @@ enum class GameState {
     STARTER,       // elección del pokémon inicial al empezar una partida nueva
     PLAYER,        // menú del jugador: nivel, medallas (la partida queda congelada)
     RESEARCH,      // máquina de investigación (la partida queda congelada)
+    BATTLE,        // combate por turnos contra un entrenador (la partida queda congelada)
+    LEARN,         // un pokémon quiere aprender un movimiento y ya conoce cuatro
+    SEEDS,         // elección de las semillas que se siembran en una parcela (la partida queda congelada)
     PC,            // PC de la máquina del inicio: único sitio donde se cambian pokémon entre equipo y PC (la partida queda congelada)
     UPDATING       // actualización de la aplicación en curso
 };
@@ -24,7 +27,7 @@ enum class GameState {
 // Estados en los que la escena 3D se dibuja de fondo.
 constexpr bool isInGame(GameState state) {
     return state == GameState::PLAYING || state == GameState::PAUSED || state == GameState::CONTROLS || state == GameState::MAP ||
-           state == GameState::INVENTORY || state == GameState::POKEDEX || state == GameState::TYPES || state == GameState::POKEMON || state == GameState::STARTER || state == GameState::RESEARCH || state == GameState::PC || state == GameState::PLAYER;
+           state == GameState::INVENTORY || state == GameState::POKEDEX || state == GameState::TYPES || state == GameState::POKEMON || state == GameState::STARTER || state == GameState::RESEARCH || state == GameState::PC || state == GameState::PLAYER || state == GameState::SEEDS || state == GameState::BATTLE || state == GameState::LEARN;
 }
 
 // Estados en los que la ventana va en pantalla completa (desde que empieza la carga de la partida).
@@ -34,5 +37,5 @@ constexpr bool isFullscreen(GameState state) {
 
 // Estados que se redibujan continuamente; el resto solo con eventos.
 constexpr bool isAnimated(GameState state) {
-    return state == GameState::TITLE_SCREEN || state == GameState::LOADING || state == GameState::PLAYING || state == GameState::UPDATING || state == GameState::STARTER;
+    return state == GameState::TITLE_SCREEN || state == GameState::LOADING || state == GameState::PLAYING || state == GameState::UPDATING || state == GameState::STARTER || state == GameState::BATTLE;
 }

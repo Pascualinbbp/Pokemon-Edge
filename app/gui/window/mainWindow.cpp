@@ -19,6 +19,9 @@
 #include "../game/pokedexComponent.hpp"
 #include "../game/typeChartComponent.hpp"
 #include "../game/researchComponent.hpp"
+#include "../game/seedComponent.hpp"
+#include "../game/battleComponent.hpp"
+#include "../game/learnComponent.hpp"
 #include "../game/playerComponent.hpp"
 #include "../game/starterComponent.hpp"
 #include "../menus/updateComponent.hpp"
@@ -280,6 +283,23 @@ void MainWindow::run() {
                 StarterComponent::detail::reset();
                 redrawFrames = 2;
                 justPaused = true;
+            } else if (engine.takeSeedRequest()) {
+                g_state = GameState::SEEDS;
+                g_backState = GameState::PLAYING;
+                redrawFrames = 2;
+                justPaused = true;
+            } else if (engine.takeBattleRequest()) {
+                g_state = GameState::BATTLE;
+                g_backState = GameState::PLAYING;
+                BattleComponent::begin();
+                redrawFrames = 2;
+                justPaused = true;
+            } else if (engine.takeLearnRequest()) {
+                g_state = GameState::LEARN;
+                g_backState = GameState::PLAYING;
+                LearnComponent::reset();
+                redrawFrames = 2;
+                justPaused = true;
             } else if (engine.takeResearchRequest()) {
                 g_state = GameState::RESEARCH;
                 g_backState = GameState::PLAYING;
@@ -384,6 +404,15 @@ void MainWindow::run() {
                 break;
             case GameState::RESEARCH:
                 ResearchComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory());
+                break;
+            case GameState::SEEDS:
+                SeedComponent::render(g_state, g_backState, engine);
+                break;
+            case GameState::BATTLE:
+                BattleComponent::render(g_state, engine);
+                break;
+            case GameState::LEARN:
+                LearnComponent::render(g_state, g_backState, engine);
                 break;
             case GameState::PC:
                 PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress(), InputHandler::activeDevice(), true);

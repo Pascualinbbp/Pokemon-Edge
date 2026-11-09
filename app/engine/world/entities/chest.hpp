@@ -11,17 +11,19 @@ namespace ChestStyle {
         DirectX::XMFLOAT3 lid;   // color de la tapa
         float glow;              // brillo propio de la tapa (0 = solo iluminada)
         int sparkles;            // chispas al abrirlo
+        const char* model;       // modelo dentro de assets/models (chests/<id del cofre>); si falta se dibuja con cubos
     };
 
     inline Look look(int rarity) {
         switch (rarity) {
-            case 3: case 4: return { { 0.20f, 0.45f, 0.95f }, 0.15f, 10 }; // raro (id de rarity): azul
-            case 5: case 6: return { { 0.65f, 0.28f, 0.92f }, 0.28f, 16 }; // épico: morado
-            case 7: return { { 0.98f, 0.80f, 0.18f }, 0.55f, 26 };        // legendario: dorado, con mucho brillo
-            default: return { { 0.60f, 0.40f, 0.22f }, 0.00f, 6 };  // común: madera
+            case 3: case 4: return { { 0.20f, 0.45f, 0.95f }, 0.15f, 10, "chests/2" }; // raro (id de rarity): azul
+            case 5: case 6: return { { 0.65f, 0.28f, 0.92f }, 0.28f, 16, "chests/3" }; // épico: morado
+            case 7: return { { 0.98f, 0.80f, 0.18f }, 0.55f, 26, "chests/4" };        // legendario: dorado, con mucho brillo
+            default: return { { 0.60f, 0.40f, 0.22f }, 0.00f, 6, "chests/1" };  // común: madera
         }
     }
 
+    inline constexpr const char* LID_PART = "movable"; // nodo de la tapa en cualquier modelo de cofre (el cuerpo es "fixed")
     inline constexpr DirectX::XMFLOAT3 BODY = { 0.42f, 0.27f, 0.14f };
     inline constexpr DirectX::XMFLOAT3 LOCK = { 0.95f, 0.78f, 0.22f };
 }

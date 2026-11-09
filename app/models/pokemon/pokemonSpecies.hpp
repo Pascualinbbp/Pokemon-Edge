@@ -57,6 +57,7 @@ struct PokemonSpecies {
     int minLevel = 1;         // nivel al aparecer salvaje
     int maxLevel = 1;
     int generationId = -1;    // generación (tabla generation)
+    std::vector<int> learnTags; // etiquetas de aprendizaje (tabla pokemon_learn_tag): movimientos genéricos que puede aprender
     int rarityId = -1;        // rareza (tabla rarity)
     std::vector<Evolution> evolutions; // vacío = no evoluciona
     bool swims = false;       // acuático: solo aparece donde hay agua y se mueve por ella

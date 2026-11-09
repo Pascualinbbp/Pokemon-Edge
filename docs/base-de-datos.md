@@ -18,6 +18,12 @@ Los datos de juego viven en **Neon (PostgreSQL)**. En cada compilación, GitHub 
 | `skill` | `id`, `name`, `description`, `animation` | Habilidad de recolección (talar, picar, regar…) |
 | `resource_node`, `habitat_resource` | | Nodos de recolección y dónde salen |
 | `reward` | `id` (grupo), `kind`, `target_id`, `probability`, `min_quantity`, `max_quantity` | Todas las recompensas. `kind`: `ITEM`, `MATERIAL`, `XP`. Al sortear un grupo sale **una** entrada según su probabilidad |
+| `move` | `id`, `name`, `description`, `type_id`, `class_id`, `pp`, `power`, `accuracy`, `effect_id`, `learn_weight` | Movimientos (potencia/precisión vacías = no daña / no falla; `learn_weight` = probabilidad relativa de que un pokémon lo intente aprender) |
+| `move_class` | `id`, `name` | Clase de movimiento: Físico, Especial, Estado (1:n con `move`) |
+| `move_tag` | `id`, `name`, `priority` | Etiquetas de movimiento (Contacto, Puño, Suelo, Sonido, Mordisco, Prioridad +1/+4). La prioridad de un movimiento es la suma de sus etiquetas |
+| `move_tag_link` | `move_id`, `tag_id` | n:m movimiento–etiqueta |
+| `learn_tag` | `id`, `name` | Etiquetas de aprendizaje (Universal, Ágil...) |
+| `move_learn_tag` / `pokemon_learn_tag` | `move_id`/`pokemon_id`, `learn_tag_id` | Un movimiento con etiquetas de aprendizaje solo lo aprenden los pokémon que comparten alguna (sea cual sea su tipo); sin ellas, solo los de su tipo |
 | `chest` | `id`, `name`, `rarity_id`, `reward_id` | Cofres |
 | `dex_milestone` | `id`, `kind`, `threshold`, `species_id`, `description`, `progress`, `reward_id` | Hitos de la Pokédex (la experiencia que dan está en `reward`) |
 | `generation` | `id`, `name`, `region` | Generación de cada pokémon |
@@ -42,6 +48,7 @@ Cada fila se clasifica por su efecto: `CAPTURE` → `PokeballType`; `HEAL`/`HEAL
 assets/
   sprites/  items/<categoría>/<id>.png · types/<id>.png · weather/<id>.png · radio/<id>.png · ui/
   models/   items/<categoría>/<id>.glb
+            chests/<id del cofre>.glb (nodos "fixed" y "movable" con la bisagra en extras.janus)
   audio/    radio/<id>.mp3 · sfx/*.wav
 ```
 

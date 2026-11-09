@@ -48,6 +48,9 @@
 #include "entities/playerAction.hpp"
 #include "entities/pokeball.hpp"
 #include "state/pokemonStorage.hpp"
+#include "state/battle.hpp"
+#include "entities/trainer.hpp"
+#include <memory>
 #include "spawn/resourceSpawn.hpp"
 #include "spawn/cropField.hpp"
 #include "state/playerHealth.hpp"
@@ -109,7 +112,15 @@ struct Scene {
     ResearchMachine machine;  // máquina de investigación (fija)
     Professor oak;            // Profesor Oak (fijo junto al inicio)
     bool starterRequested = false; // el jugador ha hablado con Oak sin tener pokémon: la interfaz abre la elección del inicial
+    bool seedRequested = false;     // junto a una parcela con varias semillas: la interfaz abre la pantalla de elección
     bool researchRequested = false; // el jugador ha usado la máquina: la interfaz abre su pantalla
+    std::vector<Trainer> trainers;  // entrenadores de prueba junto al inicio
+    std::shared_ptr<Battle> battle; // combate por turnos en curso (nullptr = ninguno)
+    bool battleRequested = false;   // se acaba de empezar un combate por turnos: la interfaz abre su pantalla
+    bool learnRequested = false;    // hay un pokémon con un movimiento esperando decisión: la interfaz abre su pantalla
+    // Animación del combate por turnos: quién ataca (0 jugador, 1 rival), si el golpe llega y el tiempo desde que empezó el mensaje.
+    struct BattleFx { int attacker = -1; bool hit = false; float time = 0.0f; };
+    BattleFx battleFx;
     Companion companion;      // el líder del equipo, que acompaña al jugador y trabaja recursos
     std::string noticeText;   // segunda línea del aviso: recompensa obtenida, pokémon capturado...
 
@@ -134,6 +145,8 @@ struct Scene {
         };
         nodes = ResourceSpawn::generate(gameData, habitats, worldSeed, world);
         plots = Crops::generate(gameData, world, nodes);
+        trainers.push_back(Trainer("Entrenador Rojo", Trainer::Style::REAL_TIME, -1.0f, 10.0f, { 0.85f, 0.2f, 0.2f }));
+        trainers.push_back(Trainer("Entrenador Azul", Trainer::Style::TURN_BASED, -5.0f, 10.0f, { 0.2f, 0.35f, 0.85f }));
         m_home = player.body.position;
         for (const Skill& skill : gameData.skills) if (PlayerActions::parse(skill.animation) == PlayerAction::FISH) m_fishSkill = skill.id;
     }
@@ -157,7 +170,6 @@ struct Scene {
         const bool wheel = updateRadioWheel(dt, input); // con la rueda abierta la mira y el lanzamiento quedan bloqueados
         if (input.ballSwitch != 0 && !wheel) {
             if (m_aiming) inventory.cycle(input.ballSwitch);
-            else if (m_interaction.kind == Interaction::PLOT && availableSeeds().size() > 1) cycleSeed(input.ballSwitch); // junto a una parcela: elige la semilla
             else storage.cycleActive(input.ballSwitch); // fuera del modo captura cambia el pokémon que acompaña
         }
         if (input.modeSwitch) {
@@ -198,6 +210,7 @@ struct Scene {
         for (const ResourceNode& node : nodes) if (!node.gone() && !node.vein() && nearPlayer(node.body.position, PROP_RANGE)) world.props.push_back(node.solid());
         world.props.push_back(machine.solid());
         world.props.push_back(oak.solid());
+        for (const Trainer& trainer : trainers) world.props.push_back(trainer.solid());
 
         player.aiming = m_aiming;
         InputState moveInput = input;
@@ -245,6 +258,8 @@ struct Scene {
         GroundField::update(dt, m_groundTimer, player.body.position.x, player.body.position.z, player.body.underground, *m_data, habitats, world, groundItems.entities);
         updateFruits(dt);
         updateCompanion(dt);
+        updateTrainerDuel(dt);
+        updateLearning();
         updateHeldItems(dt);
         updateForage(dt);
         updateFootprints(dt);
@@ -297,6 +312,7 @@ struct Scene {
     }
 
     DirectX::XMMATRIX getViewMatrix() const {
+        if (battle) return battleView();
         const DirectX::XMFLOAT3 at = camera.focus(player.body.position), full = camera.eye(player.body.position);
         const float feet = player.body.feet();
         const bool inWater = m_swimLatch > 0.0f;
@@ -388,8 +404,9 @@ struct Scene {
             s.interactTarget = &m_data->chests[chests.entities[m_interaction.index].typeIndex()].name;
         } else if (m_interaction.kind == Interaction::PLOT) {
             s.interactVerb = PLANT_VERB;
-            const Material* seeds = m_seedCrop >= 0 ? seedMaterial(m_seedCrop) : nullptr;
-            s.interactTarget = seeds ? &seeds->name : &GROUND_NAME;
+            const std::vector<int> seedCrops = availableSeeds();
+            const Material* seeds = seedCrops.size() == 1 ? seedMaterial(seedCrops.front()) : nullptr;
+            s.interactTarget = seeds ? &seeds->name : &PLOT_NAME;
         } else if (m_interaction.kind == Interaction::NODE) {
             const ResourceNode& node = nodes[m_interaction.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -411,6 +428,9 @@ struct Scene {
         } else if (m_interaction.kind == Interaction::PROFESSOR) {
             s.interactVerb = TALK_VERB;
             s.interactTarget = &PROFESSOR_NAME;
+        } else if (m_interaction.kind == Interaction::TRAINER) {
+            s.interactVerb = FIGHT_VERB;
+            s.interactTarget = &trainers[m_interaction.index].name;
         } else if (m_interaction.kind == Interaction::MACHINE) {
             s.interactVerb = USE_VERB;
             s.interactTarget = &MACHINE_NAME;
@@ -526,7 +546,6 @@ struct Scene {
                 if (m_castHint) add(PromptAction::INTERACT, "Pescar");
                 break;
         }
-        if (m_interaction.kind == Interaction::PLOT && availableSeeds().size() > 1) add(PromptAction::BALL_SWITCH, "Cambiar de semilla");
     }
 
     // Nombre y nivel sobre cada pokémon visible (los salvajes y el acompañante).
@@ -564,6 +583,7 @@ struct Scene {
             case Interaction::FRUIT:   return above(fruits[m_interaction.index].body, 0.7f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
             case Interaction::PROFESSOR: return above(oak.body, Professor::HEIGHT + 0.5f);
+            case Interaction::TRAINER: return above(trainers[m_interaction.index].body, Trainer::HEIGHT + 0.5f);
             case Interaction::WEAKENED: return m_weak ? DirectX::XMFLOAT3{ m_weak->body.position.x, m_weak->body.position.y + CaptureTarget::SIZE + 0.9f, m_weak->body.position.z } : DirectX::XMFLOAT3{};
             default:                   return {};
         }
@@ -939,7 +959,7 @@ struct Scene {
         float best = 1.0e9f;
         const auto distance2 = [&](const DirectX::XMFLOAT3& at) { return Geometry::distance2XZ(at, companion.body.position); };
         const auto inRange = [&](const DirectX::XMFLOAT3& at) { return nearPlayer(at, Companion::SEARCH_RANGE); };
-        const CompanionRules::Mode mode = storage.mode;
+        const CompanionRules::Mode mode = m_duelTrainer >= 0 ? CompanionRules::Mode::BATTLE : storage.mode; // en un duelo siempre pelea
         tickCollectWindow(dt);
         // Lo que ya empezó (un árbol a medio talar, una roca a medio picar) lo termina aunque se cierre la ventana de recolección, pero no encadena el siguiente.
         if (m_taskNode >= 0) {
@@ -1000,7 +1020,7 @@ struct Scene {
         const bool resting = !m_engaged && m_captureRest > 0.0f; // entre combates sigue al jugador
         CaptureTarget* fightTarget = nullptr;
         if (species && mode != CompanionRules::Mode::COLLECT && !resting) {
-            fightTarget = m_engaged ? m_engaged : fightTargetFor(mode);
+            fightTarget = m_engaged ? m_engaged : (m_duelTrainer >= 0 && wild.foe() && wild.foe()->hittable() ? wild.foe() : fightTargetFor(mode));
             m_engaged = fightTarget;
         }
         if (fightTarget) best = distance2(fightTarget->body.position);
@@ -1264,6 +1284,11 @@ struct Scene {
             best = d2;
             m_interaction = { Interaction::PROFESSOR, 0 };
         }
+        for (int i = 0; i < static_cast<int>(trainers.size()); ++i) {
+            if (trainers[i].busy || battle) continue;
+            const float tx = trainers[i].body.position.x - player.body.position.x, tz = trainers[i].body.position.z - player.body.position.z, d2 = tx * tx + tz * tz;
+            if (d2 <= trainers[i].reach() * trainers[i].reach() && d2 < best) { best = d2; m_interaction = { Interaction::TRAINER, i }; }
+        }
         if (const int i = nearestIn(nodes, [](const ResourceNode& n) { return n.canWork(true); }, best); i >= 0) {
             const ResourceNode& node = nodes[i];
             if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
@@ -1280,13 +1305,10 @@ struct Scene {
             const float dx = plots[i].position.x - player.body.position.x, dz = plots[i].position.z - player.body.position.z, d2 = dx * dx + dz * dz;
             if (d2 <= Crops::REACH * Crops::REACH && d2 < best) { best = d2; m_interaction = { Interaction::PLOT, i }; }
         }
-        if (m_interaction.kind == Interaction::PLOT) {
-            const std::vector<int> seeds = availableSeeds();
-            if (std::find(seeds.begin(), seeds.end(), m_seedCrop) == seeds.end()) m_seedCrop = seeds.front();
-        }
         if (m_weak) m_interaction = { Interaction::WEAKENED, 0 }; // capturar al debilitado tiene prioridad
     }
 
+    public:
     // Material de las semillas de un cultivo, y esas semillas como objeto del inventario.
     const Material* seedMaterial(int crop) const {
         for (const Material& material : m_data->materials) if (material.name == Crops::LIST[crop].seedName) return &material;
@@ -1307,15 +1329,27 @@ struct Scene {
         return crops;
     }
 
-    // Q / E junto a una parcela: cambia las semillas que se van a sembrar.
-    void cycleSeed(int direction) {
-        const std::vector<int> seeds = availableSeeds();
-        if (seeds.size() < 2) return;
-        const auto at = std::find(seeds.begin(), seeds.end(), m_seedCrop);
-        const int index = at == seeds.end() ? 0 : static_cast<int>(at - seeds.begin());
-        m_seedCrop = seeds[(index + (direction > 0 ? 1 : static_cast<int>(seeds.size()) - 1)) % seeds.size()];
+    // Semillas que el jugador puede sembrar (para la pantalla de elección).
+    struct SeedChoice { int crop; const Item* item; std::string name; int count; };
+    std::vector<SeedChoice> seedChoices() const {
+        std::vector<SeedChoice> choices;
+        for (const int crop : availableSeeds()) {
+            const Item* item = seedItem(crop);
+            choices.push_back({ crop, item, item->name, inventory.count(item->id) });
+        }
+        return choices;
     }
 
+    // Siembra en la parcela pendiente las semillas elegidas en la pantalla de elección.
+    void plantSeed(int crop) {
+        if (m_pendingPlot >= 0 && m_pendingPlot < static_cast<int>(plots.size())) {
+            m_seedCrop = crop;
+            sow(plots[m_pendingPlot]);
+        }
+        m_pendingPlot = -1;
+    }
+
+    private:
     void sow(const Crops::Plot& plot) {
         const std::vector<int> seeds = availableSeeds();
         if (std::find(seeds.begin(), seeds.end(), m_seedCrop) == seeds.end()) return;
@@ -1356,7 +1390,12 @@ struct Scene {
             if (needsStarter()) starterRequested = true;
             else showNotice(Notice::REWARD, std::string(Professor::NAME) + ": ¡Cuida bien de tu compañero!");
         }
-        else if (m_interaction.kind == Interaction::PLOT) sow(plots[m_interaction.index]);
+        else if (m_interaction.kind == Interaction::TRAINER) startDuel(m_interaction.index);
+        else if (m_interaction.kind == Interaction::PLOT) {
+            const std::vector<int> seeds = availableSeeds();
+            if (seeds.size() == 1) { m_seedCrop = seeds.front(); sow(plots[m_interaction.index]); }
+            else if (seeds.size() > 1) { m_pendingPlot = m_interaction.index; seedRequested = true; } // varias semillas: la interfaz deja elegir
+        }
         else if (m_interaction.kind == Interaction::NODE) {
             ResourceNode& node = nodes[m_interaction.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
@@ -1840,7 +1879,7 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PROFESSOR, WEAKENED, FRUIT, PLOT } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PROFESSOR, WEAKENED, FRUIT, PLOT, TRAINER } kind = NONE;
         int index = -1;
     };
 
@@ -1857,7 +1896,9 @@ struct Scene {
     static constexpr const char* PICK_VERB = "Recoger";
     static constexpr const char* USE_VERB = "Usar";
     static constexpr const char* TALK_VERB = "Hablar con";
+    static constexpr const char* FIGHT_VERB = "Retar a";
     inline static const std::string PROFESSOR_NAME = Professor::NAME;
+    inline static const std::string PLOT_NAME = "Parcela de cultivo";
     inline static const std::string GROUND_NAME = "objeto brillante";
     inline static const std::string MACHINE_NAME = "máquina de investigación";
     static constexpr float CAVE_TEMPERATURE = 12.0f;   // °C dentro de la cueva, la mina y la isla del cielo
@@ -1868,7 +1909,8 @@ struct Scene {
     static constexpr float FLOWER_CHECK_SECONDS = 2.0f; // cada cuánto se intenta hacer brotar una flor
     float m_flowerTimer = 0.0f;
     std::vector<float> m_flowerWeights;
-    int m_seedCrop = -1;       // cultivo cuyas semillas se siembran al interactuar con una parcela
+    int m_seedCrop = -1;       // cultivo cuyas semillas se siembran
+    int m_pendingPlot = -1;    // parcela a la que se siembra cuando se elige la semilla
     float m_groundTimer = 0.0f; // reloj de aparición de los objetos sueltos del mundo
     float m_clock = 0.0f;       // segundos de partida (marea)
     static constexpr float RESPAWN_TIME = 3.4f; // duración de la pantalla de carga tras desmayarse (s)
@@ -1913,6 +1955,171 @@ struct Scene {
     static constexpr float CRITICAL_MULTIPLIER = 1.5f, LEFTOVERS_INTERVAL = 6.0f;
     static constexpr int LIFE_ORB_RECOIL_DIVISOR = 20; // la Vidasfera quita 1/20 de los PS máximos en cada golpe
     float m_healAcc = 0.0f;                            // PS fraccionarios acumulados al curarse poco a poco
+
+    public:
+    // --- Entrenadores ---
+    // Pokémon rival de prueba: una especie al azar del nivel de nuestro líder (o cercano).
+    OwnedPokemon rivalPokemon(int level) const {
+        OwnedPokemon rival;
+        const OwnedPokemon* lead = storage.active();
+        const PokemonSpecies* mine = lead ? m_data->speciesById(lead->speciesId) : nullptr;
+        const PokemonSpecies* species = nullptr;
+        for (int tries = 0; tries < 30 && (!species || (mine && !DamageRules::compute(*m_data, *mine, level, *species, level).lands())); ++tries) { // nunca uno al que el líder no pueda hacer daño
+            species = &m_data->species[static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(m_data->species.size()) - 1))];
+        }
+        rival.speciesId = species->id;
+        rival.level = (std::max)(2, level);
+        storage.ensureMoves(rival);
+        return rival;
+    }
+    int leadLevel() const { const OwnedPokemon* lead = storage.active(); return lead ? lead->level : 5; }
+
+    static BattleRules::OwnedLike likeOf(const OwnedPokemon& o, int source) { return { o.speciesId, o.level, o.shiny, o.hp, o.heldItemId, o.moves, o.pp, o.evs, source }; }
+
+    // Empieza el duelo con un entrenador: en tiempo real (su pokémon sale al mundo y peleamos como contra los salvajes) o por turnos (pantalla propia).
+    void startDuel(int index) {
+        Trainer& trainer = trainers[index];
+        if (battle || m_duelTrainer >= 0 || trainer.busy) return;
+        if (storage.team().empty() || storage.nextUsable() < 0) { showNotice(Notice::REWARD, "Tus pokémon no están en condiciones de combatir"); return; }
+        trainer.busy = true;
+        if (trainer.style == Trainer::Style::REAL_TIME) {
+            m_duelTrainer = index;
+            m_duelLeft = DUEL_POKEMON;
+            showNotice(Notice::REWARD, trainer.name + " quiere combatir");
+            sendDuelPokemon();
+            return;
+        }
+        std::vector<BattleRules::Fighter> mine, foes;
+        for (int i = 0; i < static_cast<int>(storage.team().size()); ++i) mine.push_back(BattleRules::makeFighter(*m_data, likeOf(storage.team()[i], i)));
+        for (int i = 0; i < DUEL_POKEMON; ++i) foes.push_back(BattleRules::makeFighter(*m_data, likeOf(rivalPokemon(leadLevel()), -1)));
+        const OwnedPokemon* lead = storage.active();
+        const int first = lead && !storage.fainted(*lead) ? storage.activeIndex() : storage.nextUsable();
+        battle = std::make_shared<Battle>(*m_data, std::move(mine), first, std::move(foes), trainer.name);
+        m_battleTrainer = index;
+        const DirectX::XMFLOAT3& at = player.body.position;
+        m_battleOrigin = at;
+        m_battleYaw = std::atan2(trainer.body.position.x - at.x, trainer.body.position.z - at.z);
+        battleFx = {};
+        battleRequested = true;
+        player.body.velocity = { 0.0f, 0.0f, 0.0f };
+    }
+
+    // Saca el siguiente pokémon del entrenador de tiempo real junto a él.
+    void sendDuelPokemon() {
+        const Trainer& trainer = trainers[m_duelTrainer];
+        const OwnedPokemon rival = rivalPokemon(leadLevel());
+        const int index = m_data->speciesIndex(rival.speciesId);
+        const DirectX::XMFLOAT3 toPlayer = { player.body.position.x - trainer.body.position.x, 0.0f, player.body.position.z - trainer.body.position.z };
+        const float length = (std::max)(0.01f, std::sqrt(toPlayer.x * toPlayer.x + toPlayer.z * toPlayer.z));
+        const float x = trainer.body.position.x + toPlayer.x / length * 3.0f, z = trainer.body.position.z + toPlayer.z / length * 3.0f;
+        wild.spawnFoe(x, (std::max)(trainer.body.position.y, world.surfaceHeight(x, z)), z, std::atan2(toPlayer.x, toPlayer.z), index, rival.speciesId, rival.level);
+        m_engaged = nullptr;
+    }
+
+    // Duelo en tiempo real: cuando cae su pokémon saca otro; sin más, gana el jugador. Si el jugador cae, se termina.
+    void updateTrainerDuel(float dt) {
+        if (m_duelTrainer < 0) return;
+        if (m_respawn > 0.0f || storage.teamWiped()) { endDuel(false); return; }
+        if (!wild.foeActive()) { // su pokémon ha caído
+            if (!m_duelNext) {
+                if (--m_duelLeft <= 0) { endDuel(true); return; }
+                m_duelNext = true;
+                m_duelPause = DUEL_PAUSE;
+                return;
+            }
+            if ((m_duelPause -= dt) <= 0.0f) { m_duelNext = false; sendDuelPokemon(); }
+        }
+    }
+    void endDuel(bool won) {
+        if (m_duelTrainer < 0) return;
+        Trainer& trainer = trainers[m_duelTrainer];
+        trainer.busy = false;
+        m_duelTrainer = -1;
+        m_duelNext = false;
+        wild.dismissFoe();
+        m_engaged = nullptr;
+        if (won) { inventory.addMoney(DUEL_MONEY); showNotice(Notice::REWARD, "¡Has derrotado a " + trainer.name + "!  +" + std::to_string(DUEL_MONEY) + " pokémonedas"); }
+    }
+
+    // Termina el combate por turnos: PS y PP vuelven a los pokémon del jugador y los que combatieron ganan experiencia si ganó.
+    void finishBattle() {
+        if (!battle) return;
+        for (const BattleRules::Fighter& f : battle->playerTeam()) {
+            OwnedPokemon* owned = storage.mutableAt(true, f.source);
+            if (!owned) continue;
+            owned->hp = f.hp;
+            owned->pp = f.pp;
+        }
+        const bool won = battle->outcome() == Battle::Outcome::WON;
+        if (won) {
+            const int xp = battle->xpEarned();
+            for (const BattleRules::Fighter& f : battle->playerTeam()) {
+                if (!f.participated || f.fainted()) continue;
+                const PokemonStorage::XpResult result = storage.addXp(f.source, xp, progress.levelCap());
+                if (result.levels > 0) showNotice(Notice::LEVEL_UP, f.name + " ¡Nivel " + std::to_string(storage.team()[static_cast<size_t>(f.source)].level) + "!");
+            }
+            inventory.addMoney(DUEL_MONEY);
+            showNotice(Notice::REWARD, "¡Has derrotado a " + battle->foeName() + "!  +" + std::to_string(xp) + " PX, +" + std::to_string(DUEL_MONEY) + " pokémonedas");
+        }
+        if (m_battleTrainer >= 0) trainers[m_battleTrainer].busy = false;
+        m_battleTrainer = -1;
+        battle.reset();
+    }
+
+    // Movimientos nuevos: los aprendidos solos se avisan; los que no caben abren la pantalla de decisión (nunca durante un combate).
+    void updateLearning() {
+        if (battle) return;
+        for (const auto& entry : storage.m_learnedNow) {
+            const PokemonSpecies* species = m_data->speciesById(entry.first);
+            const Move* move = m_data->move(entry.second);
+            if (species && move) showNotice(Notice::REWARD, species->name + " aprendió " + move->name);
+        }
+        storage.m_learnedNow.clear();
+        if (!learnRequested && !battleRequested && storage.pendingLearnRequest().index >= 0) learnRequested = true;
+    }
+
+    // Vista del combate por turnos: detrás de nuestro pokémon, mirando hacia el rival.
+    DirectX::XMFLOAT3 battleSpot(int side) const {
+        const float dx = std::sin(m_battleYaw), dz = std::cos(m_battleYaw);
+        const float distance = side == 0 ? 0.0f : BATTLE_DISTANCE;
+        const float x = m_battleOrigin.x + dx * distance, z = m_battleOrigin.z + dz * distance;
+        return { x, (std::max)(m_battleOrigin.y, world.surfaceHeight(x, z)), z };
+    }
+    // Tiempo y desplazamiento de la embestida del que ataca y el temblor del que recibe (en metros hacia delante y a un lado).
+    DirectX::XMFLOAT3 battleOffset(int side) const {
+        const float t = battleFx.time;
+        const float dx = std::sin(m_battleYaw), dz = std::cos(m_battleYaw);
+        float forward = 0.0f, lateral = 0.0f;
+        if (battleFx.attacker == side) forward = (side == 0 ? 1.0f : -1.0f) * 1.4f * std::sin((std::min)(t / 0.35f, 1.0f) * 3.14159265f);
+        else if (battleFx.attacker >= 0 && battleFx.hit && t > 0.25f && t < 0.75f) lateral = 0.18f * std::sin((t - 0.25f) * 60.0f);
+        return { dx * forward + dz * lateral, 0.0f, dz * forward - dx * lateral };
+    }
+    DirectX::XMMATRIX battleView() const {
+        const DirectX::XMFLOAT3 mine = battleSpot(0), foe = battleSpot(1);
+        const float dx = std::sin(m_battleYaw), dz = std::cos(m_battleYaw);
+        const DirectX::XMFLOAT3 eye = { mine.x - dx * 3.4f - dz * 1.0f, mine.y + 2.1f, mine.z - dz * 3.4f + dx * 1.0f };
+        const DirectX::XMFLOAT3 at = { (mine.x + foe.x * 2.0f) / 3.0f, mine.y + 0.8f, (mine.z + foe.z * 2.0f) / 3.0f };
+        return DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&eye), DirectX::XMLoadFloat3(&at), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
+    }
+    float battleYaw() const { return m_battleYaw; }
+    int battleTrainer() const { return m_battleTrainer; }
+    void advanceBattleFx(float dt) { battleFx.time += dt; }
+    // Empieza la animación de un mensaje del combate (quién ataca y si llega el golpe).
+    void playBattleFx(int attacker, bool hit) { battleFx = { attacker, hit, 0.0f }; }
+
+    private:
+
+    static constexpr int DUEL_POKEMON = 2;
+    static constexpr int DUEL_MONEY = 300;
+    static constexpr float DUEL_PAUSE = 1.5f;
+    static constexpr float BATTLE_DISTANCE = 7.5f;
+    int m_duelTrainer = -1;
+    int m_duelLeft = 0;
+    float m_duelPause = 0.0f;
+    bool m_duelNext = false;
+    int m_battleTrainer = -1;
+    DirectX::XMFLOAT3 m_battleOrigin = {};
+    float m_battleYaw = 0.0f;
     CaptureTarget* m_engaged = nullptr; // salvaje al que el acompañante está atacando ahora
     float m_captureRest = 0.0f; // descanso del acompañante entre ataques en modo captura
     bool m_collecting = false;

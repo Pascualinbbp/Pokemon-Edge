@@ -130,6 +130,8 @@ class Renderer3D {
     void addFootprints(const Scene& scene);
     void addMachine();
     void addProfessor(const Scene& scene);
+    void addTrainers(const Scene& scene);
+    void addBattle(const Scene& scene);
     void addCreature(const DirectX::XMFLOAT3& position, float size, float yaw, int speciesId, bool shiny);
     void setObject(ID3D11DeviceContext* context, DirectX::CXMMATRIX world, DirectX::CXMMATRIX worldViewProj,
         const DirectX::XMFLOAT4& tint) const;
@@ -191,6 +193,9 @@ class Renderer3D {
     struct BallModel { const RenderModel* model = nullptr; int lid = -1; };
     const BallModel& ballModel(int ballType);
     std::unordered_map<std::string, BallModel> m_ballModels;
+    struct ChestModel { const RenderModel* model = nullptr; int lid = -1; };
+    const ChestModel& chestModel(const char* name);
+    std::unordered_map<std::string, ChestModel> m_chestModels;
 
     std::vector<Draw> m_draws; // se reutiliza entre frames
 

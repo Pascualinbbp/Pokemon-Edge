@@ -8,6 +8,7 @@
 #include "dexProgress.hpp"
 #include "../rules/companionRules.hpp"
 #include "../rules/evRules.hpp"
+#include "../rules/moveRules.hpp"
 #include "../rules/pokemonRules.hpp"
 #include "../rules/researchRules.hpp"
 
@@ -24,6 +25,10 @@ struct OwnedPokemon {
     int xp = 0;                     // experiencia hacia el siguiente nivel (no se guarda)
     int hp = -1;                    // PS actuales (-1 = al máximo); 0 = debilitado
     int heldItemId = -1;            // objeto equipable que lleva (id de item; -1 = ninguno)
+    MoveRules::Slots moves = { -1, -1, -1, -1 }; // movimientos que conoce (id de move; -1 = hueco)
+    MoveRules::Slots pp = { -1, -1, -1, -1 };    // PP actuales de cada uno (-1 = al máximo; no se guardan)
+    std::vector<int> unlocked;      // movimientos que ya intentó aprender (aunque no los lleve puestos): no vuelven a salir
+    std::vector<int> pendingLearn;  // movimientos que quiere aprender y esperan la decisión del jugador (no se guarda)
 };
 
 // Resultado de un análisis de la máquina de investigación.
@@ -138,13 +143,14 @@ class PokemonStorage {
     }
     bool teamWiped() const { return !m_team.empty() && nextUsable() < 0; }
     // Centro pokémon: todo el equipo recupera sus PS.
-    void healTeam() { for (OwnedPokemon& owned : m_team) owned.hp = -1; }
+    void healTeam() { for (OwnedPokemon& owned : m_team) { owned.hp = -1; owned.pp = { -1, -1, -1, -1 }; } }
 
     // Un pokémon recién capturado va al equipo y, si está lleno, al PC. Devuelve false si no hay sitio en ninguno.
     bool add(const OwnedPokemon& owned, bool& sentToPc) {
         sentToPc = teamFull();
         OwnedPokemon stored = owned;
         stored.uid = m_nextUid++;
+        ensureMoves(stored);
         markDex(owned.speciesId, DEX_CAUGHT);
         dexProgress.captured(owned.speciesId, owned.shiny, owned.level);
         if (owned.analyzed) if (const PokemonSpecies* species = m_data->speciesById(owned.speciesId)) dexProgress.ranked(owned.speciesId, EvRules::rank(species->stats, owned.evCaps));
@@ -239,6 +245,7 @@ class PokemonStorage {
         ++owned->level;
         if (owned->hp >= 0 && hpBefore > 0) owned->hp = hpBefore + (std::max)(0, maxHp(*owned) - maxBefore); // el aumento de PS máximos también sube los actuales
         dexProgress.leveled(owned->speciesId, owned->level);
+        if (MoveRules::attemptsAt(owned->level)) { const int learned = attemptLearn(*owned); if (learned >= 0 && owned->pendingLearn.empty()) m_learnedNow.push_back({ owned->speciesId, learned }); }
         const PokemonSpecies* species = m_data->speciesById(owned->speciesId);
         const Evolution* evolution = species ? species->levelEvolution(owned->level, RandomUtil::range(0.0f, 1.0f)) : nullptr;
         if (evolution && m_data->speciesById(evolution->toId)) {
@@ -296,6 +303,66 @@ class PokemonStorage {
         if (owned->level >= cap) owned->xp = 0;
         return result;
     }
+
+    // --- Movimientos ---
+    // Intenta aprender uno nuevo (al azar entre los que no ha desbloqueado). Lo desbloquea; si tiene hueco lo equipa, si no queda pendiente de decisión.
+    // Devuelve su id (-1 si ya no queda ninguno).
+    int attemptLearn(OwnedPokemon& owned, bool damagingOnly = false) const {
+        const PokemonSpecies* species = m_data->speciesById(owned.speciesId);
+        if (!species) return -1;
+        std::vector<const Move*> options = MoveRules::pool(*m_data, *species, owned.unlocked);
+        if (damagingOnly) { std::vector<const Move*> hits; for (const Move* move : options) if (move->damaging()) hits.push_back(move); if (!hits.empty()) options = hits; }
+        const int id = MoveRules::roll(options);
+        if (id < 0) return -1;
+        owned.unlocked.push_back(id);
+        const int slot = MoveRules::freeSlot(owned.moves);
+        if (slot >= 0) { owned.moves[slot] = id; owned.pp[slot] = -1; }
+        else owned.pendingLearn.push_back(id);
+        return id;
+    }
+    // Movimientos iniciales de uno recién creado: el primero siempre, y uno más por cada LEARN_EVERY niveles que ya tiene. Los cuatro primeros los lleva
+    // puestos; el resto queda desbloqueado.
+    void ensureMoves(OwnedPokemon& owned) const {
+        if (MoveRules::known(owned.moves) > 0 || !owned.unlocked.empty()) return;
+        for (int i = 0, n = 1 + owned.level / MoveRules::LEARN_EVERY; i < n; ++i) {
+            if (attemptLearn(owned, i == 0) < 0) break; // el primero siempre hace daño
+            owned.pendingLearn.clear(); // los que no caben no preguntan: solo se desbloquean
+        }
+    }
+    int maxPp(const OwnedPokemon& owned, int slot) const { const Move* move = m_data->move(owned.moves[slot]); return move ? move->pp : 0; }
+    int ppOf(const OwnedPokemon& owned, int slot) const { return owned.pp[slot] < 0 ? maxPp(owned, slot) : (std::min)(owned.pp[slot], maxPp(owned, slot)); }
+    // Pone 'moveId' (uno desbloqueado) en el hueco 'slot'; si ya lo llevaba en otro hueco, se intercambian.
+    bool setMove(bool inTeam, int index, int slot, int moveId) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned || slot < 0 || slot >= MoveRules::MAX_KNOWN || !MoveRules::contains(owned->unlocked, moveId)) return false;
+        for (int i = 0; i < MoveRules::MAX_KNOWN; ++i) if (i != slot && owned->moves[i] == moveId) { owned->moves[i] = owned->moves[slot]; owned->pp[i] = -1; }
+        owned->moves[slot] = moveId;
+        owned->pp[slot] = -1;
+        return true;
+    }
+    // Quita el hueco (siempre debe quedar al menos un movimiento).
+    bool clearMove(bool inTeam, int index, int slot) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned || slot < 0 || slot >= MoveRules::MAX_KNOWN || MoveRules::known(owned->moves) <= 1) return false;
+        owned->moves[slot] = -1;
+        return true;
+    }
+    // El primer pokémon (equipo, luego PC) con un movimiento esperando decisión. Devuelve su lugar y el movimiento (-1 si no hay).
+    struct LearnRequest { bool inTeam = true; int index = -1; int moveId = -1; };
+    LearnRequest pendingLearnRequest() const {
+        for (int i = 0; i < static_cast<int>(m_team.size()); ++i) if (!m_team[i].pendingLearn.empty()) return { true, i, m_team[i].pendingLearn.front() };
+        for (int i = 0; i < static_cast<int>(m_pc.size()); ++i) if (!m_pc[i].pendingLearn.empty()) return { false, i, m_pc[i].pendingLearn.front() };
+        return {};
+    }
+    // Resuelve el aprendizaje pendiente: slot >= 0 olvida ese movimiento y aprende el nuevo; -1 lo rechaza (queda desbloqueado, se podrá equipar luego).
+    void resolveLearn(bool inTeam, int index, int slot) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned || owned->pendingLearn.empty()) return;
+        const int id = owned->pendingLearn.front();
+        owned->pendingLearn.erase(owned->pendingLearn.begin());
+        if (slot >= 0 && slot < MoveRules::MAX_KNOWN) { owned->moves[slot] = id; owned->pp[slot] = -1; }
+    }
+    OwnedPokemon* mutableAt(bool inTeam, int index) { return at(inTeam, index); }
 
     // --- Objetos equipables ---
     const HeldItem* heldOf(const OwnedPokemon& owned) const { return m_data->held(owned.heldItemId); }
@@ -448,7 +515,7 @@ class PokemonStorage {
             result.push_back(species->name + SEPARATOR + std::to_string(owned.level) + SEPARATOR + (owned.shiny ? "1" : "0") + SEPARATOR +
                              (ball ? ball->name : std::string()) + SEPARATOR + (owned.analyzed ? "1" : "0") + SEPARATOR +
                              join(owned.evs) + SEPARATOR + join(owned.evCaps) + SEPARATOR + std::to_string(owned.hp) + SEPARATOR +
-                             (held ? held->name : std::string()));
+                             (held ? held->name : std::string()) + SEPARATOR + moveNames(owned.moves) + SEPARATOR + moveNames(owned.unlocked));
         }
         return result;
     }
@@ -478,7 +545,31 @@ class PokemonStorage {
         for (int i = 0; i < BaseStats::COUNT; ++i) owned.evs[i] = (std::min)(owned.evs[i], owned.evCaps[i]);
         owned.hp = field(7).empty() ? -1 : std::atoi(field(7).c_str());
         for (const HeldItem& held : m_data->heldItems) if (!field(8).empty() && held.name == field(8)) owned.heldItemId = held.id;
+        owned.moves = { -1, -1, -1, -1 };
+        { int slot = 0; for (const std::string& name : splitNames(field(9))) if (const Move* move = m_data->moveByName(name)) if (slot < MoveRules::MAX_KNOWN) owned.moves[slot++] = move->id; }
+        for (const std::string& name : splitNames(field(10))) if (const Move* move = m_data->moveByName(name)) owned.unlocked.push_back(move->id);
+        for (const int id : owned.moves) if (id >= 0 && !MoveRules::contains(owned.unlocked, id)) owned.unlocked.push_back(id);
+        ensureMoves(owned);
+        owned.pendingLearn.clear();
         list.push_back(owned);
+    }
+
+    // Nombres de movimiento separados por ';' (los huecos vacíos se omiten).
+    std::string moveNames(const MoveRules::Slots& slots) const { return moveNames(std::vector<int>(slots.begin(), slots.end())); }
+    std::string moveNames(const std::vector<int>& ids) const {
+        std::string text;
+        for (const int id : ids) if (const Move* move = m_data->move(id)) text += (text.empty() ? "" : ";") + move->name;
+        return text;
+    }
+    static std::vector<std::string> splitNames(const std::string& text) {
+        std::vector<std::string> names;
+        for (size_t from = 0; from < text.size();) {
+            const size_t cut = text.find(';', from);
+            names.push_back(text.substr(from, cut == std::string::npos ? std::string::npos : cut - from));
+            if (cut == std::string::npos) break;
+            from = cut + 1;
+        }
+        return names;
     }
 
     const GameData* m_data = &GameData::empty();
@@ -489,4 +580,7 @@ class PokemonStorage {
     bool m_medicinePending = false;
     int m_active = 0;  // índice en el equipo del pokémon que acompaña al jugador
     mutable int m_nextUid = 1;
+    public:
+    // Movimientos aprendidos solos (había hueco) desde la última vez que se vaciaron: la escena los avisa. (especie, movimiento)
+    std::vector<std::pair<int, int>> m_learnedNow;
 };

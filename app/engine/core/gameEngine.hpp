@@ -127,6 +127,23 @@ class GameEngine {
         return requested;
     }
 
+    // true una sola vez cuando el jugador interactúa con una parcela teniendo varias semillas.
+    bool takeSeedRequest() {
+        const bool requested = m_scene.seedRequested;
+        m_scene.seedRequested = false;
+        return requested;
+    }
+    std::vector<Scene::SeedChoice> seedChoices() const { return m_scene.seedChoices(); }
+    void plantSeed(int crop) { m_scene.plantSeed(crop); }
+
+    // Combate por turnos y aprendizaje de movimientos (la interfaz abre su pantalla y la partida queda congelada).
+    bool takeBattleRequest() { const bool requested = m_scene.battleRequested; m_scene.battleRequested = false; return requested; }
+    bool takeLearnRequest() { const bool requested = m_scene.learnRequested; m_scene.learnRequested = false; return requested; }
+    std::shared_ptr<Battle> battle() const { return m_scene.battle; }
+    void battleAdvance(float dt) { m_scene.advanceBattleFx(dt); }
+    void battlePlayFx(int attacker, bool hit) { m_scene.playBattleFx(attacker, hit); }
+    void battleFinish() { m_scene.finishBattle(); }
+
     GameStatus status() const {
         GameStatus s = m_scene.status();
         DirectX::XMStoreFloat4x4(&s.viewProj, m_scene.getViewMatrix() * DirectX::XMLoadFloat4x4(&m_renderer.projection()));

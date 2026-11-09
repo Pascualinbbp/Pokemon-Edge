@@ -13,6 +13,7 @@
 #include "../style/guiStyle.hpp"
 #include "../style/icons/itemIcon.hpp"
 #include "../style/icons/teamCircle.hpp"
+#include "moveEditor.hpp"
 #include "../window/guiInput.hpp"
 #include "../../engine/core/inputDevice.hpp"
 #include "../../engine/world/rules/evRules.hpp"
@@ -63,6 +64,7 @@ namespace PokemonComponent {
         inline int typeFilter = -1;              // índice en data.types (-1 = todos)
         inline int rankFilter = -1;              // potencial mínimo (-1 = todos)
         inline bool shinyFilter = false;
+        inline bool editingMoves = false;        // editor de movimientos abierto para el pokémon seleccionado
 
         inline void select(const Place& place) {
             selection = place;
@@ -471,6 +473,9 @@ namespace PokemonComponent {
                 }
             }
 
+            ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 132.0f, pos.y + headerHeight - 30.0f));
+            if (GuiCards::button("##moves", "MOVIMIENTOS", ImVec2(116.0f, 24.0f), true, IM_COL32(200, 70, 50, 255))) { editingMoves = true; MoveEditor::reset(); }
+
             const float left = pos.x + 16.0f, width = size.x - 32.0f;
             float y = pos.y + headerHeight + 10.0f;
             const bool compact = size.y < 640.0f;
@@ -549,6 +554,10 @@ namespace PokemonComponent {
         detail::drawHeld(data, storage);
         detail::finishDrag(storage);
 
+        if (detail::editingMoves) {
+            if (!MoveEditor::render(data, storage, detail::selection.inTeam, detail::selection.index)) detail::editingMoves = false;
+            return; // el editor se queda con ESC y los clics este fotograma
+        }
         if (GuiInput::backPressed()) {
             if (detail::held.active) detail::held.active = false;
             else state = back;
