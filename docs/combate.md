@@ -6,3 +6,12 @@
 - **Orden:** cambio de pokémon > prioridad (etiquetas) > Garra rápida > velocidad (parálisis x0,5) > azar.
 - **Combate (`Battle`):** 1 contra 1 con cambios; sin PP usa Forcejeo; el rival elige por daño esperado. Los mensajes del turno se reproducen uno a uno (`BattleComponent`).
 - **Entrenadores de prueba** (junto al inicio): Rojo = duelo en tiempo real (su pokémon sale al mundo, como un salvaje); Azul = combate por turnos (carga, cámara tras tu pokémon, sin movimiento).
+
+## Zona de combate por turnos
+Círculo en el suelo (`Scene::ARENA_*`, centro al sur de los entrenadores). Al empezar, durante la pantalla de carga, el entrenador y el jugador caminan hasta puntos opuestos del borde (por fuera) y los pokémon pelean en medio; al terminar vuelven a donde estaban. Sale siempre el primer pokémon del equipo no debilitado. El cuadro de cada combatiente muestra tipos, estado y cambios de estadística (ATQ +2...); al subir/bajar una estadística o activarse una habilidad aparece un aviso flotante y aros luminosos en 3D. Los movimientos muestran su eficacia contra el rival (supereficaz, hipereficaz, poco eficaz, muy poco eficaz, no afecta).
+
+## Tienda
+El Tendero (junto al inicio) abre la tienda: vende los objetos del apartado «Pokémon» con `buy_price > 0` (un precio 0 los excluye: Honor Ball, Starter Ball, Shiny Ball) y compra lo que tenga `sell_price > 0`. Regalos por compra: `item.gift_every` / `gift_reward_id`.
+
+## Coco
+`assets/models/fruits/coconut.glb` (nodos `mitad_a` y `mitad_b`). Un coco puede partirse al caer del árbol (12 %) o cuando un pokémon se lo come; cada mitad es un cuerpo físico propio y desaparece sola o al comerla. Sonido: `assets/audio/sfx/coconut_break.wav`.

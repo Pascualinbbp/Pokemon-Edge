@@ -20,6 +20,7 @@
 #include "../game/typeChartComponent.hpp"
 #include "../game/researchComponent.hpp"
 #include "../game/seedComponent.hpp"
+#include "../game/shopComponent.hpp"
 #include "../game/battleComponent.hpp"
 #include "../game/learnComponent.hpp"
 #include "../game/playerComponent.hpp"
@@ -294,6 +295,12 @@ void MainWindow::run() {
                 BattleComponent::begin();
                 redrawFrames = 2;
                 justPaused = true;
+            } else if (engine.takeShopRequest()) {
+                g_state = GameState::SHOP;
+                g_backState = GameState::PLAYING;
+                ShopComponent::reset();
+                redrawFrames = 2;
+                justPaused = true;
             } else if (engine.takeLearnRequest()) {
                 g_state = GameState::LEARN;
                 g_backState = GameState::PLAYING;
@@ -410,6 +417,9 @@ void MainWindow::run() {
                 break;
             case GameState::BATTLE:
                 BattleComponent::render(g_state, engine);
+                break;
+            case GameState::SHOP:
+                ShopComponent::render(g_state, g_backState, engine);
                 break;
             case GameState::LEARN:
                 LearnComponent::render(g_state, g_backState, engine);

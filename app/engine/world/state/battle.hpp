@@ -34,6 +34,13 @@ class Battle {
         int attacker = -1;  // lado que ataca en este mensaje (-1 = ninguno)
         int moveType = -1;  // tipo del movimiento (para el efecto visual)
         bool hit = false;   // el golpe llegó (el defensor se sacude)
+        int types[2][2] = { { -1, -1 }, { -1, -1 } };                       // tipos de cada pokémon en ese momento
+        int stages[2][static_cast<int>(Stat::COUNT)] = {};                  // niveles de estadísticas de cada uno en ese momento
+        int fxSide = -1;      // a quién le pasa algo visible (sube/baja una estadística, se activa una habilidad)
+        int fxKind = 0;       // 0 nada, 1 sube, 2 baja, 3 habilidad
+        int fxStat = -1;      // estadística (subir/bajar)
+        int fxAmount = 0;     // niveles que cambia (con signo)
+        std::string fxText;   // texto del aviso (nombre de la habilidad o de la estadística)
     };
 
     Battle(const GameData& data, std::vector<Fighter> player, int playerActive, std::vector<Fighter> foe, std::string foeName)
@@ -141,8 +148,16 @@ class Battle {
             const Fighter& f = m_team[side][m_active[side]];
             m.speciesId[side] = f.speciesId; m.name[side] = f.name; m.level[side] = f.level; m.hp[side] = f.hp; m.maxHp[side] = f.maxHp;
             m.status[side] = f.status; m.shiny[side] = f.shiny;
+            for (int i = 0; i < 2; ++i) m.types[side][i] = i < static_cast<int>(f.types.size()) ? f.types[static_cast<size_t>(i)] : -1;
+            for (int i = 0; i < static_cast<int>(Stat::COUNT); ++i) m.stages[side][i] = f.stages[static_cast<size_t>(i)];
         }
         m_messages.push_back(m);
+    }
+
+    // Marca el último mensaje con un aviso visual para 'side' (sube/baja una estadística, habilidad activada).
+    void tag(int side, int kind, const std::string& text, int stat = -1, int amount = 0) {
+        Message& m = m_messages.back();
+        m.fxSide = side; m.fxKind = kind; m.fxText = text; m.fxStat = stat; m.fxAmount = amount;
     }
 
     bool chance(float p) const { return RandomUtil::range(0.0f, 1.0f) < p; }
@@ -168,6 +183,7 @@ class Battle {
         for (const Ability* a : BattleRules::abilitiesOf(*m_data, f)) {
             if (a->trigger != Ability::Trigger::ON_ENTER || !a->spec.active()) continue;
             say(f.name + " activa " + a->name);
+            tag(side, 3, a->name);
             applyEffect(a->spec, side, 1 - side, 0, nullptr);
         }
     }
@@ -272,11 +288,12 @@ class Battle {
             amount = (std::min)(amount, foe.hp);
             foe.hp -= amount;
             dealt = amount;
-            say(std::string(d.crit ? "¡Golpe crítico! " : "") + (d.effectiveness > 1.0f ? "¡Es muy eficaz!" : d.effectiveness < 1.0f ? "No es muy eficaz..." : "Impacta."), side, move.typeId, true);
+            say(std::string(d.crit ? "¡Golpe crítico! " : "") + (d.effectiveness >= 4.0f ? "¡Es hipereficaz!" : d.effectiveness > 1.0f ? "¡Es supereficaz!" : d.effectiveness <= 0.25f ? "Es muy poco eficaz..." : d.effectiveness < 1.0f ? "No es muy eficaz..." : "Impacta."), side, move.typeId, true);
             if (move.contact && !foe.fainted()) {
                 for (const Ability* a : BattleRules::abilitiesOf(*m_data, foe)) {
                     if (a->trigger != Ability::Trigger::ON_CONTACT || !a->spec.active()) continue;
                     say(foe.name + " activa " + a->name);
+                    tag(1 - side, 3, a->name);
                     applyEffect(a->spec, 1 - side, side, 0, nullptr);
                 }
             }
@@ -306,6 +323,7 @@ class Battle {
                 const int diff = (std::abs)(next - stage);
                 stage = next;
                 say(who(t, tSide) + (e.amount > 0 ? " sube " : " baja ") + (diff > 1 ? "mucho " : "") + "su " + EffectSpec::statName(e.stat) + ".");
+                tag(tSide, e.amount > 0 ? 1 : 2, EffectSpec::statName(e.stat), static_cast<int>(e.stat), e.amount > 0 ? diff : -diff);
                 break;
             }
             case EffectSpec::Kind::STATUS:

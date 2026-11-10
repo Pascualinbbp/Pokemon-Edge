@@ -4,11 +4,11 @@
 #include <DirectXMath.h>
 #include "../../physics/physicsWorld.hpp"
 
-// Entrenador no jugador (de prueba, junto al inicio): fijo, mirando al jugador. Al hablar con él propone un combate. Cada entrenador tiene su estilo:
+// Personaje no jugador junto al inicio: entrenadores (de prueba) o el tendero: fijo, mirando al jugador. Al hablar con él propone un combate. Cada entrenador tiene su estilo:
 // en tiempo real (igual que contra los salvajes) o por turnos (combate integrado con menú).
 class Trainer {
     public:
-    enum class Style { REAL_TIME, TURN_BASED };
+    enum class Style { REAL_TIME, TURN_BASED, SHOP }; // SHOP: no combate, es el tendero
 
     static constexpr float WIDTH = 0.6f;
     static constexpr float HEIGHT = 1.8f;

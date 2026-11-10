@@ -30,6 +30,7 @@ namespace Sound {
         FRUIT_DROP,     // un fruto cae al suelo
         HEAL,           // poción sobre un pokémon
         RADIO_TUNE,     // cambio de emisora (interferencia)
+        COCONUT_BREAK,  // un coco se parte
         COUNT
     };
 
@@ -62,6 +63,7 @@ namespace Sound {
             { "audio/sfx/fruit_drop.wav",    0.65f, 30.0f, 0.10f },
             { "audio/sfx/heal.wav",          0.85f, 40.0f, 0.00f },
             { "audio/sfx/radio_tune.wav",    0.60f, 0.0f,  0.00f },
+            { "audio/sfx/coconut_break.wav", 0.85f, 35.0f, 0.05f },
         };
         return table[static_cast<size_t>(sfx)];
     }

@@ -1091,6 +1091,11 @@ void Renderer3D::collect(const Scene& scene) {
     for (const Crops::Plot& plot : scene.plots) addPlot(plot);
     for (const ResourceNode& node : scene.nodes) {
         const float dx = node.body.position.x - p.x, dz = node.body.position.z - p.z;
+        if (scene.battle) { // en el combate por turnos la zona de combate queda despejada
+            const XMFLOAT3 a = scene.arenaCenter();
+            const float ax = node.body.position.x - a.x, az = node.body.position.z - a.z;
+            if (ax * ax + az * az < (Scene::ARENA_RADIUS + 1.5f) * (Scene::ARENA_RADIUS + 1.5f)) continue;
+        }
         if (!node.gone() && dx * dx + dz * dz <= kNodeDrawRange * kNodeDrawRange) addNode(node);
     }
     for (const GroundItem& item : scene.groundItems.entities) addGroundItem(item);
@@ -1099,7 +1104,7 @@ void Renderer3D::collect(const Scene& scene) {
     addMachine();
     addProfessor(scene);
     addTrainers(scene);
-    if (scene.battle) addBattle(scene);
+    if (scene.battle) { addArena(scene); addBattle(scene); }
 
     for (const Pokeball& ball : scene.balls) addBall(ball);
 }
@@ -1578,12 +1583,36 @@ void Renderer3D::addNode(const ResourceNode& node) {
 
 // Objeto suelto: semiesfera blanca que brilla y late. No proyecta sombra.
 // Fruto caído: coco (esfera marrón con tres "ojos"), plátano (media luna amarilla) o cereza (pareja roja); gira al rodar.
+namespace {
+constexpr const char* COCONUT_MODEL = "fruits/coconut"; // assets/models/fruits/coconut.glb
+constexpr float COCONUT_SCALE = 1.45f;                  // el modelo mide ~0,18 m: así iguala al coco de Fruit::RADIUS
+}
+
 void Renderer3D::addFruit(const Fruit& fruit) {
     const float k = fruit.scale();
     if (k <= 0.001f) return;
     const XMFLOAT3& p = fruit.body.position;
     const float r = Fruit::RADIUS * k;
     if (fruit.kind() == Fruit::Kind::COCONUT) {
+        // assets/models/fruits/coconut.glb: dos nodos, mitad_a y mitad_b (juntos forman el coco entero). Sin archivo queda la esfera marrón.
+        const RenderModel* model = m_models.get(m_device, COCONUT_MODEL, false);
+        if (model && fruit.half()) { // mitad suelta: tumbada con la parte abierta hacia arriba, girada según el coco
+            const int index = model->part(fruit.part() == Fruit::Part::HALF_A ? "mitad_a" : "mitad_b");
+            if (index >= 0) {
+                const float s = COCONUT_SCALE * k;
+                const XMMATRIX flip = fruit.part() == Fruit::Part::HALF_B ? XMMatrixRotationX(3.14159265f) : XMMatrixIdentity(); // la tapa se da la vuelta: queda como un cuenco
+                add(model->parts[static_cast<size_t>(index)].mesh, XMMatrixScaling(s, s, s) * flip * XMMatrixRotationY(fruit.yaw()) * XMMatrixTranslation(p.x, p.y, p.z),
+                    { 1.0f, 1.0f, 1.0f, 0.0f }, true, DrawKind::MODEL, model->texture.Get());
+                return;
+            }
+        }
+        if (model && !fruit.half()) {
+            const XMFLOAT3 c = model->center();
+            const float s = COCONUT_SCALE * k;
+            addModel(*model, XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(s, s, s) * XMMatrixRotationX(fruit.spin()) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
+            return;
+        }
+        if (fruit.half()) return;
         const XMMATRIX at = XMMatrixRotationX(fruit.spin()) * XMMatrixTranslation(p.x, p.y, p.z);
         add(m_sphere, XMMatrixScaling(r, r, r) * at, { 0.36f, 0.24f, 0.12f, 0.0f });
         add(m_cube, XMMatrixScaling(r * 0.35f, r * 0.35f, r * 0.2f) * XMMatrixTranslation(0.0f, r * 0.55f, r * 0.8f) * at, { 0.12f, 0.08f, 0.05f, 0.0f }, false);
@@ -1626,11 +1655,22 @@ void Renderer3D::addFootprints(const Scene& scene) {
     }
 }
 
+namespace {
+constexpr const char* GROUND_ITEM_MODEL = "ground/item"; // assets/models/ground/item.glb
+constexpr float GROUND_ITEM_HEIGHT = 0.42f;            // altura con la que se dibuja (m)
+}
+
 void Renderer3D::addGroundItem(const GroundItem& item) {
     const XMFLOAT3& p = item.body.position;
     const float k = item.scale();
     if (k <= 0.001f) return;
 
+    // Bolsita del suelo (assets/models/ground/item.glb, apoyada en el suelo); sin archivo queda solo el destello.
+    if (const RenderModel* bag = m_models.get(m_device, GROUND_ITEM_MODEL, false)) {
+        const XMFLOAT3 c = bag->center();
+        const float s = GROUND_ITEM_HEIGHT / (std::max)(0.001f, bag->height()) * k;
+        addModel(*bag, XMMatrixTranslation(-c.x, -bag->boundsMin.y, -c.z) * XMMatrixScaling(s, s, s) * XMMatrixRotationY(item.body.position.x * 3.1f) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, item.glow() * 0.6f }, ModelPose());
+    }
     const float r = GroundItem::RADIUS * k;
     add(m_dome, XMMatrixScaling(r, r, r) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, item.glow() }, false);
 }
@@ -1698,6 +1738,49 @@ void Renderer3D::addBattle(const Scene& scene) {
         const float t = (fx.time - 0.2f) / 0.4f, k = size * (0.6f + 1.4f * t), fade = 1.0f - t;
         const XMFLOAT3 at = scene.battleSpot(defender);
         add(m_sphere, XMMatrixScaling(k, k, k) * XMMatrixTranslation(at.x, at.y + size * 0.5f, at.z), { r / 255.0f, g / 255.0f, b / 255.0f, 1.0f * fade }, false, DrawKind::GLOW);
+    }
+
+    // Subida/bajada de estadísticas y habilidades: aros luminosos que suben (verde) o bajan (rojo) alrededor del pokémon; la habilidad es un destello dorado.
+    if (battle.hasMessage() && battle.front().fxKind != 0 && battle.front().fxSide >= 0 && fx.time < 1.3f) {
+        const Battle::Message& m = battle.front();
+        const XMFLOAT3 at = scene.battleSpot(m.fxSide);
+        const float t = fx.time / 1.3f;
+        if (m.fxKind == 3) {
+            const float k = size * (0.5f + 1.2f * t);
+            add(m_sphere, XMMatrixScaling(k, k, k) * XMMatrixTranslation(at.x, at.y + size * 0.5f, at.z), { 1.0f, 0.85f, 0.3f, 0.7f * (1.0f - t) }, false, DrawKind::GLOW);
+        } else {
+            const bool up = m.fxKind == 1;
+            const int rings = (std::min)(3, 1 + std::abs(m.fxAmount));
+            for (int i = 0; i < rings; ++i) {
+                const float phase = std::fmod(t * 1.6f + static_cast<float>(i) / static_cast<float>(rings), 1.0f);
+                const float y = up ? phase * size * 1.5f : (1.0f - phase) * size * 1.5f;
+                const float k = size * 0.75f;
+                add(m_sphere, XMMatrixScaling(k, k * 0.07f, k) * XMMatrixTranslation(at.x, at.y + y, at.z),
+                    up ? XMFLOAT4{ 0.25f, 1.0f, 0.4f, 0.85f * (1.0f - phase) } : XMFLOAT4{ 1.0f, 0.25f, 0.25f, 0.85f * phase }, false, DrawKind::GLOW);
+            }
+        }
+    }
+}
+
+// Zona de combate por turnos: un disco circular en el suelo con un borde de losetas, un círculo central y las marcas donde se colocan los entrenadores y los pokémon.
+void Renderer3D::addArena(const Scene& scene) {
+    const XMFLOAT3 c = scene.arenaCenter();
+    constexpr float R = Scene::ARENA_RADIUS, PI2 = 6.2831853f;
+    add(m_sphere, XMMatrixScaling(R, 0.06f, R) * XMMatrixTranslation(c.x, c.y, c.z), { 0.58f, 0.62f, 0.68f, 0.0f }, false);
+    const auto ring = [&](const XMFLOAT3& at, float radius, int count, float width, const XMFLOAT4& a, const XMFLOAT4& b) {
+        const float length = PI2 * radius / static_cast<float>(count) * 0.9f;
+        for (int i = 0; i < count; ++i) {
+            const float angle = PI2 * static_cast<float>(i) / static_cast<float>(count);
+            add(m_cube, XMMatrixScaling(length, 0.1f, width) * XMMatrixRotationY(angle) * XMMatrixTranslation(at.x + std::sin(angle) * radius, at.y + 0.04f, at.z + std::cos(angle) * radius),
+                i % 2 ? a : b, false);
+        }
+    };
+    ring(c, R, 72, 0.32f, { 0.95f, 0.95f, 0.95f, 0.0f }, { 0.85f, 0.2f, 0.2f, 0.0f });
+    ring(c, 1.3f, 28, 0.14f, { 0.95f, 0.95f, 0.95f, 0.0f }, { 0.95f, 0.95f, 0.95f, 0.0f });
+    for (int side = 0; side < 2; ++side) {
+        const XMFLOAT3 spot = scene.battleSpot(side), stand = scene.arenaStand(side);
+        ring(spot, 1.0f, 20, 0.12f, { 1.0f, 0.85f, 0.3f, 0.0f }, { 1.0f, 0.85f, 0.3f, 0.0f });
+        add(m_cube, XMMatrixScaling(1.5f, 0.07f, 1.5f) * XMMatrixTranslation(stand.x, stand.y + 0.035f, stand.z), side == 0 ? XMFLOAT4{ 0.25f, 0.45f, 0.9f, 0.0f } : XMFLOAT4{ 0.9f, 0.3f, 0.25f, 0.0f }, false);
     }
 }
 

@@ -27,6 +27,8 @@ namespace BattleComponent {
             int hp[2] = { 1, 1 };
             int maxHp[2] = { 1, 1 };
             EffectSpec::Status status[2] = { EffectSpec::Status::NONE, EffectSpec::Status::NONE };
+            int types[2][2] = { { -1, -1 }, { -1, -1 } };
+            int stages[2][static_cast<int>(EffectSpec::Stat::COUNT)] = {};
         };
 
         struct State {
@@ -37,6 +39,10 @@ namespace BattleComponent {
             std::string text;
             Show shown;
             float bar[2] = { -1.0f, -1.0f }; // PS que muestra cada barra (animados)
+            // Aviso visual del mensaje en curso: sube/baja una estadística o se activa una habilidad.
+            int fxSide = -1, fxKind = 0, fxAmount = 0;
+            std::string fxText;
+            float fxTime = 99.0f;
         };
         inline State& state() { static State s; return s; }
 
@@ -47,14 +53,34 @@ namespace BattleComponent {
             for (int side = 0; side < 2; ++side) {
                 const Battle::Fighter& f = battle.fighter(side);
                 s.name[side] = f.name; s.level[side] = f.level; s.hp[side] = f.hp; s.maxHp[side] = f.maxHp; s.status[side] = f.status;
+                for (int i = 0; i < 2; ++i) s.types[side][i] = i < static_cast<int>(f.types.size()) ? f.types[static_cast<size_t>(i)] : -1;
+                for (int i = 0; i < static_cast<int>(EffectSpec::Stat::COUNT); ++i) s.stages[side][i] = f.stages[static_cast<size_t>(i)];
             }
             return s;
         }
 
+        inline const char* statShort(int stat) {
+            static constexpr const char* N[] = { "ATQ", "DEF", "AT.ESP", "DEF.ESP", "VEL", "PREC", "EVA" };
+            return N[stat];
+        }
+
+        // Cuánto le hace un movimiento al rival, en palabras (vacío si es normal o no hace daño).
+        struct Effect { const char* label; ImU32 color; };
+        inline Effect effectiveness(const GameData& data, const Move& move, const BattleRules::Fighter& target) {
+            if (!move.damaging()) return { "", 0 };
+            const float m = data.typeChart.multiplier(move.typeId, target.types);
+            if (m <= TypeChart::IMMUNE) return { "NO AFECTA", IM_COL32(70, 70, 85, 255) };
+            if (m >= 4.0f) return { "HIPEREFICAZ", IM_COL32(150, 60, 220, 255) };
+            if (m > 1.0f) return { "SUPEREFICAZ", IM_COL32(40, 160, 80, 255) };
+            if (m <= 0.25f) return { "MUY POCO EFICAZ", IM_COL32(170, 70, 60, 255) };
+            if (m < 1.0f) return { "POCO EFICAZ", IM_COL32(200, 120, 40, 255) };
+            return { "", 0 };
+        }
+
         inline ImU32 hpColor(float f) { return f > 0.5f ? IM_COL32(90, 210, 110, 255) : f > 0.2f ? IM_COL32(235, 200, 60, 255) : IM_COL32(230, 70, 70, 255); }
 
-        // Cuadro de un combatiente: nombre, nivel, estado y barra de PS (la del jugador también con los números).
-        inline void drawBox(ImDrawList* dl, const ImVec2& pos, const ImVec2& size, const Show& s, int side, float animatedHp) {
+        // Cuadro de un combatiente: nombre, nivel, tipos, estado, cambios de estadísticas y barra de PS (la del jugador también con los números).
+        inline void drawBox(ImDrawList* dl, const GameData& data, const ImVec2& pos, const ImVec2& size, const Show& s, int side, float animatedHp) {
             GuiCards::panel(dl, pos, ImVec2(pos.x + size.x, pos.y + size.y));
             char text[64];
             std::snprintf(text, sizeof(text), "%s", s.name[side].c_str());
@@ -63,14 +89,52 @@ namespace BattleComponent {
             GuiCards::text(dl, ImVec2(pos.x + size.x - 14.0f - GuiCards::textWidth(text, 1.0f), pos.y + 10.0f), IM_COL32(255, 255, 255, 230), text, 1.0f);
             float x = pos.x + 14.0f;
             const float y = pos.y + 36.0f;
+            for (int i = 0; i < 2; ++i) { // tipos
+                const PokemonType* type = s.types[side][i] >= 0 ? data.type(s.types[side][i]) : nullptr;
+                if (type) x += GuiCards::typeChip(dl, ImVec2(x, y), *type) + 6.0f;
+            }
             const char* status = EffectSpec::statusName(s.status[side]);
-            if (*status) x += GuiCards::chip(dl, ImVec2(x, y), status, s.status[side] == EffectSpec::Status::BURN ? IM_COL32(220, 90, 40, 255) : s.status[side] == EffectSpec::Status::POISON ? IM_COL32(150, 70, 190, 255) : IM_COL32(210, 170, 40, 255), 0.75f) + 8.0f;
+            if (*status) x += GuiCards::chip(dl, ImVec2(x, y), status, s.status[side] == EffectSpec::Status::BURN ? IM_COL32(220, 90, 40, 255) : s.status[side] == EffectSpec::Status::POISON ? IM_COL32(150, 70, 190, 255) : IM_COL32(210, 170, 40, 255), 0.75f) + 6.0f;
+            float sx = pos.x + 14.0f; // estadísticas alteradas: "ATQ +2" en verde, "DEF -1" en rojo
+            for (int i = 0; i < static_cast<int>(EffectSpec::Stat::COUNT); ++i) {
+                const int stage = s.stages[side][i];
+                if (stage == 0) continue;
+                std::snprintf(text, sizeof(text), "%s %+d", statShort(i), stage);
+                if (sx + GuiCards::textWidth(text, 0.7f) + 16.0f > pos.x + size.x - 8.0f) break;
+                sx += GuiCards::chip(dl, ImVec2(sx, pos.y + 62.0f), text, stage > 0 ? IM_COL32(40, 150, 80, 255) : IM_COL32(190, 60, 60, 255), 0.7f) + 5.0f;
+            }
             const float fraction = animatedHp / static_cast<float>((std::max)(1, s.maxHp[side]));
             GuiCards::bar(dl, ImVec2(pos.x + 14.0f, pos.y + size.y - 24.0f), size.x - 28.0f, fraction, hpColor(fraction), 12.0f);
             if (side == 0) {
                 std::snprintf(text, sizeof(text), "%d / %d", static_cast<int>(std::ceil(animatedHp)), s.maxHp[side]);
-                GuiCards::text(dl, ImVec2(pos.x + size.x - 14.0f - GuiCards::textWidth(text, 0.85f), y), IM_COL32(255, 255, 255, 235), text, 0.85f);
+                GuiCards::text(dl, ImVec2(pos.x + size.x - 14.0f - GuiCards::textWidth(text, 0.85f), y + 2.0f), IM_COL32(255, 255, 255, 235), text, 0.85f);
             }
+        }
+
+        // Aviso flotante sobre el cuadro de quien lo recibe: flecha y texto que suben y se desvanecen (verde sube, rojo baja, amarillo habilidad).
+        inline void drawFx(ImDrawList* dl, const State& s, const ImVec2& pos, const ImVec2& size) {
+            constexpr float DURATION = 1.4f;
+            if (s.fxKind == 0 || s.fxTime >= DURATION) return;
+            const float t = s.fxTime / DURATION, alpha = t < 0.7f ? 1.0f : (1.0f - t) / 0.3f;
+            const int a = static_cast<int>(255.0f * alpha);
+            const bool up = s.fxKind == 1, down = s.fxKind == 2;
+            const ImU32 color = up ? IM_COL32(70, 220, 110, a) : down ? IM_COL32(240, 80, 80, a) : IM_COL32(250, 210, 70, a);
+            std::string label;
+            if (s.fxKind == 3) label = s.fxText;
+            else {
+                std::string stat = s.fxText;
+                for (char& c : stat) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                label = stat + (up ? " SUBE" : " BAJA");
+                if (std::abs(s.fxAmount) > 1) label += up ? " MUCHO" : " MUCHO";
+            }
+            const float rise = 34.0f * t, cx = pos.x + size.x * 0.5f, top = pos.y - 8.0f - rise;
+            const float w = GuiCards::textWidth(label.c_str(), 1.1f);
+            dl->AddRectFilled(ImVec2(cx - w * 0.5f - 34.0f, top - 22.0f), ImVec2(cx + w * 0.5f + 12.0f, top + 8.0f), IM_COL32(15, 15, 25, static_cast<int>(210.0f * alpha)), 14.0f);
+            GuiCards::text(dl, ImVec2(cx - w * 0.5f, top - 18.0f), color, label.c_str(), 1.1f);
+            const float ax = cx - w * 0.5f - 18.0f, ay = top - 7.0f; // flecha (triángulo)
+            if (up) dl->AddTriangleFilled(ImVec2(ax, ay - 9.0f), ImVec2(ax - 8.0f, ay + 6.0f), ImVec2(ax + 8.0f, ay + 6.0f), color);
+            else if (down) dl->AddTriangleFilled(ImVec2(ax, ay + 9.0f), ImVec2(ax - 8.0f, ay - 6.0f), ImVec2(ax + 8.0f, ay - 6.0f), color);
+            else dl->AddCircleFilled(ImVec2(ax, ay), 7.0f, color);
         }
 
         inline std::string typeName(const GameData& data, int typeId) {
@@ -116,7 +180,10 @@ namespace BattleComponent {
                 s.text = m.text;
                 for (int side = 0; side < 2; ++side) {
                     s.shown.name[side] = m.name[side]; s.shown.level[side] = m.level[side]; s.shown.hp[side] = m.hp[side]; s.shown.maxHp[side] = m.maxHp[side]; s.shown.status[side] = m.status[side];
+                    for (int i = 0; i < 2; ++i) s.shown.types[side][i] = m.types[side][i];
+                    for (int i = 0; i < static_cast<int>(EffectSpec::Stat::COUNT); ++i) s.shown.stages[side][i] = m.stages[side][i];
                 }
+                s.fxSide = m.fxSide; s.fxKind = m.fxKind; s.fxAmount = m.fxAmount; s.fxText = m.fxText; s.fxTime = 0.0f;
                 engine.battlePlayFx(m.attacker, m.hit);
             }
             s.messageTime += dt;
@@ -133,8 +200,12 @@ namespace BattleComponent {
             const float step = BAR_SPEED * static_cast<float>(s.shown.maxHp[side]) * dt;
             s.bar[side] = s.bar[side] < target ? (std::min)(target, s.bar[side] + step) : (std::max)(target, s.bar[side] - step);
         }
-        drawBox(dl, ImVec2(40.0f, 40.0f), ImVec2(340.0f, 76.0f), s.shown, 1, s.bar[1]);
-        drawBox(dl, ImVec2(screen.x - 40.0f - 360.0f, screen.y - 380.0f), ImVec2(360.0f, 84.0f), s.shown, 0, s.bar[0]);
+        s.fxTime += dt;
+        const ImVec2 foePos(40.0f, 60.0f), foeSize(360.0f, 112.0f), minePos(screen.x - 40.0f - 380.0f, screen.y - 445.0f), mineSize(380.0f, 118.0f);
+        drawBox(dl, data, foePos, foeSize, s.shown, 1, s.bar[1]);
+        drawBox(dl, data, minePos, mineSize, s.shown, 0, s.bar[0]);
+        if (s.fxSide == 1) drawFx(dl, s, foePos, foeSize);
+        else if (s.fxSide == 0) drawFx(dl, s, minePos, mineSize);
 
         // Cuadro de texto.
         const float boxTop = screen.y - 160.0f, boxBottom = screen.y - 30.0f;
@@ -196,6 +267,8 @@ namespace BattleComponent {
                         char info[48];
                         std::snprintf(info, sizeof(info), "%s   PP %d/%d", typeName(data, move->typeId).c_str(), me.pp[i], move->pp);
                         GuiCards::text(dl, ImVec2(x + 12.0f, y + 31.0f), IM_COL32(255, 255, 255, 225), info, 0.8f);
+                        const Effect effect = effectiveness(data, *move, battle->fighter(1));
+                        if (*effect.label) GuiCards::chip(dl, ImVec2(x + w - 12.0f - GuiCards::textWidth(effect.label, 0.7f) - 16.0f, y + 6.0f), effect.label, effect.color, 0.7f);
                     } else GuiCards::centeredText(dl, ImVec2(x + w * 0.5f, y + h * 0.5f), GuiStyle::MUTED, "—", 1.0f);
                     if (clicked) { Battle::Action a; a.index = i; battle->submit(a); s.menu = Menu::MAIN; }
                 }
@@ -230,6 +303,8 @@ namespace BattleComponent {
                     char text[64];
                     std::snprintf(text, sizeof(text), "%s  Nv. %d", f.name.c_str(), f.level);
                     GuiCards::text(dl, ImVec2(menuLeft + 56.0f, y + 6.0f), IM_COL32(255, 255, 255, f.fainted() ? 130 : 255), text, 0.95f);
+                    float tx = menuLeft + 56.0f + GuiCards::textWidth(text, 0.95f) + 10.0f;
+                    for (const int typeId : f.types) if (const PokemonType* type = data.type(typeId)) tx += GuiCards::chip(dl, ImVec2(tx, y + 6.0f), typeName(data, typeId).c_str(), GuiCards::typeColor(typeId), 0.65f) + 4.0f;
                     GuiCards::bar(dl, ImVec2(menuLeft + 56.0f, y + 31.0f), w - 160.0f, f.hpFraction(), hpColor(f.hpFraction()), 8.0f);
                     std::snprintf(text, sizeof(text), f.fainted() ? "Debilitado" : i == battle->active(0) ? "En combate" : "%d/%d", f.hp, f.maxHp);
                     if (!f.fainted() && i != battle->active(0)) std::snprintf(text, sizeof(text), "%d/%d", f.hp, f.maxHp);

@@ -126,6 +126,7 @@ class Renderer3D {
     void addNode(const ResourceNode& node);
     void addGroundItem(const GroundItem& item);
     void addFruit(const Fruit& fruit);
+    void addArena(const Scene& scene);
     void addPotionFx(const Scene& scene, DirectX::CXMMATRIX hand);
     void addFootprints(const Scene& scene);
     void addMachine();

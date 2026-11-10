@@ -77,7 +77,7 @@ namespace MoveEditor {
             GuiCards::text(cl, ImVec2(a.x + 10.0f, a.y + 30.0f), IM_COL32(255, 255, 255, 220), info, 0.75f);
             if (hovered) ImGui::SetTooltip("%s", move->description.c_str());
             if (clicked) storage.setMove(inTeam, index, detail::slot, move->id);
-            ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + 62.0f));
+            ImGui::Dummy(ImVec2(0.0f, 6.0f)); // separación (no mover el cursor a pelo: ImGui aborta si el último gesto de un child es un SetCursorScreenPos)
         }
         ImGui::EndChild();
 

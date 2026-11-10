@@ -24,6 +24,7 @@
 #include "rules/deathRules.hpp"
 #include "entities/captureTarget.hpp"
 #include "rules/rewardRules.hpp"
+#include "rules/shopRules.hpp"
 #include "rules/evRules.hpp"
 #include "state/playerProgress.hpp"
 #include "rules/pokemonRules.hpp"
@@ -117,6 +118,7 @@ struct Scene {
     std::vector<Trainer> trainers;  // entrenadores de prueba junto al inicio
     std::shared_ptr<Battle> battle; // combate por turnos en curso (nullptr = ninguno)
     bool battleRequested = false;   // se acaba de empezar un combate por turnos: la interfaz abre su pantalla
+    bool shopRequested = false;     // se acaba de hablar con el tendero: la interfaz abre la tienda
     bool learnRequested = false;    // hay un pokémon con un movimiento esperando decisión: la interfaz abre su pantalla
     // Animación del combate por turnos: quién ataca (0 jugador, 1 rival), si el golpe llega y el tiempo desde que empezó el mensaje.
     struct BattleFx { int attacker = -1; bool hit = false; float time = 0.0f; };
@@ -147,6 +149,7 @@ struct Scene {
         plots = Crops::generate(gameData, world, nodes);
         trainers.push_back(Trainer("Entrenador Rojo", Trainer::Style::REAL_TIME, -1.0f, 10.0f, { 0.85f, 0.2f, 0.2f }));
         trainers.push_back(Trainer("Entrenador Azul", Trainer::Style::TURN_BASED, -5.0f, 10.0f, { 0.2f, 0.35f, 0.85f }));
+        trainers.push_back(Trainer("Tendero", Trainer::Style::SHOP, 5.0f, 10.0f, { 0.2f, 0.62f, 0.38f }));
         m_home = player.body.position;
         for (const Skill& skill : gameData.skills) if (PlayerActions::parse(skill.animation) == PlayerAction::FISH) m_fishSkill = skill.id;
     }
@@ -429,7 +432,7 @@ struct Scene {
             s.interactVerb = TALK_VERB;
             s.interactTarget = &PROFESSOR_NAME;
         } else if (m_interaction.kind == Interaction::TRAINER) {
-            s.interactVerb = FIGHT_VERB;
+            s.interactVerb = trainers[m_interaction.index].style == Trainer::Style::SHOP ? SHOP_VERB : FIGHT_VERB;
             s.interactTarget = &trainers[m_interaction.index].name;
         } else if (m_interaction.kind == Interaction::MACHINE) {
             s.interactVerb = USE_VERB;
@@ -999,7 +1002,7 @@ struct Scene {
                 }
             }
             for (Fruit& fruit : fruits) { // también recoge los frutos caídos (el jugador tiene prioridad: si los coge antes, ya no están)
-                if (!fruit.available() || !fruit.body.onGround || !inRange(fruit.body.position)) continue;
+                if (!fruit.pickable() || !fruit.body.onGround || !inRange(fruit.body.position)) continue;
                 const float d2 = distance2(fruit.body.position);
                 if (d2 < best) {
                     best = d2;
@@ -1017,7 +1020,7 @@ struct Scene {
             m_engaged = nullptr;
             if (mode != CompanionRules::Mode::COLLECT) m_captureRest = RandomUtil::range(CompanionRules::CAPTURE_REST_MIN, CompanionRules::CAPTURE_REST_MAX);
         }
-        const bool resting = !m_engaged && m_captureRest > 0.0f; // entre combates sigue al jugador
+        const bool resting = m_duelTrainer < 0 && !m_engaged && m_captureRest > 0.0f; // (en un duelo no descansa: combate sin pausa) // entre combates sigue al jugador
         CaptureTarget* fightTarget = nullptr;
         if (species && mode != CompanionRules::Mode::COLLECT && !resting) {
             fightTarget = m_engaged ? m_engaged : (m_duelTrainer >= 0 && wild.foe() && wild.foe()->hittable() ? wild.foe() : fightTargetFor(mode));
@@ -1273,7 +1276,7 @@ struct Scene {
         m_weak = m_weakExpired ? nullptr : weakenedTarget();
         if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
         if (const int i = nearestIn(groundItems.entities, [](const GroundItem& g) { return g.available(); }, best); i >= 0) m_interaction = { Interaction::GROUND, i };
-        if (const int i = nearestIn(fruits, [](const Fruit& f) { return f.available(); }, best); i >= 0) m_interaction = { Interaction::FRUIT, i };
+        if (const int i = nearestIn(fruits, [](const Fruit& f) { return f.pickable(); }, best); i >= 0) m_interaction = { Interaction::FRUIT, i };
         const float mx = machine.body.position.x - player.body.position.x, mz = machine.body.position.z - player.body.position.z;
         if (const float d2 = mx * mx + mz * mz; d2 <= machine.reach() * machine.reach() && d2 < best) {
             best = d2;
@@ -1390,7 +1393,10 @@ struct Scene {
             if (needsStarter()) starterRequested = true;
             else showNotice(Notice::REWARD, std::string(Professor::NAME) + ": ¡Cuida bien de tu compañero!");
         }
-        else if (m_interaction.kind == Interaction::TRAINER) startDuel(m_interaction.index);
+        else if (m_interaction.kind == Interaction::TRAINER) {
+            if (trainers[m_interaction.index].style == Trainer::Style::SHOP) shopRequested = true;
+            else startDuel(m_interaction.index);
+        }
         else if (m_interaction.kind == Interaction::PLOT) {
             const std::vector<int> seeds = availableSeeds();
             if (seeds.size() == 1) { m_seedCrop = seeds.front(); sow(plots[m_interaction.index]); }
@@ -1454,7 +1460,7 @@ struct Scene {
     }
 
     // --- Frutos: cocos de palmera, plátanos del árbol de jungla y cerezas del cerezo ---
-    static constexpr int   MAX_FRUITS = 15, MAX_PER_KIND = 5; // como mucho en el suelo a la vez (en total y de cada clase: así los cocos no tapan a los plátanos)
+    static constexpr int   MAX_FRUITS = 20, MAX_PER_KIND = 5; // como mucho en el suelo a la vez (en total y de cada clase: así los cocos no tapan a los plátanos)
     static constexpr float FRUIT_DROP_MIN = 7.0f, FRUIT_DROP_MAX = 16.0f; // segundos entre caídas
     static constexpr float FRUIT_RANGE = 55.0f;      // solo caen en árboles cercanos al jugador
     static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13, CHERRY_TYPE = 11;
@@ -1485,26 +1491,58 @@ struct Scene {
         Sound::emit(Sound::Sfx::PICK, fruit.body.position); // el sonido es del fruto: el mismo para quien lo coja
     }
 
+    static constexpr float COCONUT_BREAK_CHANCE = 12.0f; // % de cocos que se parten al caer del árbol
+
+    // El coco entero se parte en sus dos mitades (cada una un cuerpo físico distinto que sale despedido en sentido contrario).
+    // 'eaten': un pokémon se las come, así que se encogen despacio, una tras otra.
+    void breakCoconut(Fruit& whole, bool eaten) {
+        const DirectX::XMFLOAT3 at = whole.body.position, carried = whole.body.velocity; // copias: añadir frutos invalida 'whole'
+        const float angle = RandomUtil::range(0.0f, 6.2831853f), push = eaten ? 0.25f : RandomUtil::range(0.9f, 1.6f), lift = eaten ? 0.8f : RandomUtil::range(1.4f, 2.2f);
+        whole.consume();
+        Sound::emit(Sound::Sfx::COCONUT_BREAK, at);
+        for (int i = 0; i < 2; ++i) {
+            const float side = i == 0 ? 1.0f : -1.0f;
+            fruits.emplace_back(Fruit::Kind::COCONUT, ++m_fruitId, DirectX::XMFLOAT3{ at.x, at.y + 0.04f, at.z },
+                                std::sin(angle) * push * side + carried.x * 0.3f, std::cos(angle) * push * side + carried.z * 0.3f,
+                                i == 0 ? Fruit::Part::HALF_A : Fruit::Part::HALF_B, lift);
+            if (eaten) fruits.back().take(1.4f + 0.6f * static_cast<float>(i), 0.5f + 0.4f * static_cast<float>(i));
+        }
+    }
+
     // Un salvaje se come el fruto: suena como cogerlo y, además, como comerlo (cosas del fruto, no del pokémon).
+    // Un coco entero primero se parte; las mitades desaparecen mientras se lo come.
+    // OJO: puede añadir frutos al vector, así que 'fruit' no vale tras llamarla.
     void eatFruit(Fruit& fruit) {
-        fruit.take();
-        Sound::emit(Sound::Sfx::PICK, fruit.body.position);
-        Sound::emit(Sound::Sfx::EAT, fruit.body.position);
+        const DirectX::XMFLOAT3 at = fruit.body.position;
+        if (fruit.kind() == Fruit::Kind::COCONUT && !fruit.half()) breakCoconut(fruit, true);
+        else fruit.take();
+        Sound::emit(Sound::Sfx::PICK, at);
+        Sound::emit(Sound::Sfx::EAT, at);
     }
 
     // De vez en cuando cae un fruto de un árbol maduro cercano (si no hay ya demasiados en el suelo) y rueda con su inercia.
     void updateFruits(float dt) {
-        for (Fruit& fruit : fruits) {
+        std::vector<int> cracking; // cocos que acaban de caer y se rompen (se parten tras el bucle: añade frutos)
+        for (size_t i = 0; i < fruits.size(); ++i) {
+            Fruit& fruit = fruits[i];
             world.step(fruit.body, dt);
             fruit.update(dt);
-            if (const float landing = fruit.takeLanding(); landing > 0.0f) Sound::emit(Sound::Sfx::FRUIT_DROP, fruit.body.position, landing);
+            if (const float landing = fruit.takeLanding(); landing > 0.0f) {
+                if (fruit.breaksOnLanding()) cracking.push_back(fruit.id());
+                else Sound::emit(Sound::Sfx::FRUIT_DROP, fruit.body.position, landing);
+            }
+        }
+        for (const int id : cracking) {
+            for (size_t i = 0; i < fruits.size(); ++i) {
+                if (fruits[i].id() == id) { breakCoconut(fruits[i], false); break; }
+            }
         }
         fruits.erase(std::remove_if(fruits.begin(), fruits.end(), [](const Fruit& f) { return f.finished(); }), fruits.end());
         if ((m_fruitTimer -= dt) > 0.0f) return;
         m_fruitTimer = RandomUtil::range(FRUIT_DROP_MIN, FRUIT_DROP_MAX);
         if (static_cast<int>(fruits.size()) >= MAX_FRUITS || player.body.underground) return;
         int onGround[3] = { 0, 0, 0 };
-        for (const Fruit& fruit : fruits) if (fruit.available()) ++onGround[static_cast<int>(fruit.kind())];
+        for (const Fruit& fruit : fruits) if (fruit.available() && !fruit.half()) ++onGround[static_cast<int>(fruit.kind())];
         std::vector<const ResourceNode*> trees[3]; // árboles cercanos por clase de fruto
         for (const ResourceNode& node : nodes) {
             Fruit::Kind treeKind;
@@ -1523,6 +1561,7 @@ struct Scene {
         fruitKind(tree.typeId(), kind);
         fruits.emplace_back(kind, ++m_fruitId, DirectX::XMFLOAT3{ at.x + std::sin(angle) * 0.5f, at.y + height * 0.9f, at.z + std::cos(angle) * 0.5f },
                             std::sin(angle) * out, std::cos(angle) * out);
+        if (kind == Fruit::Kind::COCONUT && RandomUtil::roll(COCONUT_BREAK_CHANCE)) fruits.back().setBreaksOnLanding(true);
     }
 
     // Los salvajes cercanos se acercan a comer un fruto caído o una baya madura de un arbusto y se quedan comiendo un momento.
@@ -1897,6 +1936,7 @@ struct Scene {
     static constexpr const char* USE_VERB = "Usar";
     static constexpr const char* TALK_VERB = "Hablar con";
     static constexpr const char* FIGHT_VERB = "Retar a";
+    static constexpr const char* SHOP_VERB = "Comprar a";
     inline static const std::string PROFESSOR_NAME = Professor::NAME;
     inline static const std::string PLOT_NAME = "Parcela de cultivo";
     inline static const std::string GROUND_NAME = "objeto brillante";
@@ -1992,13 +2032,14 @@ struct Scene {
         std::vector<BattleRules::Fighter> mine, foes;
         for (int i = 0; i < static_cast<int>(storage.team().size()); ++i) mine.push_back(BattleRules::makeFighter(*m_data, likeOf(storage.team()[i], i)));
         for (int i = 0; i < DUEL_POKEMON; ++i) foes.push_back(BattleRules::makeFighter(*m_data, likeOf(rivalPokemon(leadLevel()), -1)));
-        const OwnedPokemon* lead = storage.active();
-        const int first = lead && !storage.fainted(*lead) ? storage.activeIndex() : storage.nextUsable();
+        int first = -1; // siempre sale el primero del equipo (que no esté debilitado), sea cual sea el que nos siga en el mundo
+        for (int i = 0; i < static_cast<int>(storage.team().size()) && first < 0; ++i) if (!storage.fainted(storage.team()[static_cast<size_t>(i)])) first = i;
         battle = std::make_shared<Battle>(*m_data, std::move(mine), first, std::move(foes), trainer.name);
         m_battleTrainer = index;
-        const DirectX::XMFLOAT3& at = player.body.position;
-        m_battleOrigin = at;
-        m_battleYaw = std::atan2(trainer.body.position.x - at.x, trainer.body.position.z - at.z);
+        m_battleOrigin = player.body.position;     // a donde vuelve el jugador al terminar
+        m_trainerHome = trainer.body.position;     // y el entrenador
+        m_battleSlide = 0.0f;                      // durante la carga ambos se desplazan a los bordes de la zona de combate
+        m_battleYaw = std::atan2(arenaDirection().x, arenaDirection().z);
         battleFx = {};
         battleRequested = true;
         player.body.velocity = { 0.0f, 0.0f, 0.0f };
@@ -2061,7 +2102,12 @@ struct Scene {
             inventory.addMoney(DUEL_MONEY);
             showNotice(Notice::REWARD, "¡Has derrotado a " + battle->foeName() + "!  +" + std::to_string(xp) + " PX, +" + std::to_string(DUEL_MONEY) + " pokémonedas");
         }
-        if (m_battleTrainer >= 0) trainers[m_battleTrainer].busy = false;
+        if (m_battleTrainer >= 0) {
+            trainers[m_battleTrainer].busy = false;
+            trainers[m_battleTrainer].body.position = m_trainerHome;
+        }
+        player.body.position = m_battleOrigin;
+        player.body.velocity = { 0.0f, 0.0f, 0.0f };
         m_battleTrainer = -1;
         battle.reset();
     }
@@ -2078,12 +2124,59 @@ struct Scene {
         if (!learnRequested && !battleRequested && storage.pendingLearnRequest().index >= 0) learnRequested = true;
     }
 
+    // --- Tienda: vende todo lo relacionado con los pokémon (apartado "Pokémon" de la mochila) que tenga precio de compra. Un precio de compra 0 lo
+    // deja fuera (Honor Ball, Shiny Ball...): se decide en la base de datos, no aquí. ---
+    std::vector<const Item*> shopStock() const {
+        std::vector<const Item*> stock;
+        for (const Item& item : m_data->items) {
+            if (item.buyPrice <= 0) continue;
+            for (const ItemCategoryInfo& category : m_data->categories) {
+                if (category.id == item.categoryId && category.section == "Pokémon") { stock.push_back(&item); break; }
+            }
+        }
+        return stock;
+    }
+    // Compra 'quantity' unidades (o las que alcance el dinero). Devuelve el texto del resultado ("" si no pudo comprar nada).
+    std::string shopBuy(int itemId, int quantity) {
+        const Item* item = m_data->item(itemId);
+        if (!item || item->buyPrice <= 0 || quantity <= 0) return {};
+        const int units = (std::min)(quantity, inventory.money() / item->buyPrice);
+        if (units <= 0) return {};
+        inventory.add(itemId, units);
+        inventory.addMoney(-units * item->buyPrice);
+        std::string text = std::to_string(units) + "x " + m_data->itemName(*item) + " comprado";
+        const ShopRules::Gift gift = ShopRules::giftFor(*m_data, *item, units, m_shopBought[itemId]);
+        if (gift.reward && gift.count > 0) {
+            for (int i = 0; i < gift.count; ++i) giveEntry(*gift.reward);
+            text += " (¡y de regalo!)";
+        }
+        return text;
+    }
+
+    // --- Zona de combate por turnos: un círculo en el suelo junto al inicio. El entrenador está en un punto del borde (por fuera) y el jugador
+    // en el opuesto, uno frente al otro; los pokémon pelean en medio. ---
+    static constexpr float ARENA_RADIUS = 7.0f;       // radio de la zona (m)
+    static constexpr float ARENA_EDGE_GAP = 0.9f;     // los entrenadores están así de lejos del borde, por fuera
+    static constexpr float ARENA_POKEMON = 3.0f;      // cada pokémon, así de lejos del centro
+    DirectX::XMFLOAT3 arenaCenter() const {
+        const float x = ARENA_X, z = ARENA_Z;
+        return { x, (std::max)(Physics::World::START_HEIGHT, world.surfaceHeight(x, z)), z };
+    }
+    // Del jugador hacia el entrenador (unitario, en el plano).
+    static DirectX::XMFLOAT3 arenaDirection() { return { 0.0f, 0.0f, -1.0f }; }
+    // Dónde está cada entrenador (lado 0 = jugador, 1 = rival) cuando ya han tomado sitio.
+    DirectX::XMFLOAT3 arenaStand(int side) const {
+        const DirectX::XMFLOAT3 c = arenaCenter(), d = arenaDirection();
+        const float r = ARENA_RADIUS + ARENA_EDGE_GAP, k = side == 1 ? r : -r;
+        const float x = c.x + d.x * k, z = c.z + d.z * k;
+        return { x, (std::max)(c.y, world.surfaceHeight(x, z)), z };
+    }
+
     // Vista del combate por turnos: detrás de nuestro pokémon, mirando hacia el rival.
     DirectX::XMFLOAT3 battleSpot(int side) const {
-        const float dx = std::sin(m_battleYaw), dz = std::cos(m_battleYaw);
-        const float distance = side == 0 ? 0.0f : BATTLE_DISTANCE;
-        const float x = m_battleOrigin.x + dx * distance, z = m_battleOrigin.z + dz * distance;
-        return { x, (std::max)(m_battleOrigin.y, world.surfaceHeight(x, z)), z };
+        const DirectX::XMFLOAT3 c = arenaCenter(), d = arenaDirection();
+        const float k = side == 1 ? ARENA_POKEMON : -ARENA_POKEMON;
+        return { c.x + d.x * k, c.y, c.z + d.z * k };
     }
     // Tiempo y desplazamiento de la embestida del que ataca y el temblor del que recibe (en metros hacia delante y a un lado).
     DirectX::XMFLOAT3 battleOffset(int side) const {
@@ -2103,7 +2196,16 @@ struct Scene {
     }
     float battleYaw() const { return m_battleYaw; }
     int battleTrainer() const { return m_battleTrainer; }
-    void advanceBattleFx(float dt) { battleFx.time += dt; }
+    void advanceBattleFx(float dt) {
+        battleFx.time += dt;
+        if (!battle || m_battleSlide >= 1.0f) return;
+        // Durante la pantalla de carga el entrenador y el jugador caminan hasta sus sitios del borde (con suavizado).
+        m_battleSlide = (std::min)(1.0f, m_battleSlide + dt / BATTLE_SLIDE_TIME);
+        const float e = m_battleSlide * m_battleSlide * (3.0f - 2.0f * m_battleSlide);
+        const DirectX::XMFLOAT3 mine = arenaStand(0), theirs = arenaStand(1);
+        player.body.position = { m_battleOrigin.x + (mine.x - m_battleOrigin.x) * e, m_battleOrigin.y + (mine.y - m_battleOrigin.y) * e, m_battleOrigin.z + (mine.z - m_battleOrigin.z) * e };
+        if (m_battleTrainer >= 0) trainers[m_battleTrainer].body.position = { m_trainerHome.x + (theirs.x - m_trainerHome.x) * e, m_trainerHome.y + (theirs.y - m_trainerHome.y) * e, m_trainerHome.z + (theirs.z - m_trainerHome.z) * e };
+    }
     // Empieza la animación de un mensaje del combate (quién ataca y si llega el golpe).
     void playBattleFx(int attacker, bool hit) { battleFx = { attacker, hit, 0.0f }; }
 
@@ -2111,8 +2213,12 @@ struct Scene {
 
     static constexpr int DUEL_POKEMON = 2;
     static constexpr int DUEL_MONEY = 300;
-    static constexpr float DUEL_PAUSE = 1.5f;
-    static constexpr float BATTLE_DISTANCE = 7.5f;
+    static constexpr float DUEL_PAUSE = 0.35f;
+    static constexpr float BATTLE_SLIDE_TIME = 1.8f; // lo que tardan en colocarse (menos que la pantalla de carga)
+    static constexpr float ARENA_X = -3.0f, ARENA_Z = 17.5f; // centro de la zona: al sur de los entrenadores
+    DirectX::XMFLOAT3 m_trainerHome = {};
+    std::map<int, int> m_shopBought; // unidades compradas de cada objeto que aún no han dado regalo
+    float m_battleSlide = 1.0f;
     int m_duelTrainer = -1;
     int m_duelLeft = 0;
     float m_duelPause = 0.0f;
