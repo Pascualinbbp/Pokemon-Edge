@@ -138,6 +138,7 @@ class GameEngine {
 
     // Combate por turnos y aprendizaje de movimientos (la interfaz abre su pantalla y la partida queda congelada).
     bool takeBattleRequest() { const bool requested = m_scene.battleRequested; m_scene.battleRequested = false; return requested; }
+    void battleOrbit(float yaw, float tilt) { m_scene.battleOrbit(yaw, tilt); }
     bool takeShopRequest() { const bool requested = m_scene.shopRequested; m_scene.shopRequested = false; return requested; }
     std::vector<const Item*> shopStock() const { return m_scene.shopStock(); }
     std::string shopBuy(int itemId, int quantity) { return m_scene.shopBuy(itemId, quantity); }

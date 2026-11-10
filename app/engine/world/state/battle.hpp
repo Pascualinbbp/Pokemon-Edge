@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include "../rules/battleRules.hpp"
+#include "../rules/experienceRules.hpp"
 
 // Combate por turnos 1 contra 1 con cambios de pokémon (única definición; no sabe nada de pantallas). El jugador manda una orden por turno
 // (submit); el combate resuelve el turno entero y lo cuenta como una cola de mensajes, cada uno con una foto de los PS en ese momento, para
@@ -41,6 +42,9 @@ class Battle {
         int fxStat = -1;      // estadística (subir/bajar)
         int fxAmount = 0;     // niveles que cambia (con signo)
         std::string fxText;   // texto del aviso (nombre de la habilidad o de la estadística)
+        bool onField[2] = { false, false }; // cada pokémon está ya en el campo (aún no ha salido de su pokéball o ya volvió a ella: no)
+        int animKind = 0;     // 1 vuelve a su pokéball, 2 sale de su pokéball, 3 se debilita
+        int animSide = -1;
     };
 
     Battle(const GameData& data, std::vector<Fighter> player, int playerActive, std::vector<Fighter> foe, std::string foeName)
@@ -54,6 +58,7 @@ class Battle {
         say(m_foeName + " quiere combatir");
         enter(1);
         enter(0);
+        markFaced();
     }
 
     Phase phase() const { return m_phase; }
@@ -62,7 +67,7 @@ class Battle {
     int active(int side) const { return m_active[side]; }
     const Fighter& fighter(int side) const { return m_team[side][m_active[side]]; } // el que está en combate de ese lado
     const std::string& foeName() const { return m_foeName; }
-    int xpEarned() const { return m_xp; }
+    const std::vector<int>& defeatedLevels() const { return m_defeated; } // niveles de los pokémon rivales derrotados (el jugador gana experiencia por ellos)
 
     // Cola de mensajes pendientes de mostrar.
     bool hasMessage() const { return !m_messages.empty(); }
@@ -127,7 +132,8 @@ class Battle {
     std::deque<Message> m_messages;
     Phase m_phase = Phase::CHOOSE;
     Outcome m_outcome = Outcome::NONE;
-    int m_xp = 0;
+    std::vector<int> m_defeated;
+    bool m_onField[2] = { false, false };
 
     // --- Utilidades ---
     int firstAlive(int side) const {
@@ -145,6 +151,7 @@ class Battle {
         m.moveType = moveType;
         m.hit = hit;
         for (int side = 0; side < 2; ++side) {
+            m.onField[side] = m_onField[side];
             const Fighter& f = m_team[side][m_active[side]];
             m.speciesId[side] = f.speciesId; m.name[side] = f.name; m.level[side] = f.level; m.hp[side] = f.hp; m.maxHp[side] = f.maxHp;
             m.status[side] = f.status; m.shiny[side] = f.shiny;
@@ -153,6 +160,9 @@ class Battle {
         }
         m_messages.push_back(m);
     }
+
+    // El último mensaje lleva una animación de pokéball (1 vuelve, 2 sale, 3 se debilita) para ese lado.
+    void anim(int side, int kind) { m_messages.back().animKind = kind; m_messages.back().animSide = side; }
 
     // Marca el último mensaje con un aviso visual para 'side' (sube/baja una estadística, habilidad activada).
     void tag(int side, int kind, const std::string& text, int stat = -1, int amount = 0) {
@@ -179,7 +189,9 @@ class Battle {
     void enter(int side) {
         Fighter& f = cur(side);
         f.participated = side == 0 ? true : f.participated;
+        m_onField[side] = true;
         say((side == 0 ? "¡Adelante, " + f.name + "!" : m_foeName + " envía a " + f.name + "."));
+        anim(side, 2);
         for (const Ability* a : BattleRules::abilitiesOf(*m_data, f)) {
             if (a->trigger != Ability::Trigger::ON_ENTER || !a->spec.active()) continue;
             say(f.name + " activa " + a->name);
@@ -190,13 +202,15 @@ class Battle {
 
     void switchTo(int side, int index) {
         Fighter& old = cur(side);
-        if (!old.fainted()) say(side == 0 ? "¡Vuelve, " + old.name + "!" : m_foeName + " retira a " + old.name + ".");
+        if (!old.fainted()) { say(side == 0 ? "¡Vuelve, " + old.name + "!" : m_foeName + " retira a " + old.name + "."); anim(side, 1); }
+        m_onField[side] = false;
         old.stages = {};
         old.flinched = false;
         old.protecting = false;
         m_active[side] = index;
         if (side == 0) cur(0).participated = true;
         enter(side);
+        markFaced();
     }
 
     // --- IA del rival ---
@@ -300,10 +314,10 @@ class Battle {
             if (const HeldItem* held = m_data->held(me.heldId)) {
                 if (held->effect == HeldItem::Effect::LIFE_ORB && !me.fainted()) { me.hp = (std::max)(0, me.hp - (std::max)(1, me.maxHp / BattleRules::RECOIL_ORB_DIVISOR)); say(who(me, side) + " pierde PS por la Vidasfera."); }
             }
-            if (foe.fainted()) say(who(foe, 1 - side) + " se debilitó.");
+            if (foe.fainted()) { say(who(foe, 1 - side) + " se debilitó."); anim(1 - side, 3); m_onField[1 - side] = false; }
         }
         if (move.effect.active()) applyEffect(move.effect, side, targetsFoe && !move.effect.self ? 1 - side : side, dealt, &move);
-        if (me.fainted()) say(who(me, side) + " se debilitó.");
+        if (me.fainted()) { say(who(me, side) + " se debilitó."); anim(side, 3); m_onField[side] = false; }
         resolveFaints();
     }
 
@@ -374,18 +388,30 @@ class Battle {
                 if (a->trigger != Ability::Trigger::END_TURN || !a->spec.active()) continue;
                 applyEffect(a->spec, side, 1 - side, 0, nullptr);
             }
-            if (f.fainted()) say(who(f, side) + " se debilitó.");
+            if (f.fainted()) { say(who(f, side) + " se debilitó."); anim(side, 3); m_onField[side] = false; }
         }
         m_coin = chance(0.5f);
         resolveFaints();
     }
+
+    // Los pokémon del jugador que estuvieron frente al rival derrotado y siguen en pie se reparten su experiencia (según el nivel de cada uno).
+    void awardXp() {
+        const Fighter& foe = cur(1);
+        m_defeated.push_back(foe.level);
+        std::vector<int> winners;
+        for (int i = 0; i < static_cast<int>(m_team[0].size()); ++i) if ((foe.faced >> i & 1u) && !m_team[0][static_cast<size_t>(i)].fainted()) winners.push_back(i);
+        float rarity = 1.0f;
+        if (const PokemonSpecies* species = m_data->speciesById(foe.speciesId)) rarity = m_data->xpMultiplier(*species);
+        for (const int i : winners) m_team[0][static_cast<size_t>(i)].xpGain += ExperienceRules::pokemonXp(foe.level, m_team[0][static_cast<size_t>(i)].level, static_cast<int>(winners.size()), rarity);
+    }
+    void markFaced() { cur(1).faced |= 1u << m_active[0]; }
 
     // Quien cae: el rival saca al siguiente solo; si es el jugador, elige él (o pierde si no le queda ninguno).
     void resolveFaints() {
         if (m_phase == Phase::OVER) return;
         if (cur(1).fainted() && !m_foeCounted) {
             m_foeCounted = true;
-            m_xp += PokemonRules::battleXp(cur(1).level);
+            awardXp();
         }
         if (cur(1).fainted()) {
             const int next = firstAlive(1);
@@ -394,6 +420,7 @@ class Battle {
             m_foeCounted = false;
             m_replaced[1] = true;
             enter(1);
+            markFaced();
         }
         if (cur(0).fainted() && m_phase == Phase::CHOOSE) {
             if (firstAlive(0) < 0) { finish(Outcome::LOST); return; }

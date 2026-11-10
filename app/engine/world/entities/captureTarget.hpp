@@ -1,9 +1,11 @@
 #pragma once
 #include <algorithm>
+#include <vector>
 #include <cmath>
 #include <utility>
 #include <DirectXMath.h>
 #include "../../physics/physicsWorld.hpp"
+#include "../../physics/steering.hpp"
 #include "../../../utils/core/randomUtil.hpp"
 #include "../rules/captureRules.hpp"
 #include "../state/captureSequence.hpp"
@@ -34,6 +36,9 @@ class CaptureTarget {
 
     enum class Event { NONE, CAPTURED, ESCAPED }; // se emite en el instante en que la animación revela el resultado
 
+    std::vector<int> attackers; // posiciones del equipo de los pokémon que le han golpeado (reparten la experiencia al derrotarlo)
+    void addAttacker(int teamIndex) { if (std::find(attackers.begin(), attackers.end(), teamIndex) == attackers.end()) attackers.push_back(teamIndex); }
+
     Physics::Body body; // pasa por la misma física que el resto (suelo, paredes)
 
     CaptureTarget() {
@@ -44,6 +49,7 @@ class CaptureTarget {
     // Lo coloca (o recoloca) en un punto del mundo, vivo, con la vida entera y sin especie asignada.
     // 'y' = altura de los pies (de ella depende si está bajo tierra o en la superficie); 'deep' = sale de una galería al renovarse.
     void place(float x, float y, float z, float yaw, bool deep = false) {
+        attackers.clear();
         body.position = { x, y, z };
         body.underground = deep;
         m_deepSlot = deep;
@@ -268,6 +274,7 @@ class CaptureTarget {
             m_fightClock -= dt;
             const float fx = m_foe.x - body.position.x, fz = m_foe.y - body.position.z, dist = std::sqrt(fx * fx + fz * fz);
             m_heading = std::atan2(fx, fz);
+            if (dist > m_keep + 0.4f) m_heading = Steering::avoid(world, { body.position.x, body.position.y + HALF, body.position.z }, HALF, m_heading, m_avoidSide, dist); // rodea lo que haya de por medio
             m_yaw += (std::clamp)(DirectX::XMScalarModAngle(m_heading - m_yaw), -TURN_SPEED * 2.0f * dt, TURN_SPEED * 2.0f * dt);
             float move = 0.0f;
             if (dist > m_keep + 0.4f) move = 1.0f;
@@ -325,6 +332,7 @@ class CaptureTarget {
     float m_hp = 1.0f;
     DirectX::XMFLOAT2 m_foe = {};   // dónde está su rival (x, z)
     float m_keep = 1.5f;            // distancia a la que pelea
+    int m_avoidSide = 0;            // lado por el que rodea un obstáculo al ir hacia su rival
     float m_fightClock = 0.0f;
     float m_eatClock = 0.0f, m_eatTotal = 1.0f;
     int m_speciesIndex = -1;

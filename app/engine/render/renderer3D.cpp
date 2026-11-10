@@ -1585,7 +1585,6 @@ void Renderer3D::addNode(const ResourceNode& node) {
 // Fruto caído: coco (esfera marrón con tres "ojos"), plátano (media luna amarilla) o cereza (pareja roja); gira al rodar.
 namespace {
 constexpr const char* COCONUT_MODEL = "fruits/coconut"; // assets/models/fruits/coconut.glb
-constexpr float COCONUT_SCALE = 1.45f;                  // el modelo mide ~0,18 m: así iguala al coco de Fruit::RADIUS
 }
 
 void Renderer3D::addFruit(const Fruit& fruit) {
@@ -1599,7 +1598,7 @@ void Renderer3D::addFruit(const Fruit& fruit) {
         if (model && fruit.half()) { // mitad suelta: tumbada con la parte abierta hacia arriba, girada según el coco
             const int index = model->part(fruit.part() == Fruit::Part::HALF_A ? "mitad_a" : "mitad_b");
             if (index >= 0) {
-                const float s = COCONUT_SCALE * k;
+                const float s = k; // el modelo ya viene a su tamaño: k solo anima aparecer/desaparecer
                 const XMMATRIX flip = fruit.part() == Fruit::Part::HALF_B ? XMMatrixRotationX(3.14159265f) : XMMatrixIdentity(); // la tapa se da la vuelta: queda como un cuenco
                 add(model->parts[static_cast<size_t>(index)].mesh, XMMatrixScaling(s, s, s) * flip * XMMatrixRotationY(fruit.yaw()) * XMMatrixTranslation(p.x, p.y, p.z),
                     { 1.0f, 1.0f, 1.0f, 0.0f }, true, DrawKind::MODEL, model->texture.Get());
@@ -1608,7 +1607,7 @@ void Renderer3D::addFruit(const Fruit& fruit) {
         }
         if (model && !fruit.half()) {
             const XMFLOAT3 c = model->center();
-            const float s = COCONUT_SCALE * k;
+            const float s = k;
             addModel(*model, XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(s, s, s) * XMMatrixRotationX(fruit.spin()) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
             return;
         }
@@ -1657,7 +1656,6 @@ void Renderer3D::addFootprints(const Scene& scene) {
 
 namespace {
 constexpr const char* GROUND_ITEM_MODEL = "ground/item"; // assets/models/ground/item.glb
-constexpr float GROUND_ITEM_HEIGHT = 0.42f;            // altura con la que se dibuja (m)
 }
 
 void Renderer3D::addGroundItem(const GroundItem& item) {
@@ -1665,11 +1663,11 @@ void Renderer3D::addGroundItem(const GroundItem& item) {
     const float k = item.scale();
     if (k <= 0.001f) return;
 
-    // Bolsita del suelo (assets/models/ground/item.glb, apoyada en el suelo); sin archivo queda solo el destello.
+    // Objeto del suelo: el modelo assets/models/ground/item.glb tal cual (ya tiene sus medidas), apoyado en el suelo. Solo si falta el archivo se usa la cúpula.
     if (const RenderModel* bag = m_models.get(m_device, GROUND_ITEM_MODEL, false)) {
         const XMFLOAT3 c = bag->center();
-        const float s = GROUND_ITEM_HEIGHT / (std::max)(0.001f, bag->height()) * k;
-        addModel(*bag, XMMatrixTranslation(-c.x, -bag->boundsMin.y, -c.z) * XMMatrixScaling(s, s, s) * XMMatrixRotationY(item.body.position.x * 3.1f) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, item.glow() * 0.6f }, ModelPose());
+        addModel(*bag, XMMatrixTranslation(-c.x, -bag->boundsMin.y, -c.z) * XMMatrixScaling(k, k, k) * XMMatrixRotationY(p.x * 3.1f) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
+        return;
     }
     const float r = GroundItem::RADIUS * k;
     add(m_dome, XMMatrixScaling(r, r, r) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, item.glow() }, false);
@@ -1720,15 +1718,59 @@ void Renderer3D::addTrainers(const Scene& scene) {
 void Renderer3D::addBattle(const Scene& scene) {
     const Battle& battle = *scene.battle;
     const float size = Companion::SIZE * 1.15f;
+    const Scene::BattleFx& animFx = scene.battleFx;
+    const Battle::Message* current = battle.hasMessage() ? &battle.front() : nullptr;
+    // Pokéball sencilla (mitad roja, mitad blanca) en un punto.
+    const auto drawBall = [&](const XMFLOAT3& at, float radius, float open) {
+        add(m_sphere, XMMatrixScaling(radius, radius, radius) * XMMatrixTranslation(at.x, at.y + radius * 0.25f, at.z), { 0.9f, 0.15f, 0.15f, 0.0f }, false);
+        add(m_sphere, XMMatrixScaling(radius * 0.97f, radius * 0.7f, radius * 0.97f) * XMMatrixTranslation(at.x, at.y - radius * 0.3f, at.z), { 0.95f, 0.95f, 0.95f, 0.0f }, false);
+        if (open > 0.0f) add(m_sphere, XMMatrixScaling(radius * 1.1f, radius * 1.1f, radius * 1.1f) * XMMatrixTranslation(at.x, at.y, at.z), { 1.0f, 1.0f, 1.0f, open }, false, DrawKind::GLOW);
+    };
     for (int side = 0; side < 2; ++side) {
         const Battle::Fighter& f = battle.fighter(side);
-        const Battle::Message* shown = battle.hasMessage() ? &battle.front() : nullptr;
-        const int hp = shown ? shown->hp[side] : f.hp;
-        const int species = shown ? shown->speciesId[side] : f.speciesId;
-        if (hp <= 0 && !(scene.battleFx.attacker == side)) continue; // el debilitado desaparece
-        const XMFLOAT3 spot = scene.battleSpot(side), off = scene.battleOffset(side);
+        const int hp = current ? current->hp[side] : f.hp;
+        const int species = current ? current->speciesId[side] : f.speciesId;
+        const bool onField = current ? current->onField[side] : true;
+        const int anim = current && current->animSide == side ? current->animKind : 0;
+        if (!onField) continue;
+        const float t = animFx.time;
+        const XMFLOAT3 spot = scene.battleSpot(side), off = scene.battleOffset(side), stand = scene.arenaStand(side);
+        const XMFLOAT3 hand = { stand.x, stand.y + 1.3f, stand.z };
+        float scale = 1.0f, sink = 0.0f;
+        if (anim == 1) { // vuelve a su pokéball: un rayo rojo lo recoge y se encoge hacia la mano
+            const float k = (std::min)(t / 0.7f, 1.0f);
+            scale = 1.0f - k;
+            for (int i = 1; i <= 6; ++i) {
+                const float u = static_cast<float>(i) / 7.0f;
+                add(m_sphere, XMMatrixScaling(0.11f, 0.11f, 0.11f) * XMMatrixTranslation(spot.x + (hand.x - spot.x) * u, spot.y + size * 0.5f * (1.0f - u) + hand.y * u, spot.z + (hand.z - spot.z) * u),
+                    { 1.0f, 0.2f, 0.2f, 0.9f * (1.0f - k) }, false, DrawKind::GLOW);
+            }
+            const float g = size * (1.1f - 0.6f * k);
+            add(m_sphere, XMMatrixScaling(g, g, g) * XMMatrixTranslation(spot.x, spot.y + size * 0.5f, spot.z), { 1.0f, 0.25f, 0.25f, 0.6f * (1.0f - k) }, false, DrawKind::GLOW);
+            if (k < 1.0f) drawBall(hand, 0.14f, 0.0f);
+        } else if (anim == 2) { // sale de su pokéball: la lanza el entrenador, se abre con un destello y crece
+            constexpr float FLIGHT = 0.45f, GROW = 0.4f;
+            if (t < FLIGHT) {
+                const float u = t / FLIGHT;
+                drawBall({ hand.x + (spot.x - hand.x) * u, hand.y + (spot.y + 0.3f - hand.y) * u + std::sin(u * 3.14159265f) * 1.2f, hand.z + (spot.z - hand.z) * u }, 0.14f, 0.0f);
+                scale = 0.0f;
+            } else {
+                const float k = (std::min)((t - FLIGHT) / GROW, 1.0f);
+                scale = k;
+                const float g = size * (0.4f + 1.4f * k);
+                add(m_sphere, XMMatrixScaling(g, g, g) * XMMatrixTranslation(spot.x, spot.y + size * 0.5f, spot.z), { 1.0f, 1.0f, 1.0f, 0.9f * (1.0f - k) }, false, DrawKind::GLOW);
+                if (k < 0.5f) drawBall({ spot.x, spot.y + 0.3f, spot.z }, 0.14f, 1.0f - k * 2.0f);
+            }
+        } else if (hp <= 0) { // debilitado: se hunde y se desvanece (si la animación ya acabó, no se dibuja)
+            if (anim != 3) continue;
+            const float k = (std::min)(t / 0.8f, 1.0f);
+            scale = 1.0f - k;
+            sink = k * size * 0.5f;
+            add(m_sphere, XMMatrixScaling(size, size, size) * XMMatrixTranslation(spot.x, spot.y + size * 0.5f, spot.z), { 1.0f, 0.2f, 0.2f, 0.5f * (1.0f - k) }, false, DrawKind::GLOW);
+        }
+        if (scale <= 0.01f) continue;
         const float yaw = scene.battleYaw() + (side == 0 ? 0.0f : 3.14159265f);
-        addCreature({ spot.x + off.x, spot.y + size * 0.5f, spot.z + off.z }, size, yaw, species, shown ? shown->shiny[side] : f.shiny);
+        addCreature({ spot.x + off.x, spot.y + size * 0.5f * scale - sink, spot.z + off.z }, size * scale, yaw, species, current ? current->shiny[side] : f.shiny);
     }
     const Scene::BattleFx& fx = scene.battleFx;
     if (fx.attacker >= 0 && fx.hit && fx.time > 0.2f && fx.time < 0.6f) {
@@ -1762,26 +1804,11 @@ void Renderer3D::addBattle(const Scene& scene) {
     }
 }
 
-// Zona de combate por turnos: un disco circular en el suelo con un borde de losetas, un círculo central y las marcas donde se colocan los entrenadores y los pokémon.
+// Zona de combate por turnos: un disco circular en el suelo (sin más marcas).
 void Renderer3D::addArena(const Scene& scene) {
     const XMFLOAT3 c = scene.arenaCenter();
-    constexpr float R = Scene::ARENA_RADIUS, PI2 = 6.2831853f;
+    constexpr float R = Scene::ARENA_RADIUS;
     add(m_sphere, XMMatrixScaling(R, 0.06f, R) * XMMatrixTranslation(c.x, c.y, c.z), { 0.58f, 0.62f, 0.68f, 0.0f }, false);
-    const auto ring = [&](const XMFLOAT3& at, float radius, int count, float width, const XMFLOAT4& a, const XMFLOAT4& b) {
-        const float length = PI2 * radius / static_cast<float>(count) * 0.9f;
-        for (int i = 0; i < count; ++i) {
-            const float angle = PI2 * static_cast<float>(i) / static_cast<float>(count);
-            add(m_cube, XMMatrixScaling(length, 0.1f, width) * XMMatrixRotationY(angle) * XMMatrixTranslation(at.x + std::sin(angle) * radius, at.y + 0.04f, at.z + std::cos(angle) * radius),
-                i % 2 ? a : b, false);
-        }
-    };
-    ring(c, R, 72, 0.32f, { 0.95f, 0.95f, 0.95f, 0.0f }, { 0.85f, 0.2f, 0.2f, 0.0f });
-    ring(c, 1.3f, 28, 0.14f, { 0.95f, 0.95f, 0.95f, 0.0f }, { 0.95f, 0.95f, 0.95f, 0.0f });
-    for (int side = 0; side < 2; ++side) {
-        const XMFLOAT3 spot = scene.battleSpot(side), stand = scene.arenaStand(side);
-        ring(spot, 1.0f, 20, 0.12f, { 1.0f, 0.85f, 0.3f, 0.0f }, { 1.0f, 0.85f, 0.3f, 0.0f });
-        add(m_cube, XMMatrixScaling(1.5f, 0.07f, 1.5f) * XMMatrixTranslation(stand.x, stand.y + 0.035f, stand.z), side == 0 ? XMFLOAT4{ 0.25f, 0.45f, 0.9f, 0.0f } : XMFLOAT4{ 0.9f, 0.3f, 0.25f, 0.0f }, false);
-    }
 }
 
 void Renderer3D::addMachine() {
@@ -1818,7 +1845,7 @@ void Renderer3D::addChest(const Chest& chest) {
     const ChestModel& model = chestModel(look.model);
     if (model.model) {
         const XMFLOAT3 c = model.model->center();
-        const float k = Chest::HEIGHT / (std::max)(0.001f, model.model->height());
+        const float k = 1.0f; // el modelo ya viene a su tamaño
         ModelPose pose;
         pose.set(model.lid, chest.lidAngle() / Chest::LID_ANGLE);
         addModel(*model.model, XMMatrixTranslation(-c.x, -model.model->boundsMin.y, -c.z) * XMMatrixScaling(k, k, k) * place, { 1.0f, 1.0f, 1.0f, look.glow * 0.5f }, pose);

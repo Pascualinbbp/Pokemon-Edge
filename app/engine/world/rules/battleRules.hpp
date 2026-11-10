@@ -48,6 +48,8 @@ namespace BattleRules {
         int protectStreak = 0;
         bool flinched = false;
         bool participated = false;
+        unsigned faced = 0;   // (rival) bits de los pokémon del jugador que estuvieron en combate frente a él
+        int xpGain = 0;       // (jugador) experiencia que ha ganado en este combate
         int source = -1; // posición en el equipo de origen
 
         bool fainted() const { return hp <= 0; }

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <DirectXMath.h>
 #include "../../physics/physicsWorld.hpp"
+#include "../../physics/steering.hpp"
 #include "ballTransfer.hpp"
 #include "../../audio/sounds.hpp"
 
@@ -119,7 +120,7 @@ class Companion {
     // Avanza el seguimiento. 'power' > 0 = trabajando este frame (el multiplicador del pokémon); devuelve true cuando
     // completa un golpe. Con 'goal' va hacia ese punto (aunque se separe del jugador) en vez de seguirlo y se detiene a 'approach' de él.
     bool update(float dt, const Physics::World& world, const DirectX::XMFLOAT3& playerPosition, float cameraYaw, float power,
-                const DirectX::XMFLOAT3* goal = nullptr, float approach = APPROACH) {
+                const DirectX::XMFLOAT3* goal = nullptr, float approach = APPROACH, bool combat = false) {
         if (!active()) return false;
         m_time += dt;
         m_cameraYaw = cameraYaw;
@@ -137,7 +138,7 @@ class Companion {
         const float distance = std::sqrt(dx * dx + dz * dz);
         const float stop = goal ? approach : 0.3f;
         float heading = std::atan2(dx, dz);
-        if (goal && distance > AVOID_MIN_GOAL) heading = avoid(world, heading);
+        if (goal && (distance > AVOID_MIN_GOAL || combat) && distance > stop) heading = avoid(world, heading, distance);
         if (goal) m_yaw = std::atan2(dx, dz); // de cara a su objetivo aunque ya haya llegado
         if (!goal && distance > TELEPORT_DISTANCE) {
             body.position = { spot.x, playerPosition.y, spot.y };
@@ -226,25 +227,8 @@ class Companion {
 
     // Rumbo libre de obstáculos más cercano al deseado: si hay algo delante, prueba cada vez más a los lados (primero hacia el
     // lado que ya usaba, para no vacilar) y sigue por el primero que está despejado.
-    float avoid(const Physics::World& world, float heading) {
-        const DirectX::XMFLOAT3 from = { body.position.x, body.position.y + PROBE_HEIGHT, body.position.z };
-        const auto clear = [&](float angle) {
-            const DirectX::XMFLOAT3 to = { from.x + std::sin(angle) * AVOID_PROBE, from.y, from.z + std::cos(angle) * AVOID_PROBE };
-            return !world.blocked(from, to);
-        };
-        if (clear(heading)) {
-            m_avoidSide = 0;
-            return heading;
-        }
-        const int first = m_avoidSide != 0 ? m_avoidSide : 1;
-        for (const float offset : { 0.5f, 1.0f, 1.5f, 2.0f }) {
-            for (const int side : { first, -first }) {
-                if (!clear(heading + side * offset)) continue;
-                m_avoidSide = side;
-                return heading + side * offset;
-            }
-        }
-        return heading;
+    float avoid(const Physics::World& world, float heading, float limit) {
+        return Steering::avoid(world, { body.position.x, body.position.y + PROBE_HEIGHT, body.position.z }, body.collisionRadius, heading, m_avoidSide, limit);
     }
 
     // Punto donde se coloca: detrás y a la derecha del jugador respecto a la cámara.

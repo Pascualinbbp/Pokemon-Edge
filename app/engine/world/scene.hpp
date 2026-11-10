@@ -25,6 +25,7 @@
 #include "entities/captureTarget.hpp"
 #include "rules/rewardRules.hpp"
 #include "rules/shopRules.hpp"
+#include "rules/experienceRules.hpp"
 #include "rules/evRules.hpp"
 #include "state/playerProgress.hpp"
 #include "rules/pokemonRules.hpp"
@@ -427,7 +428,7 @@ struct Scene {
             }
         } else if (m_interaction.kind == Interaction::FRUIT) {
             s.interactVerb = PICK_VERB;
-            s.interactTarget = &fruitName(fruits[m_interaction.index].kind());
+            s.interactTarget = &fruitName(fruits[m_interaction.index]);
         } else if (m_interaction.kind == Interaction::PROFESSOR) {
             s.interactVerb = TALK_VERB;
             s.interactTarget = &PROFESSOR_NAME;
@@ -769,6 +770,11 @@ struct Scene {
                    (!stored ? " (sin espacio)" : sentToPc ? " (enviado al PC)" : "");
         }
         if (const int levels = progress.addXp(static_cast<int>(std::lround(static_cast<float>(Xp::CAPTURE) * rarityXp))); levels > 0) text += "   ¡Nivel " + std::to_string(progress.level()) + "!";
+        if (event == CaptureTarget::Event::CAPTURED && storage.active()) { // el compañero también gana (menos que si lo derrotara: misma fórmula, reducida)
+            const int xp = ExperienceRules::pokemonXp(target.level(), storage.active()->level, 1, rarityXp, ExperienceRules::Source::CAPTURE);
+            storage.addXp(storage.activeIndex(), xp, progress.levelCap());
+            text += "   +" + std::to_string(xp) + " PX";
+        }
         switch (target.throwKind()) {
             case CaptureRules::Throw::LUCKY:       showNotice(Notice::LUCKY, text); break;
             case CaptureRules::Throw::SUPER_LUCKY: showNotice(Notice::SUPER_LUCKY, text); break;
@@ -1002,7 +1008,7 @@ struct Scene {
                 }
             }
             for (Fruit& fruit : fruits) { // también recoge los frutos caídos (el jugador tiene prioridad: si los coge antes, ya no están)
-                if (!fruit.pickable() || !fruit.body.onGround || !inRange(fruit.body.position)) continue;
+                if (!fruit.available() || !fruit.body.onGround || !inRange(fruit.body.position)) continue;
                 const float d2 = distance2(fruit.body.position);
                 if (d2 < best) {
                     best = d2;
@@ -1042,7 +1048,7 @@ struct Scene {
         const float teamBonus = nodeTarget && arrived ? nodeTarget->teamBonus(false) : 1.0f;
         const float power = arrived ? Companion::workPower(fightTarget ? 1 : level, teamBonus) : 0.0f;
         const bool tending = potionFx.time >= 0.0f && potionFx.time < POTION_SPRAY_TO; // viene a donde el jugador le está curando
-        if (!companion.update(dt, world, player.body.position, camera.yaw(), tending ? 0.0f : power, tending ? &player.body.position : goal, tending ? POTION_DISTANCE : approach)) return;
+        if (!companion.update(dt, world, player.body.position, camera.yaw(), tending ? 0.0f : power, tending ? &player.body.position : goal, tending ? POTION_DISTANCE : approach, fightTarget != nullptr && !tending)) return;
         if (nodeTarget) workNode(*nodeTarget, false);
         else if (groundTarget) collect(*groundTarget);
         else if (fruitTarget) collectFruit(*fruitTarget);
@@ -1228,14 +1234,31 @@ struct Scene {
                 if (OwnedPokemon* mine = storage.activeMut()) storage.hurt(*mine, (std::max)(1, storage.maxHp(*mine) / LIFE_ORB_RECOIL_DIVISOR)); // la Vidasfera cobra su precio
             }
         }
+        target.addAttacker(storage.activeIndex());
         if (!target.damage((std::min)(fraction, DamageRules::MAX_HIT))) return;
 
-        const int xp = PokemonRules::battleXp(target.level());
-        const PokemonStorage::XpResult result = storage.addXp(storage.activeIndex(), xp, progress.levelCap());
-        shareExperience(xp);
-        std::string text = name + "  +" + std::to_string(xp) + " PX";
-        if (result.levels > 0) text += "   ¡Nivel " + std::to_string(storage.active()->level) + "!";
-        if (result.evolved) Sound::emit(Sound::Sfx::EVOLVE, companion.center());
+        // Derrotado: la experiencia (fórmula única, ExperienceRules) se reparte entre quienes lo golpearon y siguen en pie.
+        std::vector<int> winners;
+        for (const int index : target.attackers) if (index >= 0 && index < static_cast<int>(storage.team().size()) && !storage.fainted(storage.team()[static_cast<size_t>(index)])) winners.push_back(index);
+        if (std::find(winners.begin(), winners.end(), storage.activeIndex()) == winners.end()) winners.push_back(storage.activeIndex());
+        float rarity = 1.0f;
+        if (const PokemonSpecies* foe = m_data->speciesById(target.speciesId())) rarity = m_data->xpMultiplier(*foe);
+        std::string text;
+        int activeXp = 0;
+        PokemonStorage::XpResult activeResult;
+        for (const int index : winners) {
+            const int xp = ExperienceRules::pokemonXp(target.level(), storage.team()[static_cast<size_t>(index)].level, static_cast<int>(winners.size()), rarity);
+            const PokemonStorage::XpResult result = storage.addXp(index, xp, progress.levelCap());
+            if (index == storage.activeIndex()) { activeXp = xp; activeResult = result; }
+            if (result.evolved) Sound::emit(Sound::Sfx::EVOLVE, companion.center());
+        }
+        shareExperience(activeXp);
+        if (m_duelTrainer >= 0) { // contra un entrenador, el jugador también gana experiencia
+            const int mine = ExperienceRules::playerXp(target.level(), progress.level());
+            if (progress.addXp(mine) > 0) text = "¡Nivel " + std::to_string(progress.level()) + "!  ";
+        }
+        text += name + "  +" + std::to_string(activeXp) + " PX";
+        if (activeResult.levels > 0) text += "   ¡Nivel " + std::to_string(storage.active()->level) + "!";
         showNotice(Notice::REWARD, std::move(text));
     }
 
@@ -1276,7 +1299,7 @@ struct Scene {
         m_weak = m_weakExpired ? nullptr : weakenedTarget();
         if (const int i = nearestIn(chests.entities, [](const Chest& c) { return c.closed(); }, best); i >= 0) m_interaction = { Interaction::CHEST, i };
         if (const int i = nearestIn(groundItems.entities, [](const GroundItem& g) { return g.available(); }, best); i >= 0) m_interaction = { Interaction::GROUND, i };
-        if (const int i = nearestIn(fruits, [](const Fruit& f) { return f.pickable(); }, best); i >= 0) m_interaction = { Interaction::FRUIT, i };
+        if (const int i = nearestIn(fruits, [](const Fruit& f) { return f.available(); }, best); i >= 0) m_interaction = { Interaction::FRUIT, i };
         const float mx = machine.body.position.x - player.body.position.x, mz = machine.body.position.z - player.body.position.z;
         if (const float d2 = mx * mx + mz * mz; d2 <= machine.reach() * machine.reach() && d2 < best) {
             best = d2;
@@ -1465,8 +1488,11 @@ struct Scene {
     static constexpr float FRUIT_RANGE = 55.0f;      // solo caen en árboles cercanos al jugador
     static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13, CHERRY_TYPE = 11;
 
-    inline static const std::string COCONUT_NAME = "Coco", BANANA_NAME = "Plátano", CHERRY_NAME = "Cereza";
-    static const std::string& fruitName(Fruit::Kind kind) { return kind == Fruit::Kind::COCONUT ? COCONUT_NAME : kind == Fruit::Kind::CHERRY ? CHERRY_NAME : BANANA_NAME; }
+    inline static const std::string COCONUT_NAME = "Coco", HALF_COCONUT_NAME = "Mitad de coco", BANANA_NAME = "Plátano", CHERRY_NAME = "Cereza";
+    static const std::string& fruitName(const Fruit& fruit) {
+        if (fruit.half()) return HALF_COCONUT_NAME; // el coco partido es otro objeto (material "Mitad de coco")
+        return fruit.kind() == Fruit::Kind::COCONUT ? COCONUT_NAME : fruit.kind() == Fruit::Kind::CHERRY ? CHERRY_NAME : BANANA_NAME;
+    }
     static bool fruitKind(int treeType, Fruit::Kind& kind) {
         if (treeType == PALM_TYPE) kind = Fruit::Kind::COCONUT;
         else if (treeType == JUNGLE_TYPE) kind = Fruit::Kind::BANANA;
@@ -1475,9 +1501,9 @@ struct Scene {
         return true;
     }
 
-    const Item* fruitItem(Fruit::Kind kind) const {
+    const Item* fruitItem(const Fruit& fruit) const {
         for (const Material& material : m_data->materials) {
-            if (material.name == fruitName(kind)) return m_data->materialItem(material.id);
+            if (material.name == fruitName(fruit)) return m_data->materialItem(material.id);
         }
         return nullptr;
     }
@@ -1485,7 +1511,7 @@ struct Scene {
     // El jugador o su pokémon cogen un fruto: va al inventario.
     void collectFruit(Fruit& fruit) {
         if (!fruit.available()) return;
-        if (const Item* item = fruitItem(fruit.kind())) giveReward(item->id, 1);
+        if (const Item* item = fruitItem(fruit)) giveReward(item->id, 1);
         gainXp(Xp::PICK_UP);
         fruit.take();
         Sound::emit(Sound::Sfx::PICK, fruit.body.position); // el sonido es del fruto: el mismo para quien lo coja
@@ -1888,6 +1914,11 @@ struct Scene {
                 ball.age += h;
                 for (CaptureTarget* target : wild.loaded()) {
                     if (!target->hitBy(ball.body.position, Pokeball::RADIUS + Pokeball::CONTACT_MARGIN)) continue;
+                    if (target == wild.foe()) { // el pokémon de un entrenador no se captura: la bola rebota y se recupera
+                        showNotice(Notice::REWARD, "¡No puedes capturar a los pokémon de otros entrenadores!");
+                        ball.age = Pokeball::LIFETIME;
+                        break;
+                    }
                     target->beginCapture(ball, CaptureRules::roll(chancePercent(*target, ball.multiplierFor(target->shiny()))), camera.yaw(), world);
                     ball.spent = true;
                     ball.age = Pokeball::LIFETIME; // la bola pasa a ser la de la animación de captura
@@ -2038,6 +2069,8 @@ struct Scene {
         m_battleTrainer = index;
         m_battleOrigin = player.body.position;     // a donde vuelve el jugador al terminar
         m_trainerHome = trainer.body.position;     // y el entrenador
+        m_battleOrbit = 0.0f;
+        m_battleTilt = 0.35f;
         m_battleSlide = 0.0f;                      // durante la carga ambos se desplazan a los bordes de la zona de combate
         m_battleYaw = std::atan2(arenaDirection().x, arenaDirection().z);
         battleFx = {};
@@ -2079,7 +2112,7 @@ struct Scene {
         m_duelNext = false;
         wild.dismissFoe();
         m_engaged = nullptr;
-        if (won) { inventory.addMoney(DUEL_MONEY); showNotice(Notice::REWARD, "¡Has derrotado a " + trainer.name + "!  +" + std::to_string(DUEL_MONEY) + " pokémonedas"); }
+        if (won) showNotice(Notice::REWARD, "¡Has derrotado a " + trainer.name + "!");
     }
 
     // Termina el combate por turnos: PS y PP vuelven a los pokémon del jugador y los que combatieron ganan experiencia si ganó.
@@ -2091,17 +2124,21 @@ struct Scene {
             owned->hp = f.hp;
             owned->pp = f.pp;
         }
-        const bool won = battle->outcome() == Battle::Outcome::WON;
-        if (won) {
-            const int xp = battle->xpEarned();
-            for (const BattleRules::Fighter& f : battle->playerTeam()) {
-                if (!f.participated || f.fainted()) continue;
-                const PokemonStorage::XpResult result = storage.addXp(f.source, xp, progress.levelCap());
-                if (result.levels > 0) showNotice(Notice::LEVEL_UP, f.name + " ¡Nivel " + std::to_string(storage.team()[static_cast<size_t>(f.source)].level) + "!");
-            }
-            inventory.addMoney(DUEL_MONEY);
-            showNotice(Notice::REWARD, "¡Has derrotado a " + battle->foeName() + "!  +" + std::to_string(xp) + " PX, +" + std::to_string(DUEL_MONEY) + " pokémonedas");
+        // Sin dinero ni premios: cada pokémon cobra lo que ganó al derrotar rivales (ya repartido entre los que seguían en pie) y el jugador, la suya.
+        std::string text;
+        for (const BattleRules::Fighter& f : battle->playerTeam()) {
+            if (f.xpGain <= 0) continue;
+            const PokemonStorage::XpResult result = storage.addXp(f.source, f.xpGain, progress.levelCap());
+            text += (text.empty() ? "" : "  ") + f.name + " +" + std::to_string(f.xpGain) + " PX";
+            if (result.levels > 0) text += " (Nv. " + std::to_string(storage.team()[static_cast<size_t>(f.source)].level) + ")";
         }
+        int playerGain = 0;
+        for (const int foeLevel : battle->defeatedLevels()) playerGain += ExperienceRules::playerXp(foeLevel, progress.level());
+        if (playerGain > 0) {
+            text += (text.empty() ? "" : "  ") + std::string("Tú +") + std::to_string(playerGain) + " PX";
+            if (progress.addXp(playerGain) > 0) text += " (Nv. " + std::to_string(progress.level()) + ")";
+        }
+        if (!text.empty()) showNotice(Notice::REWARD, text);
         if (m_battleTrainer >= 0) {
             trainers[m_battleTrainer].busy = false;
             trainers[m_battleTrainer].body.position = m_trainerHome;
@@ -2163,7 +2200,7 @@ struct Scene {
         return { x, (std::max)(Physics::World::START_HEIGHT, world.surfaceHeight(x, z)), z };
     }
     // Del jugador hacia el entrenador (unitario, en el plano).
-    static DirectX::XMFLOAT3 arenaDirection() { return { 0.0f, 0.0f, -1.0f }; }
+    static DirectX::XMFLOAT3 arenaDirection() { return { 1.0f, 0.0f, 0.0f }; }
     // Dónde está cada entrenador (lado 0 = jugador, 1 = rival) cuando ya han tomado sitio.
     DirectX::XMFLOAT3 arenaStand(int side) const {
         const DirectX::XMFLOAT3 c = arenaCenter(), d = arenaDirection();
@@ -2187,11 +2224,19 @@ struct Scene {
         else if (battleFx.attacker >= 0 && battleFx.hit && t > 0.25f && t < 0.75f) lateral = 0.18f * std::sin((t - 0.25f) * 60.0f);
         return { dx * forward + dz * lateral, 0.0f, dz * forward - dx * lateral };
     }
+    // Cámara del combate por turnos: de lado a la línea de los pokémon (el nuestro a la izquierda, el rival a la derecha) y se puede girar
+    // alrededor de la zona de combate (battleOrbit) y subir o bajar.
+    void battleOrbit(float yawDelta, float tiltDelta) {
+        m_battleOrbit += yawDelta;
+        m_battleTilt = (std::clamp)(m_battleTilt + tiltDelta, 0.05f, 1.0f);
+    }
     DirectX::XMMATRIX battleView() const {
-        const DirectX::XMFLOAT3 mine = battleSpot(0), foe = battleSpot(1);
-        const float dx = std::sin(m_battleYaw), dz = std::cos(m_battleYaw);
-        const DirectX::XMFLOAT3 eye = { mine.x - dx * 3.4f - dz * 1.0f, mine.y + 2.1f, mine.z - dz * 3.4f + dx * 1.0f };
-        const DirectX::XMFLOAT3 at = { (mine.x + foe.x * 2.0f) / 3.0f, mine.y + 0.8f, (mine.z + foe.z * 2.0f) / 3.0f };
+        const DirectX::XMFLOAT3 c = arenaCenter(), d = arenaDirection();
+        const float yaw = std::atan2(-d.z, d.x) + m_battleOrbit; // mirando perpendicular a la línea nuestro→rival (nuestro pokémon a la izquierda)
+        const float dx = std::sin(yaw), dz = std::cos(yaw);
+        const float dist = 9.5f - 2.0f * m_battleTilt, height = 1.6f + 6.5f * m_battleTilt;
+        const DirectX::XMFLOAT3 eye = { c.x - dx * dist, c.y + height, c.z - dz * dist };
+        const DirectX::XMFLOAT3 at = { c.x, c.y + 0.7f, c.z };
         return DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&eye), DirectX::XMLoadFloat3(&at), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
     }
     float battleYaw() const { return m_battleYaw; }
@@ -2212,13 +2257,13 @@ struct Scene {
     private:
 
     static constexpr int DUEL_POKEMON = 2;
-    static constexpr int DUEL_MONEY = 300;
     static constexpr float DUEL_PAUSE = 0.35f;
     static constexpr float BATTLE_SLIDE_TIME = 1.8f; // lo que tardan en colocarse (menos que la pantalla de carga)
     static constexpr float ARENA_X = -3.0f, ARENA_Z = 17.5f; // centro de la zona: al sur de los entrenadores
     DirectX::XMFLOAT3 m_trainerHome = {};
     std::map<int, int> m_shopBought; // unidades compradas de cada objeto que aún no han dado regalo
     float m_battleSlide = 1.0f;
+    float m_battleOrbit = 0.0f, m_battleTilt = 0.35f; // giro y altura de la cámara del combate
     int m_duelTrainer = -1;
     int m_duelLeft = 0;
     float m_duelPause = 0.0f;

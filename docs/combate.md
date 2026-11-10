@@ -8,10 +8,18 @@
 - **Entrenadores de prueba** (junto al inicio): Rojo = duelo en tiempo real (su pokémon sale al mundo, como un salvaje); Azul = combate por turnos (carga, cámara tras tu pokémon, sin movimiento).
 
 ## Zona de combate por turnos
-Círculo en el suelo (`Scene::ARENA_*`, centro al sur de los entrenadores). Al empezar, durante la pantalla de carga, el entrenador y el jugador caminan hasta puntos opuestos del borde (por fuera) y los pokémon pelean en medio; al terminar vuelven a donde estaban. Sale siempre el primer pokémon del equipo no debilitado. El cuadro de cada combatiente muestra tipos, estado y cambios de estadística (ATQ +2...); al subir/bajar una estadística o activarse una habilidad aparece un aviso flotante y aros luminosos en 3D. Los movimientos muestran su eficacia contra el rival (supereficaz, hipereficaz, poco eficaz, muy poco eficaz, no afecta).
+Un disco circular en el suelo (`Scene::ARENA_*`, centro al sur de los entrenadores) y nada más. Al empezar, durante la pantalla de carga, el entrenador y el jugador caminan a puntos opuestos del borde (por fuera) y los pokémon pelean en medio; al terminar vuelven a donde estaban. La cámara mira de lado a la línea de combate: nuestro pokémon a la izquierda y el rival a la derecha; se gira alrededor de la zona con A/D (o flechas) o arrastrando con el botón derecho, y W/S sube y baja. Sale siempre el primer pokémon del equipo que no esté debilitado.
+
+Interfaz: abajo, de izquierda a derecha, texto | tarjeta de nuestro pokémon | controles (Luchar, Pokémon...); los movimientos y el equipo ocupan el sitio de los controles. Cada tarjeta de movimiento: símbolo de clase a la izquierda, logo del tipo en la esquina, nombre centrado y POT / PREC / PP a la derecha; el borde indica la eficacia (negro nulo, gris oscuro x1/4, gris x1/2, verde x2, naranja x4). La descripción sale con clic derecho. Los tipos se muestran como logos. Al subir/bajar una estadística o activarse una habilidad hay aviso flotante y aros en 3D. Al cambiar o debilitarse un pokémon se anima la pokéball (recoge con rayo rojo / la lanza y se abre / se hunde).
+
+## Experiencia
+Una sola fórmula (`ExperienceRules`) para todo: más experiencia cuanto más nivel tenga el rival respecto a quien la gana, dividida entre los pokémon que participaron y siguen en pie al derrotarlo (el debilitado no cobra ni cuenta), por la rareza de la especie rival. Capturar da la misma experiencia reducida a la mitad. En combates contra entrenadores no hay dinero; el jugador gana su propia experiencia por cada pokémon rival derrotado. No se pueden capturar los pokémon de un entrenador (la bola se recupera y avisa).
+
+## Obstáculos
+`Steering::avoid` (tres rayos) lo usan el compañero y los salvajes/pokémon de entrenadores al ir hacia su rival: rodean lo que haya de por medio.
 
 ## Tienda
-El Tendero (junto al inicio) abre la tienda: vende los objetos del apartado «Pokémon» con `buy_price > 0` (un precio 0 los excluye: Honor Ball, Starter Ball, Shiny Ball) y compra lo que tenga `sell_price > 0`. Regalos por compra: `item.gift_every` / `gift_reward_id`.
+El Tendero (junto al inicio) abre la tienda: pestañas COMPRAR / VENDER, categorías a la izquierda, cantidad elegida en un diálogo (VENDER TODO vende todo). Vende los objetos del apartado «Pokémon» con `buy_price > 0` (un precio 0 los excluye: Honor Ball, Starter Ball, Shiny Ball) y compra lo que tenga `sell_price > 0`. Regalos por compra: `item.gift_every` / `gift_reward_id`.
 
 ## Coco
-`assets/models/fruits/coconut.glb` (nodos `mitad_a` y `mitad_b`). Un coco puede partirse al caer del árbol (12 %) o cuando un pokémon se lo come; cada mitad es un cuerpo físico propio y desaparece sola o al comerla. Sonido: `assets/audio/sfx/coconut_break.wav`.
+`assets/models/fruits/coconut.glb` (nodos `mitad_a` y `mitad_b`, sin reescalar). Un coco puede partirse al caer del árbol (12 %) o cuando un pokémon se lo come; cada mitad es un cuerpo físico propio y es el objeto «Mitad de coco» (material nuevo), que se recoge. Sonido: `assets/audio/sfx/coconut_break.wav`.
