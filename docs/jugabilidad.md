@@ -36,7 +36,7 @@ Todos los valores indicados proceden del código actual (versión 0.0.2) y de lo
 
 En esta versión los Pokémon son **cubos objetivo** inmóviles (el cubito amarillo indica hacia dónde miran). Hay 4 en posiciones fijas, con distinta orientación.
 
-1. Entra en modo captura (clic derecho / L2).
+1. Entra en modo captura (clic derecho / L2); hace falta al menos una Pokéball de cualquier clase y, si se acaban, se sale del modo.
 2. Apunta con la cruceta del centro de la pantalla. Si apuntas a un Pokémon en alcance se muestra su **porcentaje de captura** (color: verde ≥ 70 %, amarillo ≥ 45 %, naranja ≥ 25 %, rojo por debajo).
 3. Lanza la Pokéball (clic izquierdo / R2). Cooldown de 0,45 s.
 

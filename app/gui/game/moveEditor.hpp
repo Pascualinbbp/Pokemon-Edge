@@ -24,8 +24,12 @@ namespace MoveEditor {
         const OwnedPokemon& owned = list[static_cast<size_t>(index)];
         const PokemonSpecies* species = data.speciesById(owned.speciesId);
         const ImVec2 screen = ImGui::GetIO().DisplaySize;
+        // El editor es su propia ventana a pantalla completa y siempre la de más arriba: nada del resto de la interfaz se dibuja encima ni recibe clics.
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowSize(screen);
+        ImGui::SetNextWindowFocus();
+        ImGui::Begin("##moveEditor", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse);
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        ImGui::GetForegroundDrawList(); // (el fondo oscuro va bajo el panel)
         dl->AddRectFilled(ImVec2(0.0f, 0.0f), screen, IM_COL32(0, 0, 0, 170));
         constexpr float W = 1040.0f, PAD = 22.0f, CARD_H = 92.0f, COL = 480.0f;
         const float H = (std::min)(screen.y - 60.0f, 4.0f * (CARD_H + 10.0f) + 190.0f);
@@ -87,6 +91,7 @@ namespace MoveEditor {
         if (GuiCards::button("##clear", "QUITAR ESTE MOVIMIENTO", ImVec2(260.0f, 36.0f), canClear, IM_COL32(150, 70, 70, 255))) storage.clearMove(inTeam, index, detail::slot);
         ImGui::SetCursorScreenPos(ImVec2(o.x + W - PAD - 140.0f, o.y + H - 50.0f));
         if (GuiCards::button("##closeMoves", "CERRAR", ImVec2(140.0f, 36.0f), true, IM_COL32(70, 70, 92, 255)) || GuiInput::backPressed()) open = false;
+        ImGui::End();
         return open;
     }
 }

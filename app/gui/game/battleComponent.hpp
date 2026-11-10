@@ -241,12 +241,12 @@ namespace BattleComponent {
             GuiCards::text(dl, ImVec2(screen.x * 0.5f - GuiCards::textWidth("A/D o clic derecho + arrastrar: girar cámara", 0.8f) * 0.5f, 16.0f), IM_COL32(255, 255, 255, 150), "A/D o clic derecho + arrastrar: girar cámara", 0.8f);
         }
 
-        // Zona inferior: cuadro de texto | tarjeta de nuestro pokémon | controles (luchar, pokémon...; los movimientos ocupan el mismo sitio).
+        // Zona inferior: cuadro de texto | controles (luchar, pokémon...; los movimientos ocupan el mismo sitio) con la tarjeta de nuestro pokémon justo encima.
         const float boxTop = screen.y - 200.0f, boxBottom = screen.y - 24.0f;
         const float textRight = screen.x * 0.33f;
-        const float cardLeft = textRight + 14.0f, cardWidth = (std::min)(380.0f, screen.x * 0.26f);
-        const float menuLeft = cardLeft + cardWidth + 14.0f, menuRight = screen.x - 30.0f;
-        const ImVec2 foePos(40.0f, 50.0f), foeSize(360.0f, 112.0f), minePos(cardLeft, boxTop), mineSize(cardWidth, boxBottom - boxTop);
+        const float menuLeft = textRight + 14.0f, menuRight = screen.x - 30.0f;
+        const float cardWidth = (std::min)(400.0f, menuRight - menuLeft), cardHeight = 112.0f;
+        const ImVec2 foePos(40.0f, 50.0f), foeSize(360.0f, 112.0f), minePos(menuLeft, boxTop - cardHeight - 10.0f), mineSize(cardWidth, cardHeight);
         if (s.shown.onField[1]) drawBox(dl, data, foePos, foeSize, s.shown, 1, s.bar[1]);
         if (s.shown.onField[0]) drawBox(dl, data, minePos, mineSize, s.shown, 0, s.bar[0]);
         else GuiCards::panel(dl, minePos, ImVec2(minePos.x + mineSize.x, minePos.y + mineSize.y));
@@ -308,20 +308,34 @@ namespace BattleComponent {
                     if (*effect.label) dl->AddRect(a, b, effect.color, 12.0f, 0, 4.0f);
                     else dl->AddRect(a, b, over && usable ? GuiCards::SELECT : IM_COL32(120, 125, 150, 255), 12.0f, 0, over && usable ? 2.5f : 1.5f);
                     const ImU32 ink = usable ? IM_COL32(255, 255, 255, 255) : IM_COL32(255, 255, 255, 120);
-                    detail::classIcon(dl, ImVec2(x + 26.0f, y + h * 0.58f), 14.0f, move->kind);                  // clase: izquierda
-                    if (const PokemonType* type = data.type(move->typeId)) TypeIcons::draw(dl, ImVec2(x + 15.0f, y + 15.0f), 10.0f, *type); // tipo: esquina
+                    // Todo en una misma fila, a la altura del centro de la tarjeta: clase y tipo a la izquierda, nombre en medio, números a la derecha.
+                    const float cy = y + h * 0.5f;
+                    detail::classIcon(dl, ImVec2(x + 26.0f, cy), 14.0f, move->kind);
+                    if (const PokemonType* type = data.type(move->typeId)) TypeIcons::draw(dl, ImVec2(x + 62.0f, cy), 11.0f, *type);
                     char stats[64];
                     std::snprintf(stats, sizeof(stats), "POT %s   PREC %s   PP %d/%d", move->power > 0 ? std::to_string(move->power).c_str() : "-", move->accuracy > 0 ? std::to_string(move->accuracy).c_str() : "-", me.pp[i], move->pp);
-                    const float statsWidth = GuiCards::textWidth(stats, 0.72f), nameWidth = GuiCards::textWidth(move->name.c_str(), 1.05f);
-                    const bool sameRow = w >= nameWidth + statsWidth + 150.0f; // si no cabe, los números bajan a una segunda línea
-                    GuiCards::text(dl, ImVec2(x + w * 0.5f - nameWidth * 0.5f, y + 8.0f), ink, move->name.c_str(), 1.05f); // nombre: centrado
-                    GuiCards::text(dl, ImVec2(x + w - 12.0f - statsWidth, sameRow ? y + 11.0f : y + h - 24.0f), usable ? IM_COL32(255, 255, 255, 230) : IM_COL32(255, 255, 255, 110), stats, 0.72f);
+                    const float statsScale = 0.72f, statsWidth = GuiCards::textWidth(stats, statsScale);
+                    const float leftEnd = x + 84.0f, statsLeft = x + w - 12.0f - statsWidth;
+                    float nameScale = 1.05f, nameWidth = GuiCards::textWidth(move->name.c_str(), nameScale);
+                    if (nameWidth > statsLeft - leftEnd - 12.0f) { nameScale = (std::max)(0.6f, nameScale * (statsLeft - leftEnd - 12.0f) / nameWidth); nameWidth = GuiCards::textWidth(move->name.c_str(), nameScale); }
+                    const float nameCenter = (std::clamp)(x + w * 0.5f, leftEnd + nameWidth * 0.5f + 6.0f, (std::max)(leftEnd + nameWidth * 0.5f + 6.0f, statsLeft - nameWidth * 0.5f - 6.0f)); // centrado en la tarjeta si cabe
+                    GuiCards::centeredText(dl, ImVec2(nameCenter, cy), ink, move->name.c_str(), nameScale);
+                    GuiCards::centeredText(dl, ImVec2(statsLeft + statsWidth * 0.5f, cy), usable ? IM_COL32(255, 255, 255, 230) : IM_COL32(255, 255, 255, 110), stats, statsScale);
+                    // Eficacia: texto pequeño centrado sobre el borde superior (nada si el daño es normal), con su propio contorno.
+                    if (*effect.label) {
+                        const float labelScale = 0.58f, tw = GuiCards::textWidth(effect.label, labelScale) + 14.0f, th = ImGui::GetFontSize() * labelScale + 4.0f;
+                        const ImVec2 lo(x + w * 0.5f - tw * 0.5f, y - th * 0.5f), hi(x + w * 0.5f + tw * 0.5f, y + th * 0.5f);
+                        const ImU32 edge = effect.color == IM_COL32(0, 0, 0, 255) ? IM_COL32(120, 120, 130, 255) : effect.color;
+                        dl->AddRectFilled(lo, hi, IM_COL32(16, 16, 22, 255), th * 0.5f);
+                        dl->AddRect(lo, hi, edge, th * 0.5f, 0, 2.0f);
+                        GuiCards::centeredText(dl, ImVec2((lo.x + hi.x) * 0.5f, y), IM_COL32(255, 255, 255, 255), effect.label, labelScale);
+                    }
                     if (clicked) { Battle::Action act; act.index = i; battle->submit(act); s.menu = Menu::MAIN; }
                 }
                 if (!infoClicked && s.infoMove >= 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) s.infoMove = -1;
                 if (s.infoMove >= 0 && s.infoMove < MoveRules::MAX_KNOWN) { // descripción y efecto: solo con clic derecho en la tarjeta
                     if (const Move* move = data.move(me.moves[s.infoMove])) {
-                        const float ph = 84.0f, py = boxTop - ph - 10.0f;
+                        const float ph = 84.0f, py = minePos.y - ph - 10.0f;
                         GuiCards::panel(dl, ImVec2(menuLeft, py), ImVec2(menuRight, py + ph));
                         GuiCards::text(dl, ImVec2(menuLeft + 14.0f, py + 8.0f), IM_COL32(255, 255, 255, 255), move->name.c_str(), 1.0f);
                         const Effect effect = effectiveness(data, *move, battle->fighter(1));

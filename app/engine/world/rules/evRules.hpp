@@ -32,14 +32,12 @@ namespace EvRules {
         return order;
     }
 
-    // Máximos del pokémon inicial: sus 3 mejores estadísticas base (las de su evolución final) al máximo; el resto al azar.
-    // Las de la forma actual también: así es S+ ahora y lo sigue siendo al evolucionar.
-    inline Evs starterCaps(const BaseStats& finalBase, const BaseStats& currentBase) {
+    // Máximos del pokémon inicial: sus 3 mejores estadísticas base (las de la forma que es ahora) al máximo; el resto al azar.
+    // El potencial es del pokémon, no de su evolución: al evolucionar se adapta (ver evolved).
+    inline Evs starterCaps(const BaseStats& currentBase) {
         Evs caps = rollCaps();
-        for (const BaseStats* base : { &finalBase, &currentBase }) {
-            const auto order = byBase(*base);
-            for (int i = 0; i < TOP_STATS; ++i) caps[order[i]] = MAX_EV;
-        }
+        const auto order = byBase(currentBase);
+        for (int i = 0; i < TOP_STATS; ++i) caps[order[i]] = MAX_EV;
         return caps;
     }
 
@@ -81,6 +79,13 @@ namespace EvRules {
         if (maxed == 2) return Rank::A;
         if (maxed == 1) return Rank::B;
         return std::accumulate(evs.begin(), evs.end(), 0) >= DECENT_TOTAL ? Rank::C : Rank::D;
+    }
+
+    // Al evolucionar: si era S+ con su forma anterior, lo sigue siendo con la nueva (sus tres mejores estadísticas base nuevas pasan al máximo).
+    inline void evolved(Evs& caps, const BaseStats& before, const BaseStats& after) {
+        if (rank(before, caps) != Rank::S_PLUS) return;
+        const auto order = byBase(after);
+        for (int i = 0; i < TOP_STATS; ++i) caps[order[i]] = MAX_EV;
     }
 
     // Rangos de menor a mayor potencial, para recorrerlos en la interfaz.

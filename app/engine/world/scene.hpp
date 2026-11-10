@@ -168,8 +168,13 @@ struct Scene {
         m_clock += dt;
         world.time = m_clock;
         world.tide = TIDE_AMPLITUDE * std::sin(m_clock * 6.2831853f / TIDE_PERIOD);
-        if (input.aimToggle) aimMode = !aimMode;
-        m_aiming = aimMode || input.aimHold;
+        const bool hasBalls = inventory.ownedCount() > 0; // sin pokéballs (de ninguna clase) no hay modo captura; si se agotan, se sale de él
+        if (input.aimToggle) {
+            aimMode = !aimMode && hasBalls;
+            if (!hasBalls && !input.aimHold) showNotice(Notice::REWARD, "No tienes Pokéballs.");
+        }
+        if (!hasBalls) aimMode = false;
+        m_aiming = (aimMode || input.aimHold) && hasBalls;
         updatePotionFx(dt);
         const bool wheel = updateRadioWheel(dt, input); // con la rueda abierta la mira y el lanzamiento quedan bloqueados
         if (input.ballSwitch != 0 && !wheel) {
@@ -297,8 +302,8 @@ struct Scene {
     // Al empezar una partida nueva el jugador elige su pokémon inicial: aún no tiene ninguno.
     bool needsStarter() const { return storage.empty(); }
 
-    // Crea el pokémon inicial: nivel inicial, analizado, con su pokéball exclusiva y sus 3 mejores estadísticas (las de su
-    // evolución final) con el EV máximo al máximo.
+    // Crea el pokémon inicial: nivel inicial, analizado, con su pokéball exclusiva y sus 3 mejores estadísticas (las suyas, no
+    // las de su evolución) con el EV máximo al máximo; al evolucionar el S+ se adapta a la nueva forma.
     void chooseStarter(int speciesId) {
         const PokemonSpecies* species = m_data->speciesById(speciesId);
         const PokeballType* ball = m_data->starterBall();
@@ -310,7 +315,7 @@ struct Scene {
         owned.ballId = ball ? ball->id : -1;
         owned.analyzed = true;
         owned.shiny = RandomUtil::roll(PokemonRules::STARTER_SHINY_CHANCE);
-        owned.evCaps = EvRules::starterCaps(m_data->finalForm(*species)->stats, species->stats);
+        owned.evCaps = EvRules::starterCaps(species->stats);
         bool sentToPc = false;
         storage.add(owned, sentToPc);
     }
@@ -1488,9 +1493,10 @@ struct Scene {
     static constexpr float FRUIT_RANGE = 55.0f;      // solo caen en árboles cercanos al jugador
     static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13, CHERRY_TYPE = 11;
 
-    inline static const std::string COCONUT_NAME = "Coco", HALF_COCONUT_NAME = "Mitad de coco", BANANA_NAME = "Plátano", CHERRY_NAME = "Cereza";
+    inline static const std::string COCONUT_NAME = "Coco", HALF_COCONUT_NAME = "Mitad de coco", BANANA_NAME = "Plátano", BANANAS_NAME = "Plátanos", BUNCH_NAME = "Racimo de plátanos", CHERRY_NAME = "Cereza";
     static const std::string& fruitName(const Fruit& fruit) {
         if (fruit.half()) return HALF_COCONUT_NAME; // el coco partido es otro objeto (material "Mitad de coco")
+        if (fruit.bunch()) return fruit.bananaCount() >= Fruit::BUNCH_SIZE ? BUNCH_NAME : fruit.bananaCount() > 1 ? BANANAS_NAME : BANANA_NAME; // el racimo entero es un objeto; si le faltan, se cogen sueltos
         return fruit.kind() == Fruit::Kind::COCONUT ? COCONUT_NAME : fruit.kind() == Fruit::Kind::CHERRY ? CHERRY_NAME : BANANA_NAME;
     }
     static bool fruitKind(int treeType, Fruit::Kind& kind) {
@@ -1502,8 +1508,9 @@ struct Scene {
     }
 
     const Item* fruitItem(const Fruit& fruit) const {
+        const std::string& name = fruit.bunch() ? (fruit.bananaCount() >= Fruit::BUNCH_SIZE ? BUNCH_NAME : BANANA_NAME) : fruitName(fruit);
         for (const Material& material : m_data->materials) {
-            if (material.name == fruitName(fruit)) return m_data->materialItem(material.id);
+            if (material.name == name) return m_data->materialItem(material.id);
         }
         return nullptr;
     }
@@ -1511,7 +1518,8 @@ struct Scene {
     // El jugador o su pokémon cogen un fruto: va al inventario.
     void collectFruit(Fruit& fruit) {
         if (!fruit.available()) return;
-        if (const Item* item = fruitItem(fruit)) giveReward(item->id, 1);
+        const int amount = fruit.bunch() && fruit.bananaCount() < Fruit::BUNCH_SIZE ? fruit.bananaCount() : 1; // un racimo entero es un objeto; a medias, tantos plátanos como queden
+        if (const Item* item = fruitItem(fruit)) giveReward(item->id, amount);
         gainXp(Xp::PICK_UP);
         fruit.take();
         Sound::emit(Sound::Sfx::PICK, fruit.body.position); // el sonido es del fruto: el mismo para quien lo coja
@@ -1535,12 +1543,49 @@ struct Scene {
         }
     }
 
+    static constexpr float BANANA_DETACH_CHANCE = 30.0f; // % de plátanos que se sueltan del racimo al caer del árbol
+
+    // Un plátano se separa del racimo y queda como pieza física suelta ('eaten': se lo come un pokémon, así que se encoge despacio).
+    // OJO: añade frutos al vector, así que 'bunch' no vale después.
+    void detachBanana(Fruit& bunch, int variant, bool eaten) {
+        const DirectX::XMFLOAT3 at = bunch.body.position, carried = bunch.body.velocity;
+        const float angle = RandomUtil::range(0.0f, 6.2831853f), push = eaten ? 0.0f : RandomUtil::range(0.5f, 1.4f), lift = eaten ? 0.5f : RandomUtil::range(1.0f, 2.0f);
+        if (bunch.bananaCount() == 0) bunch.take(eaten ? 0.6f : 0.0f);
+        fruits.emplace_back(Fruit::Kind::BANANA, ++m_fruitId, DirectX::XMFLOAT3{ at.x, at.y + 0.05f, at.z },
+                            std::sin(angle) * push + carried.x * 0.3f, std::cos(angle) * push + carried.z * 0.3f, Fruit::Part::PIECE, lift, variant);
+        if (eaten) fruits.back().take(1.4f, 0.2f);
+    }
+
+    // Un pokémon come un plátano del racimo: se quita uno solo; cuando no queda ninguno, el racimo desaparece.
+    void eatBanana(Fruit& bunch) {
+        if (bunch.bananaCount() == 0) { bunch.take(); return; }
+        const int variant = bunch.removeBanana(RandomUtil::integer(0, bunch.bananaCount() - 1));
+        detachBanana(bunch, variant, true);
+    }
+
+    // El racimo acaba de caer del árbol: cada plátano tiene su probabilidad de soltarse (unos racimos pierden más que otros).
+    void shedBananas(int bunchId) {
+        for (size_t i = 0; i < fruits.size(); ++i) {
+            if (fruits[i].id() != bunchId) continue;
+            std::vector<int> lost;
+            for (int b = 0; b < Fruit::BUNCH_SIZE; ++b) if (fruits[i].hasBanana(b) && RandomUtil::roll(BANANA_DETACH_CHANCE)) lost.push_back(b);
+            for (const int b : lost) {
+                fruits[i].removeBanana(bananaRank(fruits[i], b));
+                detachBanana(fruits[i], b, false); // puede invalidar fruits[i]: se vuelve a tomar en cada vuelta
+                for (size_t j = 0; j < fruits.size(); ++j) if (fruits[j].id() == bunchId) { i = j; break; }
+            }
+            return;
+        }
+    }
+    static int bananaRank(const Fruit& bunch, int variant) { int n = 0; for (int i = 0; i < variant; ++i) n += bunch.hasBanana(i) ? 1 : 0; return n; }
+
     // Un salvaje se come el fruto: suena como cogerlo y, además, como comerlo (cosas del fruto, no del pokémon).
     // Un coco entero primero se parte; las mitades desaparecen mientras se lo come.
     // OJO: puede añadir frutos al vector, así que 'fruit' no vale tras llamarla.
     void eatFruit(Fruit& fruit) {
         const DirectX::XMFLOAT3 at = fruit.body.position;
         if (fruit.kind() == Fruit::Kind::COCONUT && !fruit.half()) breakCoconut(fruit, true);
+        else if (fruit.bunch()) eatBanana(fruit);
         else fruit.take();
         Sound::emit(Sound::Sfx::PICK, at);
         Sound::emit(Sound::Sfx::EAT, at);
@@ -1548,13 +1593,14 @@ struct Scene {
 
     // De vez en cuando cae un fruto de un árbol maduro cercano (si no hay ya demasiados en el suelo) y rueda con su inercia.
     void updateFruits(float dt) {
-        std::vector<int> cracking; // cocos que acaban de caer y se rompen (se parten tras el bucle: añade frutos)
+        std::vector<int> cracking, shedding; // cocos que acaban de caer y se rompen / racimos que pierden plátanos (tras el bucle: añaden frutos)
         for (size_t i = 0; i < fruits.size(); ++i) {
             Fruit& fruit = fruits[i];
             world.step(fruit.body, dt);
             fruit.update(dt);
             if (const float landing = fruit.takeLanding(); landing > 0.0f) {
                 if (fruit.breaksOnLanding()) cracking.push_back(fruit.id());
+                else if (fruit.shedsOnLanding()) { shedding.push_back(fruit.id()); fruit.landed(); Sound::emit(Sound::Sfx::FRUIT_DROP, fruit.body.position, landing); }
                 else Sound::emit(Sound::Sfx::FRUIT_DROP, fruit.body.position, landing);
             }
         }
@@ -1563,12 +1609,13 @@ struct Scene {
                 if (fruits[i].id() == id) { breakCoconut(fruits[i], false); break; }
             }
         }
+        for (const int id : shedding) shedBananas(id);
         fruits.erase(std::remove_if(fruits.begin(), fruits.end(), [](const Fruit& f) { return f.finished(); }), fruits.end());
         if ((m_fruitTimer -= dt) > 0.0f) return;
         m_fruitTimer = RandomUtil::range(FRUIT_DROP_MIN, FRUIT_DROP_MAX);
         if (static_cast<int>(fruits.size()) >= MAX_FRUITS || player.body.underground) return;
         int onGround[3] = { 0, 0, 0 };
-        for (const Fruit& fruit : fruits) if (fruit.available() && !fruit.half()) ++onGround[static_cast<int>(fruit.kind())];
+        for (const Fruit& fruit : fruits) if (fruit.available() && !fruit.loose()) ++onGround[static_cast<int>(fruit.kind())];
         std::vector<const ResourceNode*> trees[3]; // árboles cercanos por clase de fruto
         for (const ResourceNode& node : nodes) {
             Fruit::Kind treeKind;
@@ -1588,6 +1635,7 @@ struct Scene {
         fruits.emplace_back(kind, ++m_fruitId, DirectX::XMFLOAT3{ at.x + std::sin(angle) * 0.5f, at.y + height * 0.9f, at.z + std::cos(angle) * 0.5f },
                             std::sin(angle) * out, std::cos(angle) * out);
         if (kind == Fruit::Kind::COCONUT && RandomUtil::roll(COCONUT_BREAK_CHANCE)) fruits.back().setBreaksOnLanding(true);
+        if (kind == Fruit::Kind::BANANA) fruits.back().setShedsOnLanding(true);
     }
 
     // Los salvajes cercanos se acercan a comer un fruto caído o una baya madura de un arbusto y se quedan comiendo un momento.

@@ -16,7 +16,7 @@ class ItemDao {
         for (const auto& row : SqliteUtil::executeSelect(SELECT_ITEMS)) addItem(data, row);
         if (data.items.empty()) Logger::logError("ITEM_DAO", "Las tablas de objetos no existen o están vacías.");
         for (const Material& material : data.materials) {
-            data.items.push_back({ MATERIAL_ITEM_BASE + material.id, ItemCategory::MATERIAL, material.categoryId, material.id, -1, material.name, material.description, "",
+            data.items.push_back({ MATERIAL_ITEM_BASE + material.id, ItemCategory::MATERIAL, material.categoryId, material.id, -1, material.name, material.description, "items/materiales/" + StringUtil::slug(material.name),
                                    material.buyPrice, material.sellPrice, 0, -1 });
         }
         for (const Tool& tool : data.tools) {

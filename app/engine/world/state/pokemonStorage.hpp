@@ -237,6 +237,13 @@ class PokemonStorage {
     }
 
     // --- Entrenamiento ---
+    // El potencial S+ pasa a la nueva forma al evolucionar (llamar antes de cambiar la especie).
+    void adaptPotential(OwnedPokemon& owned, int toSpeciesId) {
+        const PokemonSpecies* from = m_data->speciesById(owned.speciesId);
+        const PokemonSpecies* to = m_data->speciesById(toSpeciesId);
+        if (from && to) EvRules::evolved(owned.evCaps, from->stats, to->stats);
+    }
+
     // Sube un nivel (sin pasar de 'cap', el límite del jugador). Si alcanza el nivel de evolución, evoluciona.
     LevelResult levelUp(bool inTeam, int index, int cap) {
         OwnedPokemon* owned = at(inTeam, index);
@@ -249,6 +256,7 @@ class PokemonStorage {
         const PokemonSpecies* species = m_data->speciesById(owned->speciesId);
         const Evolution* evolution = species ? species->levelEvolution(owned->level, RandomUtil::range(0.0f, 1.0f)) : nullptr;
         if (evolution && m_data->speciesById(evolution->toId)) {
+            adaptPotential(*owned, evolution->toId);
             owned->speciesId = evolution->toId;
             markDex(owned->speciesId, DEX_CAUGHT);
             return LevelResult::EVOLVED;
@@ -264,6 +272,7 @@ class PokemonStorage {
         for (const Evolution& evolution : species->evolutions) {
             const PokemonSpecies* next = evolution.method == Evolution::Method::STONE && evolution.itemId == itemId ? m_data->speciesById(evolution.toId) : nullptr;
             if (!next) continue;
+            adaptPotential(*owned, next->id);
             owned->speciesId = next->id;
             markDex(next->id, DEX_CAUGHT);
             return next;
@@ -279,6 +288,7 @@ class PokemonStorage {
         for (const Evolution& evolution : species->evolutions) {
             const PokemonSpecies* next = evolution.method == method ? m_data->speciesById(evolution.toId) : nullptr;
             if (!next) continue;
+            adaptPotential(*owned, next->id);
             owned->speciesId = next->id;
             markDex(next->id, DEX_CAUGHT);
             return next;

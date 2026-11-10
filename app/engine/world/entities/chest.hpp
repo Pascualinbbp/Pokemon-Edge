@@ -31,10 +31,10 @@ namespace ChestStyle {
 // Cofre del mundo: sólido, con la física común. Al abrirlo levanta la tapa, suelta chispas y se desvanece.
 class Chest {
     public:
-    static constexpr float WIDTH  = 1.1f;
-    static constexpr float DEPTH  = 0.75f;
-    static constexpr float HEIGHT = 0.75f;
-    static constexpr float BASE_RATIO = 0.55f;  // fracción de la altura que ocupa el cuerpo (el resto es la tapa)
+    static constexpr float WIDTH  = 1.0f;
+    static constexpr float DEPTH  = 0.69f;
+    static constexpr float HEIGHT = 0.39f;
+    static constexpr float BASE_RATIO = 0.85f;  // fracción de la altura que ocupa el cuerpo (el resto es la tapa)
     static constexpr float INTERACT_RANGE = 2.2f; // distancia del jugador al centro para poder abrirlo
 
     static constexpr float OPEN_TIME   = 0.6f;

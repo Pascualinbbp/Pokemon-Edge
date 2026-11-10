@@ -46,7 +46,14 @@ namespace ItemIcon {
         dl->AddConvexPolyFilled(right, 4, detail::color(tone, alpha, 0.65f));
     }
 
-    inline void material(ImDrawList* dl, const ImVec2& c, float r, int materialId, float alpha = 1.0f) { block(dl, c, r, ItemStyle::materialColor(materialId), alpha); }
+    // Material: su sprite (assets/sprites/items/materiales/<nombre sin tildes>.png) o, si falta, un bloque de su color.
+    inline void material(ImDrawList* dl, const ImVec2& c, float r, const Item& item, float alpha = 1.0f) {
+        if (const ImTextureID sprite = HudIcons::sprite(item.asset)) {
+            dl->AddImage(sprite, ImVec2(c.x - r * 1.1f, c.y - r * 1.1f), ImVec2(c.x + r * 1.1f, c.y + r * 1.1f), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, static_cast<int>(255.0f * alpha)));
+            return;
+        }
+        block(dl, c, r, ItemStyle::materialColor(item.refId), alpha);
+    }
 
     // Piedra evolutiva: su sprite (assets/sprites/items/piedras_evolutivas/<id>.png) o, si falta, un bloque del color de su tipo.
     inline void stone(ImDrawList* dl, const ImVec2& c, float r, const Item& item, float alpha = 1.0f) {
@@ -163,7 +170,7 @@ namespace ItemIcon {
         switch (item.category) {
             case ItemCategory::HELD:     if (const HeldItem* type = data.held(item.refId)) held(dl, c, r, *type, alpha); break;
             case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::look(type->id), alpha); break;
-            case ItemCategory::MATERIAL: material(dl, c, r, item.refId, alpha); break;
+            case ItemCategory::MATERIAL: material(dl, c, r, item, alpha); break;
             case ItemCategory::STONE:    stone(dl, c, r, item, alpha); break;
             case ItemCategory::TOOL:     tool(dl, c, r, item.refId, alpha); break;
             case ItemCategory::TRAINING: if (const TrainingItem* type = data.training(item.refId)) training(dl, c, r, *type, alpha); break;

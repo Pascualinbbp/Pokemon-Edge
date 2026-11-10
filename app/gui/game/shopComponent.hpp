@@ -176,7 +176,13 @@ namespace ShopComponent {
             const int unit = s.selling ? item->sellPrice : item->buyPrice;
             const int limit = s.selling ? inventory.count(item->id) : (std::max)(1, (std::min)(99, inventory.money() / (std::max)(1, unit)));
             s.quantity = (std::clamp)(s.quantity + static_cast<int>(ImGui::GetIO().MouseWheel), 1, (std::max)(1, limit));
-            ImGui::GetForegroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), screen, IM_COL32(0, 0, 0, 120));
+            // El diálogo es su propia ventana a pantalla completa y la de más arriba (con su fondo oscuro dentro): nada lo tapa ni recibe clics.
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(screen);
+            ImGui::SetNextWindowFocus();
+            ImGui::Begin("##shopQuantity", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled(ImVec2(0.0f, 0.0f), screen, IM_COL32(0, 0, 0, 120));
             const float dw = 520.0f, dh = 290.0f;
             const ImVec2 d((screen.x - dw) * 0.5f, (screen.y - dh) * 0.5f);
             GuiCards::panel(dl, d, ImVec2(d.x + dw, d.y + dh), IM_COL32(30, 30, 44, 250));
@@ -218,6 +224,7 @@ namespace ShopComponent {
                 }
                 s.dialogItem = -1;
             } else if (cancelled) s.dialogItem = -1;
+            ImGui::End();
             return;
         }
         if (exit || GuiInput::backPressed()) gameState = back;

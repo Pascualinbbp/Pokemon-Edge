@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <chrono>
 #include "renderer3D.hpp"
 #include "../../utils/graphics/d3dUtil.hpp"
@@ -1585,6 +1586,7 @@ void Renderer3D::addNode(const ResourceNode& node) {
 // Fruto caído: coco (esfera marrón con tres "ojos"), plátano (media luna amarilla) o cereza (pareja roja); gira al rodar.
 namespace {
 constexpr const char* COCONUT_MODEL = "fruits/coconut"; // assets/models/fruits/coconut.glb
+constexpr const char* BANANA_MODEL = "fruits/banana_bunch"; // assets/models/fruits/banana_bunch.glb
 }
 
 void Renderer3D::addFruit(const Fruit& fruit) {
@@ -1621,6 +1623,24 @@ void Renderer3D::addFruit(const Fruit& fruit) {
         add(m_sphere, XMMatrixScaling(c, c, c) * XMMatrixTranslation(-c * 0.9f, 0.0f, 0.0f) * at, { 0.85f, 0.05f, 0.12f, 0.0f });
         add(m_sphere, XMMatrixScaling(c, c, c) * XMMatrixTranslation(c * 0.9f, 0.0f, c * 0.3f) * at, { 0.85f, 0.05f, 0.12f, 0.0f });
         add(m_cube, XMMatrixScaling(r * 0.1f, r * 1.1f, r * 0.1f) * XMMatrixTranslation(0.0f, c * 1.4f, 0.0f) * at, { 0.20f, 0.45f, 0.15f, 0.0f }, false);
+    } else if (const RenderModel* bananas = m_models.get(m_device, BANANA_MODEL, false); bananas && (fruit.piece() || fruit.bunch())) {
+        // assets/models/fruits/banana_bunch.glb: nodos corona y platano_1..5. El racimo dibuja solo los plátanos que le quedan; uno suelto es su nodo, tumbado.
+        const XMMATRIX spin = XMMatrixScaling(k, k, k) * XMMatrixRotationY(fruit.yaw()) * XMMatrixTranslation(p.x, p.y, p.z);
+        if (fruit.piece()) {
+            const int index = bananas->part("platano_" + std::to_string(fruit.variant() + 1));
+            if (index >= 0) add(bananas->parts[static_cast<size_t>(index)].mesh, spin, { 1.0f, 1.0f, 1.0f, 0.0f }, true, DrawKind::MODEL, bananas->texture.Get());
+            return;
+        }
+        const XMFLOAT3 c = bananas->center();
+        const XMMATRIX world = XMMatrixTranslation(-c.x, -c.y, -c.z) * spin;
+        for (size_t i = 0; i < bananas->parts.size(); ++i) {
+            const std::string& name = bananas->parts[i].name;
+            if (name.rfind("platano_", 0) == 0) {
+                const int n = std::atoi(name.c_str() + 8) - 1;
+                if (n < 0 || n >= Fruit::BUNCH_SIZE || !fruit.hasBanana(n)) continue;
+            } else if (name != "corona") continue;
+            add(bananas->parts[i].mesh, bananas->partMatrix(static_cast<int>(i), 0.0f) * world, { 1.0f, 1.0f, 1.0f, 0.0f }, true, DrawKind::MODEL, bananas->texture.Get());
+        }
     } else {
         const XMMATRIX at = XMMatrixRotationY(static_cast<float>(fruit.id()) * 1.7f) * XMMatrixTranslation(p.x, p.y - Fruit::RADIUS * 0.4f * k, p.z);
         add(m_cube, XMMatrixScaling(r * 0.7f, r * 0.7f, r * 2.2f) * at, { 0.97f, 0.84f, 0.18f, 0.0f });

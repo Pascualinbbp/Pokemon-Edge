@@ -52,7 +52,7 @@ assets/
   audio/    radio/<id>.mp3 · sfx/*.wav
 ```
 
-`<categoría>` es el nombre de `category` sin tildes ni espacios (`pokeballs`, `medicinas`, `entrenamiento`, `piedras_evolutivas`). Un objeto sin sprite se dibuja con un icono de reserva.
+`<categoría>` es el nombre de `category` sin tildes ni espacios (`pokeballs`, `medicinas`, `entrenamiento`, `piedras_evolutivas`). Los materiales usan `items/materiales/<nombre sin tildes ni espacios>.png` (`coco`, `mitad_de_coco`, `platano`, `racimo_de_platanos`). Un objeto sin sprite se dibuja con un icono de reserva.
 
 ## Cambiar la base de datos
 
