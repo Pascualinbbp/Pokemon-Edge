@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -7,12 +8,13 @@
 #include "../../../utils/core/randomUtil.hpp"
 #include "dexProgress.hpp"
 #include "../rules/companionRules.hpp"
-#include "../rules/evRules.hpp"
+#include "../rules/ivRules.hpp"
+#include "../rules/statRules.hpp"
 #include "../rules/moveRules.hpp"
 #include "../rules/pokemonRules.hpp"
 #include "../rules/researchRules.hpp"
 
-// Un pokémon del jugador. Su potencial (rango, EVs máximos) está oculto hasta analizarlo en la máquina de investigación.
+// Un pokémon del jugador. Su potencial (rango, topes de IV) está oculto hasta analizarlo en la máquina de investigación.
 struct OwnedPokemon {
     int uid = 0;                    // identifica a este pokémon concreto durante la partida (no se guarda)
     int speciesId = -1;
@@ -20,8 +22,10 @@ struct OwnedPokemon {
     bool shiny = false;
     int ballId = -1;                // pokéball con la que se capturó (tabla pokeball)
     bool analyzed = false;          // ya pasó por la máquina de investigación
-    EvRules::Evs evs = {};          // EVs actuales: empiezan en 0 y suben entrenándolo
-    EvRules::Evs evCaps = {};       // EVs máximos con los que salió (su potencial)
+    IvRules::Ivs ivs = {};          // IV actuales (0..31): empiezan en 0 y suben con vitaminas
+    IvRules::Ivs ivCaps = {};       // topes de IV con los que salió (su potencial); las chapas los suben a 31
+    StatRules::Evs evs = {};        // EVs repartidos por el jugador (máx. 252 por estadística y 510 en total)
+    int nature = 0;                 // naturaleza (id de nature; 0 = ninguna: neutra). El jugador puede cambiarla cuando quiera
     int xp = 0;                     // experiencia hacia el siguiente nivel (no se guarda)
     int hp = -1;                    // PS actuales (-1 = al máximo); 0 = debilitado
     int heldItemId = -1;            // objeto equipable que lleva (id de item; -1 = ninguno)
@@ -36,7 +40,7 @@ struct AnalysisEntry {
     int speciesId = -1;
     int level = 1;
     bool shiny = false;
-    EvRules::Rank rank = EvRules::Rank::D;
+    IvRules::Rank rank = IvRules::Rank::D;
     int reward = 0;
     bool released = false; // liberado automáticamente por tener menos potencial del pedido
 };
@@ -59,7 +63,7 @@ class PokemonStorage {
         m_data = &data;
         m_team.clear();
         m_pc.clear();
-        m_autoMin = EvRules::Rank::D;
+        m_autoMin = IvRules::Rank::D;
         m_active = 0;
         m_dex.assign(data.species.size(), DEX_UNSEEN);
         dexProgress.setData(data);
@@ -92,10 +96,22 @@ class PokemonStorage {
     int activeIndex() const { return m_active; }
 
     // --- PS ---
+    // Al cambiar los PS máximos (EVs) los PS actuales conservan lo que faltaba por curar; un pokémon debilitado sigue debilitado.
+    void keepHpRatio(OwnedPokemon& owned, int maxBefore, int hpBefore) const {
+        if (owned.hp < 0 || hpBefore <= 0) return;
+        owned.hp = (std::clamp)(hpBefore + (maxHp(owned) - maxBefore), 1, maxHp(owned));
+    }
     int maxHp(const OwnedPokemon& owned) const {
         const PokemonSpecies* species = m_data->speciesById(owned.speciesId);
-        return species ? PokemonRules::maxHp(*species, owned.level) : 1;
+        return species ? PokemonRules::maxHp(*species, owned.level, owned.ivs[0], owned.evs[0]) : 1;
     }
+    // Estadística 'stat' (orden de BaseStats: 0 = PS) real de un pokémon: base, nivel, IV, EV y naturaleza.
+    int statOf(const OwnedPokemon& owned, int stat) const {
+        const PokemonSpecies* species = m_data->speciesById(owned.speciesId);
+        return species ? StatRules::of(species->stats, stat, owned.level, owned.ivs[static_cast<size_t>(stat)], owned.evs[static_cast<size_t>(stat)], m_data->nature(owned.nature)) : 1;
+    }
+    // Rango de potencial de un pokémon (por los topes de IV).
+    IvRules::Rank rankOf(const OwnedPokemon& owned) const { return IvRules::rank(owned.ivCaps); }
     int hpOf(const OwnedPokemon& owned) const { return owned.hp < 0 ? maxHp(owned) : (std::min)(owned.hp, maxHp(owned)); }
     float hpFraction(const OwnedPokemon& owned) const { return static_cast<float>(hpOf(owned)) / static_cast<float>((std::max)(1, maxHp(owned))); }
     bool fainted(const OwnedPokemon& owned) const { return hpOf(owned) <= 0; }
@@ -153,7 +169,7 @@ class PokemonStorage {
         ensureMoves(stored);
         markDex(owned.speciesId, DEX_CAUGHT);
         dexProgress.captured(owned.speciesId, owned.shiny, owned.level);
-        if (owned.analyzed) if (const PokemonSpecies* species = m_data->speciesById(owned.speciesId)) dexProgress.ranked(owned.speciesId, EvRules::rank(species->stats, owned.evCaps));
+        if (owned.analyzed) dexProgress.ranked(owned.speciesId, IvRules::rank(owned.ivCaps));
         if (!sentToPc) m_team.push_back(stored);
         else if (!pcFull()) m_pc.push_back(stored);
         else return false;
@@ -169,8 +185,8 @@ class PokemonStorage {
     };
 
     // Mueve un pokémon a otro lugar: si el destino está ocupado intercambian sus sitios; si está vacío pasa al final de esa
-    // lista. El equipo nunca se queda sin pokémon ni pasa de 6, ni el PC de su capacidad. El activo sigue siendo el mismo
-    // pokémon cuando solo cambia de posición. Devuelve false si no se pudo y deja en 'landed' dónde ha quedado.
+    // lista. El equipo nunca se queda sin pokémon ni pasa de 6, ni el PC de su capacidad. Si el que acompaña cambia de posición en
+    // el equipo, sale el pokémon por el que se cambió (el que ocupa ahora su puesto); solo si ese está debilitado sigue el original. Devuelve false si no se pudo y deja en 'landed' dónde ha quedado.
     bool move(const Place& from, const Place& to, Place& landed) {
         std::vector<OwnedPokemon>& source = from.inTeam ? m_team : m_pc;
         std::vector<OwnedPokemon>& target = to.inTeam ? m_team : m_pc;
@@ -178,10 +194,9 @@ class PokemonStorage {
 
         if (to.index < static_cast<int>(target.size())) { // intercambio
             std::swap(source[from.index], target[to.index]);
-            if (from.inTeam && to.inTeam) {
-                if (m_active == from.index) m_active = to.index;
-                else if (m_active == to.index) m_active = from.index;
-            }
+            // Si el acompañante cambia de posición, sale el pokémon por el que se cambió (el que ocupa ahora su sitio); solo si ese está
+            // debilitado sigue acompañando el original en su nueva posición.
+            if (from.inTeam && to.inTeam && (m_active == from.index || m_active == to.index) && fainted(m_team[m_active])) m_active = m_active == from.index ? to.index : from.index;
             landed = to;
             return true;
         }
@@ -202,8 +217,7 @@ class PokemonStorage {
 
     // ¿Merece confirmación antes de liberarlo? Los variocolor y los de mucho potencial (A o más, ya analizados).
     bool valuable(const OwnedPokemon& owned) const {
-        const PokemonSpecies* species = m_data->speciesById(owned.speciesId);
-        return owned.shiny || (owned.analyzed && species && EvRules::rank(species->stats, owned.evCaps) >= EvRules::Rank::A);
+        return owned.shiny || (owned.analyzed && IvRules::rank(owned.ivCaps) >= IvRules::Rank::A);
     }
 
     // --- Liberar ---
@@ -237,13 +251,6 @@ class PokemonStorage {
     }
 
     // --- Entrenamiento ---
-    // El potencial S+ pasa a la nueva forma al evolucionar (llamar antes de cambiar la especie).
-    void adaptPotential(OwnedPokemon& owned, int toSpeciesId) {
-        const PokemonSpecies* from = m_data->speciesById(owned.speciesId);
-        const PokemonSpecies* to = m_data->speciesById(toSpeciesId);
-        if (from && to) EvRules::evolved(owned.evCaps, from->stats, to->stats);
-    }
-
     // Sube un nivel (sin pasar de 'cap', el límite del jugador). Si alcanza el nivel de evolución, evoluciona.
     LevelResult levelUp(bool inTeam, int index, int cap) {
         OwnedPokemon* owned = at(inTeam, index);
@@ -256,7 +263,6 @@ class PokemonStorage {
         const PokemonSpecies* species = m_data->speciesById(owned->speciesId);
         const Evolution* evolution = species ? species->levelEvolution(owned->level, RandomUtil::range(0.0f, 1.0f)) : nullptr;
         if (evolution && m_data->speciesById(evolution->toId)) {
-            adaptPotential(*owned, evolution->toId);
             owned->speciesId = evolution->toId;
             markDex(owned->speciesId, DEX_CAUGHT);
             return LevelResult::EVOLVED;
@@ -272,7 +278,6 @@ class PokemonStorage {
         for (const Evolution& evolution : species->evolutions) {
             const PokemonSpecies* next = evolution.method == Evolution::Method::STONE && evolution.itemId == itemId ? m_data->speciesById(evolution.toId) : nullptr;
             if (!next) continue;
-            adaptPotential(*owned, next->id);
             owned->speciesId = next->id;
             markDex(next->id, DEX_CAUGHT);
             return next;
@@ -288,7 +293,6 @@ class PokemonStorage {
         for (const Evolution& evolution : species->evolutions) {
             const PokemonSpecies* next = evolution.method == method ? m_data->speciesById(evolution.toId) : nullptr;
             if (!next) continue;
-            adaptPotential(*owned, next->id);
             owned->speciesId = next->id;
             markDex(next->id, DEX_CAUGHT);
             return next;
@@ -302,6 +306,7 @@ class PokemonStorage {
         XpResult result;
         OwnedPokemon* owned = at(true, teamIndex);
         if (!owned) return result;
+        if (owned->level >= cap) { owned->xp = 0; return result; } // en el nivel máximo no gana experiencia
         owned->xp += (std::max)(amount, 0);
         while (owned->level < cap && owned->xp >= PokemonRules::xpToNext(owned->level)) {
             owned->xp -= PokemonRules::xpToNext(owned->level);
@@ -390,13 +395,52 @@ class PokemonStorage {
     CompanionRules::Mode mode = CompanionRules::Mode::COLLECT;
     void cycleMode() { mode = CompanionRules::next(mode); }
 
-    // Suma hasta 'amount' EVs en una estadística (sin pasar de su máximo). Devuelve false si no cambia nada.
-    bool train(bool inTeam, int index, int stat, int amount) {
+    // Vitamina: suma hasta 'amount' IV en una estadística (sin pasar de su tope). Devuelve false si no cambia nada.
+    bool trainIv(bool inTeam, int index, int stat, int amount) {
         OwnedPokemon* owned = at(inTeam, index);
         if (!owned || !owned->analyzed || stat < 0 || stat >= BaseStats::COUNT) return false;
-        const int gain = (std::min)(amount, owned->evCaps[stat] - owned->evs[stat]);
+        const int gain = (std::min)(amount, owned->ivCaps[stat] - owned->ivs[stat]);
         if (gain <= 0) return false;
-        owned->evs[stat] += gain;
+        owned->ivs[stat] += gain;
+        return true;
+    }
+
+    // Chapa plateada: el tope de IV de una estadística pasa a 31 (el valor no cambia; el potencial sube).
+    bool raiseIvCap(bool inTeam, int index, int stat) {
+        OwnedPokemon* owned = at(inTeam, index);
+        return owned && IvRules::raiseCap(owned->ivCaps, stat);
+    }
+
+    // Chapa dorada: todos los topes de IV a 31 (potencial S+).
+    bool raiseAllIvCaps(bool inTeam, int index) {
+        OwnedPokemon* owned = at(inTeam, index);
+        return owned && IvRules::raiseAllCaps(owned->ivCaps);
+    }
+
+    // EVs: el jugador los reparte a su gusto cuando quiera, sin pasar de 252 por estadística ni de 510 en total. Devuelve el valor que queda.
+    int setEv(bool inTeam, int index, int stat, int wanted) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned) return 0;
+        const int before = maxHp(*owned);
+        const int hpBefore = hpOf(*owned);
+        const int value = StatRules::setEv(owned->evs, stat, wanted);
+        keepHpRatio(*owned, before, hpBefore);
+        return value;
+    }
+    void resetEvs(bool inTeam, int index) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned) return;
+        const int before = maxHp(*owned);
+        const int hpBefore = hpOf(*owned);
+        owned->evs = {};
+        keepHpRatio(*owned, before, hpBefore);
+    }
+
+    // Naturaleza: se puede cambiar en cualquier momento por la que se quiera (id de nature).
+    bool setNature(bool inTeam, int index, int natureId) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned || !m_data->nature(natureId)) return false;
+        owned->nature = natureId;
         return true;
     }
 
@@ -407,8 +451,8 @@ class PokemonStorage {
     }
 
     // Potencial mínimo que se conserva: los analizados con menos se liberan solos (los variocolor y el inicial, nunca).
-    EvRules::Rank autoRelease() const { return m_autoMin; }
-    void setAutoRelease(EvRules::Rank rank) { m_autoMin = rank; }
+    IvRules::Rank autoRelease() const { return m_autoMin; }
+    void setAutoRelease(IvRules::Rank rank) { m_autoMin = rank; }
 
     // Analiza todos los pokémon pendientes: revela sus datos, calcula la recompensa y libera los que no llegan al mínimo.
     AnalysisReport analyze() {
@@ -424,7 +468,7 @@ class PokemonStorage {
                 entry.speciesId = owned.speciesId;
                 entry.level = owned.level;
                 entry.shiny = owned.shiny;
-                entry.rank = EvRules::rank(species->stats, owned.evCaps);
+                entry.rank = IvRules::rank(owned.ivCaps);
                 dexProgress.ranked(owned.speciesId, entry.rank);
                 entry.reward = ResearchRules::reward(*m_data, *species, owned.level, owned.shiny);
                 const bool drop = !owned.shiny && !bound(owned) && entry.rank < m_autoMin && (&list != &m_team || m_team.size() > 1);
@@ -470,7 +514,7 @@ class PokemonStorage {
         m_pc.clear();
         for (const std::string& text : team) if (!teamFull()) decode(text, m_team);
         for (const std::string& text : pc) if (!pcFull()) decode(text, m_pc);
-        m_autoMin = EvRules::RANKS[(std::clamp)(autoRank, 0, static_cast<int>(std::size(EvRules::RANKS)) - 1)];
+        m_autoMin = IvRules::RANKS[(std::clamp)(autoRank, 0, static_cast<int>(std::size(IvRules::RANKS)) - 1)];
         m_active = m_team.empty() ? 0 : (std::clamp)(active, 0, static_cast<int>(m_team.size()) - 1);
     }
 
@@ -497,14 +541,15 @@ class PokemonStorage {
         return index >= 0 && index < static_cast<int>(list.size()) ? &list[index] : nullptr;
     }
 
-    static std::string join(const EvRules::Evs& values) {
+    static std::string join(const std::array<int, BaseStats::COUNT>& values) {
         std::string text;
         for (int i = 0; i < BaseStats::COUNT; ++i) text += (i ? "," : "") + std::to_string(values[i]);
         return text;
     }
 
-    static EvRules::Evs split(const std::string& text) {
-        EvRules::Evs values = {};
+    // "a,b,c,d,e,f" -> seis enteros sin límites (cada llamador los recorta a lo que le toca).
+    static std::array<int, BaseStats::COUNT> splitRaw(const std::string& text) {
+        std::array<int, BaseStats::COUNT> values = {};
         size_t from = 0;
         for (int i = 0; i < BaseStats::COUNT && from <= text.size(); ++i) {
             values[i] = std::atoi(text.c_str() + from);
@@ -512,8 +557,9 @@ class PokemonStorage {
             if (comma == std::string::npos) break;
             from = comma + 1;
         }
-        return EvRules::clamped(values);
+        return values;
     }
+    static IvRules::Ivs split(const std::string& text) { return IvRules::clamped(splitRaw(text)); }
 
     std::vector<std::string> encode(const std::vector<OwnedPokemon>& list) const {
         std::vector<std::string> result;
@@ -521,11 +567,13 @@ class PokemonStorage {
             const PokemonSpecies* species = m_data->speciesById(owned.speciesId);
             const PokeballType* ball = m_data->ball(owned.ballId);
             const HeldItem* held = m_data->held(owned.heldItemId);
+            const Nature* nature = m_data->nature(owned.nature);
             if (!species) continue;
             result.push_back(species->name + SEPARATOR + std::to_string(owned.level) + SEPARATOR + (owned.shiny ? "1" : "0") + SEPARATOR +
                              (ball ? ball->name : std::string()) + SEPARATOR + (owned.analyzed ? "1" : "0") + SEPARATOR +
-                             join(owned.evs) + SEPARATOR + join(owned.evCaps) + SEPARATOR + std::to_string(owned.hp) + SEPARATOR +
-                             (held ? held->name : std::string()) + SEPARATOR + moveNames(owned.moves) + SEPARATOR + moveNames(owned.unlocked));
+                             join(owned.ivs) + SEPARATOR + join(owned.ivCaps) + SEPARATOR + std::to_string(owned.hp) + SEPARATOR +
+                             (held ? held->name : std::string()) + SEPARATOR + moveNames(owned.moves) + SEPARATOR + moveNames(owned.unlocked) + SEPARATOR +
+                             join(owned.evs) + SEPARATOR + (nature ? nature->name : std::string()));
         }
         return result;
     }
@@ -550,9 +598,12 @@ class PokemonStorage {
         owned.shiny = field(2) == "1";
         if (const PokeballType* ball = m_data->ballByName(field(3))) owned.ballId = ball->id;
         owned.analyzed = field(4) == "1";
-        owned.evs = split(field(5));
-        owned.evCaps = field(6).empty() ? EvRules::Evs{} : split(field(6));
-        for (int i = 0; i < BaseStats::COUNT; ++i) owned.evs[i] = (std::min)(owned.evs[i], owned.evCaps[i]);
+        owned.ivs = split(field(5));
+        owned.ivCaps = field(6).empty() ? IvRules::Ivs{} : split(field(6));
+        for (int i = 0; i < BaseStats::COUNT; ++i) owned.ivs[i] = (std::min)(owned.ivs[i], owned.ivCaps[i]);
+        owned.evs = StatRules::clamped(splitRaw(field(11))); // partidas antiguas: sin EVs repartidos
+        for (const Nature& nature : m_data->natures) if (!field(12).empty() && nature.name == field(12)) owned.nature = nature.id;
+        if (owned.nature == 0) owned.nature = m_data->randomNatureId(); // partidas antiguas: una al azar (luego se puede cambiar)
         owned.hp = field(7).empty() ? -1 : std::atoi(field(7).c_str());
         for (const HeldItem& held : m_data->heldItems) if (!field(8).empty() && held.name == field(8)) owned.heldItemId = held.id;
         owned.moves = { -1, -1, -1, -1 };
@@ -585,7 +636,7 @@ class PokemonStorage {
     const GameData* m_data = &GameData::empty();
     std::vector<OwnedPokemon> m_team;
     std::vector<OwnedPokemon> m_pc;
-    EvRules::Rank m_autoMin = EvRules::Rank::D;
+    IvRules::Rank m_autoMin = IvRules::Rank::D;
     MedicineUse m_medicine;
     bool m_medicinePending = false;
     int m_active = 0;  // índice en el equipo del pokémon que acompaña al jugador

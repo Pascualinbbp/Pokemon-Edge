@@ -27,9 +27,6 @@ namespace BattleRules {
     inline constexpr float DAMAGE_MIN_ROLL = 0.85f;
     inline constexpr int STRUGGLE_POWER = 50;
 
-    // Estadística (no PS) según la fórmula de la serie, con los EVs entrenados.
-    inline int stat(int base, int level, int ev) { return ((2 * base + ev / 4) * level) / 100 + 5; }
-
     // Un combatiente: copia de un pokémon con lo que cambia durante el combate.
     struct Fighter {
         int speciesId = -1;
@@ -60,7 +57,7 @@ namespace BattleRules {
     };
 
     struct OwnedLike { // lo que hace falta de un pokémon guardado (así el combate no depende del almacén)
-        int speciesId; int level; bool shiny; int hp; int heldId; MoveRules::Slots moves; MoveRules::Slots pp; std::array<int, BaseStats::COUNT> evs; int source;
+        int speciesId; int level; bool shiny; int hp; int heldId; MoveRules::Slots moves; MoveRules::Slots pp; std::array<int, BaseStats::COUNT> ivs; std::array<int, BaseStats::COUNT> evs; int natureId; int source;
     };
 
     // PS actuales de un pokémon guardado (hp < 0 = al máximo).
@@ -74,13 +71,14 @@ namespace BattleRules {
         if (!species) return f;
         f.name = species->name;
         f.types = species->types;
-        f.maxHp = PokemonRules::maxHp(*species, owned.level);
+        const Nature* nature = data.nature(owned.natureId);
+        f.maxHp = PokemonRules::maxHp(*species, owned.level, owned.ivs[0], owned.evs[0]);
         f.hp = owned.hp < 0 ? f.maxHp : (std::min)(owned.hp, f.maxHp);
-        f.attack = stat(species->stats.attack, owned.level, owned.evs[1]);
-        f.spAttack = stat(species->stats.spAttack, owned.level, owned.evs[2]);
-        f.defense = stat(species->stats.defense, owned.level, owned.evs[3]);
-        f.spDefense = stat(species->stats.spDefense, owned.level, owned.evs[4]);
-        f.speed = stat(species->stats.speed, owned.level, owned.evs[5]);
+        f.attack = StatRules::of(species->stats, 1, owned.level, owned.ivs[1], owned.evs[1], nature);
+        f.spAttack = StatRules::of(species->stats, 2, owned.level, owned.ivs[2], owned.evs[2], nature);
+        f.defense = StatRules::of(species->stats, 3, owned.level, owned.ivs[3], owned.evs[3], nature);
+        f.spDefense = StatRules::of(species->stats, 4, owned.level, owned.ivs[4], owned.evs[4], nature);
+        f.speed = StatRules::of(species->stats, 5, owned.level, owned.ivs[5], owned.evs[5], nature);
         f.abilityId = species->abilityId;
         f.passiveId = species->passiveId;
         f.heldId = owned.heldId;

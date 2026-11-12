@@ -8,7 +8,7 @@
 // en tiempo real (igual que contra los salvajes) o por turnos (combate integrado con menú).
 class Trainer {
     public:
-    enum class Style { REAL_TIME, TURN_BASED, SHOP }; // SHOP: no combate, es el tendero
+    enum class Style { REAL_TIME, TURN_BASED, DOUBLES, SHOP }; // DOUBLES: por turnos 2 contra 2; SHOP: no combate, es el tendero
 
     static constexpr float WIDTH = 0.6f;
     static constexpr float HEIGHT = 1.8f;
@@ -23,6 +23,8 @@ class Trainer {
     Style style = Style::REAL_TIME;
     DirectX::XMFLOAT3 outfit = { 0.8f, 0.2f, 0.2f }; // color de la ropa
     Physics::Body body;
+    bool gym = false;        // líder de gimnasio: al derrotarlo da una medalla
+    bool badgeGiven = false; // ya la ha dado (en esta sesión)
     bool busy = false; // en pleno duelo: no acepta otro
 
     float reach() const { return INTERACT_RANGE + WIDTH * 0.5f; }

@@ -1740,48 +1740,26 @@ void Renderer3D::addBattle(const Scene& scene) {
     const float size = Companion::SIZE * 1.15f;
     const Scene::BattleFx& animFx = scene.battleFx;
     const Battle::Message* current = battle.hasMessage() ? &battle.front() : nullptr;
-    // Pokéball sencilla (mitad roja, mitad blanca) en un punto.
-    const auto drawBall = [&](const XMFLOAT3& at, float radius, float open) {
-        add(m_sphere, XMMatrixScaling(radius, radius, radius) * XMMatrixTranslation(at.x, at.y + radius * 0.25f, at.z), { 0.9f, 0.15f, 0.15f, 0.0f }, false);
-        add(m_sphere, XMMatrixScaling(radius * 0.97f, radius * 0.7f, radius * 0.97f) * XMMatrixTranslation(at.x, at.y - radius * 0.3f, at.z), { 0.95f, 0.95f, 0.95f, 0.0f }, false);
-        if (open > 0.0f) add(m_sphere, XMMatrixScaling(radius * 1.1f, radius * 1.1f, radius * 1.1f) * XMMatrixTranslation(at.x, at.y, at.z), { 1.0f, 1.0f, 1.0f, open }, false, DrawKind::GLOW);
-    };
-    for (int side = 0; side < 2; ++side) {
-        const Battle::Fighter& f = battle.fighter(side);
-        const int hp = current ? current->hp[side] : f.hp;
-        const int species = current ? current->speciesId[side] : f.speciesId;
-        const bool onField = current ? current->onField[side] : true;
-        const int anim = current && current->animSide == side ? current->animKind : 0;
-        if (!onField) continue;
+    for (int slot = 0; slot < Battle::SLOTS; ++slot) {
+        const bool exists = current ? current->speciesId[slot] >= 0 : battle.occupied(slot);
+        if (!exists) continue;
+        const int hp = current ? current->hp[slot] : battle.fighter(slot).hp;
+        const int species = current ? current->speciesId[slot] : battle.fighter(slot).speciesId;
+        const bool shiny = current ? current->shiny[slot] : battle.fighter(slot).shiny;
+        const bool onField = current ? current->onField[slot] : true;
+        const int anim = current && current->animSide == slot ? current->animKind : 0;
         const float t = animFx.time;
-        const XMFLOAT3 spot = scene.battleSpot(side), off = scene.battleOffset(side), stand = scene.arenaStand(side);
-        const XMFLOAT3 hand = { stand.x, stand.y + 1.3f, stand.z };
+        const XMFLOAT3 spot = scene.battleSpot(slot), off = scene.battleOffset(slot);
+        const BallTransfer* transfer = scene.battleBall(slot);
         float scale = 1.0f, sink = 0.0f;
-        if (anim == 1) { // vuelve a su pokéball: un rayo rojo lo recoge y se encoge hacia la mano
-            const float k = (std::min)(t / 0.7f, 1.0f);
-            scale = 1.0f - k;
-            for (int i = 1; i <= 6; ++i) {
-                const float u = static_cast<float>(i) / 7.0f;
-                add(m_sphere, XMMatrixScaling(0.11f, 0.11f, 0.11f) * XMMatrixTranslation(spot.x + (hand.x - spot.x) * u, spot.y + size * 0.5f * (1.0f - u) + hand.y * u, spot.z + (hand.z - spot.z) * u),
-                    { 1.0f, 0.2f, 0.2f, 0.9f * (1.0f - k) }, false, DrawKind::GLOW);
-            }
-            const float g = size * (1.1f - 0.6f * k);
-            add(m_sphere, XMMatrixScaling(g, g, g) * XMMatrixTranslation(spot.x, spot.y + size * 0.5f, spot.z), { 1.0f, 0.25f, 0.25f, 0.6f * (1.0f - k) }, false, DrawKind::GLOW);
-            if (k < 1.0f) drawBall(hand, 0.14f, 0.0f);
-        } else if (anim == 2) { // sale de su pokéball: la lanza el entrenador, se abre con un destello y crece
-            constexpr float FLIGHT = 0.45f, GROW = 0.4f;
-            if (t < FLIGHT) {
-                const float u = t / FLIGHT;
-                drawBall({ hand.x + (spot.x - hand.x) * u, hand.y + (spot.y + 0.3f - hand.y) * u + std::sin(u * 3.14159265f) * 1.2f, hand.z + (spot.z - hand.z) * u }, 0.14f, 0.0f);
-                scale = 0.0f;
-            } else {
-                const float k = (std::min)((t - FLIGHT) / GROW, 1.0f);
-                scale = k;
-                const float g = size * (0.4f + 1.4f * k);
-                add(m_sphere, XMMatrixScaling(g, g, g) * XMMatrixTranslation(spot.x, spot.y + size * 0.5f, spot.z), { 1.0f, 1.0f, 1.0f, 0.9f * (1.0f - k) }, false, DrawKind::GLOW);
-                if (k < 0.5f) drawBall({ spot.x, spot.y + 0.3f, spot.z }, 0.14f, 1.0f - k * 2.0f);
-            }
-        } else if (hp <= 0) { // debilitado: se hunde y se desvanece (si la animación ya acabó, no se dibuja)
+        XMFLOAT3 center = { spot.x + off.x, spot.y + size * 0.5f, spot.z + off.z };
+        if (transfer && transfer->active()) { // sale de su pokéball o vuelve a ella: las mismas que usa el acompañante (BallTransfer)
+            scale = transfer->emerge();
+            center = transfer->creatureCenter(center);
+            addTransfer(*transfer, center, size * (std::max)(scale, 0.3f));
+            if (scale <= 0.01f) continue;
+        } else if (!onField) continue;
+        else if (hp <= 0) { // debilitado: se hunde y se desvanece (si la animación ya acabó, no se dibuja)
             if (anim != 3) continue;
             const float k = (std::min)(t / 0.8f, 1.0f);
             scale = 1.0f - k;
@@ -1789,12 +1767,12 @@ void Renderer3D::addBattle(const Scene& scene) {
             add(m_sphere, XMMatrixScaling(size, size, size) * XMMatrixTranslation(spot.x, spot.y + size * 0.5f, spot.z), { 1.0f, 0.2f, 0.2f, 0.5f * (1.0f - k) }, false, DrawKind::GLOW);
         }
         if (scale <= 0.01f) continue;
-        const float yaw = scene.battleYaw() + (side == 0 ? 0.0f : 3.14159265f);
-        addCreature({ spot.x + off.x, spot.y + size * 0.5f * scale - sink, spot.z + off.z }, size * scale, yaw, species, current ? current->shiny[side] : f.shiny);
+        const float yaw = scene.battleYaw() + (Battle::sideOf(slot) == 0 ? 0.0f : 3.14159265f);
+        addCreature({ center.x, center.y - size * 0.5f * (1.0f - scale) - sink, center.z }, size * scale, yaw, species, shiny);
     }
     const Scene::BattleFx& fx = scene.battleFx;
-    if (fx.attacker >= 0 && fx.hit && fx.time > 0.2f && fx.time < 0.6f) {
-        const int defender = 1 - fx.attacker;
+    if (fx.attacker >= 0 && fx.target >= 0 && fx.hit && fx.time > 0.2f && fx.time < 0.6f) {
+        const int defender = fx.target;
         int r = 255, g = 255, b = 255;
         if (battle.hasMessage() && battle.front().moveType >= 0) PokemonStyle::typeRgb(battle.front().moveType, r, g, b);
         const float t = (fx.time - 0.2f) / 0.4f, k = size * (0.6f + 1.4f * t), fade = 1.0f - t;

@@ -26,7 +26,7 @@
 #include "rules/rewardRules.hpp"
 #include "rules/shopRules.hpp"
 #include "rules/experienceRules.hpp"
-#include "rules/evRules.hpp"
+#include "rules/ivRules.hpp"
 #include "state/playerProgress.hpp"
 #include "rules/pokemonRules.hpp"
 #include "state/researchMachine.hpp"
@@ -122,7 +122,7 @@ struct Scene {
     bool shopRequested = false;     // se acaba de hablar con el tendero: la interfaz abre la tienda
     bool learnRequested = false;    // hay un pokémon con un movimiento esperando decisión: la interfaz abre su pantalla
     // Animación del combate por turnos: quién ataca (0 jugador, 1 rival), si el golpe llega y el tiempo desde que empezó el mensaje.
-    struct BattleFx { int attacker = -1; bool hit = false; float time = 0.0f; };
+    struct BattleFx { int attacker = -1; int target = -1; bool hit = false; float time = 0.0f; };
     BattleFx battleFx;
     Companion companion;      // el líder del equipo, que acompaña al jugador y trabaja recursos
     std::string noticeText;   // segunda línea del aviso: recompensa obtenida, pokémon capturado...
@@ -150,6 +150,8 @@ struct Scene {
         plots = Crops::generate(gameData, world, nodes);
         trainers.push_back(Trainer("Entrenador Rojo", Trainer::Style::REAL_TIME, -1.0f, 10.0f, { 0.85f, 0.2f, 0.2f }));
         trainers.push_back(Trainer("Entrenador Azul", Trainer::Style::TURN_BASED, -5.0f, 10.0f, { 0.2f, 0.35f, 0.85f }));
+        trainers.back().gym = true; // líder de prueba: al derrotarlo da una medalla de gimnasio
+        trainers.push_back(Trainer("Entrenador Verde", Trainer::Style::DOUBLES, 2.0f, 10.0f, { 0.25f, 0.7f, 0.3f }));
         trainers.push_back(Trainer("Tendero", Trainer::Style::SHOP, 5.0f, 10.0f, { 0.2f, 0.62f, 0.38f }));
         m_home = player.body.position;
         for (const Skill& skill : gameData.skills) if (PlayerActions::parse(skill.animation) == PlayerAction::FISH) m_fishSkill = skill.id;
@@ -175,6 +177,11 @@ struct Scene {
         }
         if (!hasBalls) aimMode = false;
         m_aiming = (aimMode || input.aimHold) && hasBalls;
+        if (m_aiming != m_wasAiming) {
+            if (m_aiming) inventory.selectFirst();
+            Logger::logInfo("CAPTURE_MODE", std::string(m_aiming ? "Entra" : "Sale") + " del modo captura | pokéballs con unidades=" + std::to_string(inventory.ownedCount()) + " | elegida=" + (inventory.hasBalls() ? inventory.selectedBall().type.name : std::string("-")));
+            m_wasAiming = m_aiming;
+        }
         updatePotionFx(dt);
         const bool wheel = updateRadioWheel(dt, input); // con la rueda abierta la mira y el lanzamiento quedan bloqueados
         if (input.ballSwitch != 0 && !wheel) {
@@ -221,7 +228,7 @@ struct Scene {
         world.props.push_back(oak.solid());
         for (const Trainer& trainer : trainers) world.props.push_back(trainer.solid());
 
-        player.aiming = m_aiming;
+        player.aiming = m_aiming || camera.aimBlend() > 0.05f; // el personaje deja de apuntar cuando la cámara ya casi ha vuelto
         InputState moveInput = input;
         if (fishing.hooked()) moveInput.crouch = moveInput.crouchHeld = false; // los botones de decidir (Liberar) no agachan
         {   // el compañero con branquias da aire al jugador bajo el agua
@@ -236,7 +243,7 @@ struct Scene {
         weather.update(dt);
         throwCooldown = (std::max)(0.0f, throwCooldown - dt);
         noticeTime = (std::max)(0.0f, noticeTime - dt);
-        if (m_aiming && input.throwBall && !wheel) m_throwQueued = THROW_BUFFER; // el clic se recuerda unos instantes: lanzar no depende de si caminamos, corremos o nadamos
+        if (m_aiming && input.throwBall && !wheel && !aimingAtTrainerPokemon()) m_throwQueued = THROW_BUFFER; // el clic se recuerda unos instantes: lanzar no depende de si caminamos, corremos o nadamos
         m_throwQueued = (std::max)(0.0f, m_throwQueued - dt);
         if (!m_aiming) m_throwQueued = 0.0f;
         if (m_throwQueued > 0.0f && throwCooldown <= 0.0f && m_throwDelay < 0.0f) { m_throwQueued = 0.0f; startThrow(); }
@@ -315,7 +322,8 @@ struct Scene {
         owned.ballId = ball ? ball->id : -1;
         owned.analyzed = true;
         owned.shiny = RandomUtil::roll(PokemonRules::STARTER_SHINY_CHANCE);
-        owned.evCaps = EvRules::starterCaps(species->stats);
+        owned.ivCaps = IvRules::starterCaps();
+        owned.nature = m_data->randomNatureId();
         bool sentToPc = false;
         storage.add(owned, sentToPc);
     }
@@ -363,6 +371,7 @@ struct Scene {
     }
 
     GameStatus status() const {
+        const Interaction ia = validInteraction();
         GameStatus s;
         s.aimBlend = camera.aimBlend();
         s.loading = loadingFade();
@@ -383,8 +392,8 @@ struct Scene {
             s.missingPos = m_missingPos;
         }
         s.interactPos = interactionAnchor();
-        s.interactTime = m_interaction.kind == Interaction::WEAKENED ? (std::max)(1.0f - m_weakAge / CompanionRules::WEAK_PROMPT_TIME, 0.0f) : -1.0f;
-        s.interactOnScreen = m_interaction.kind == Interaction::WEAKENED; // el aviso de capturar al debilitado va fijo en la pantalla del jugador
+        s.interactTime = ia.kind == Interaction::WEAKENED ? (std::max)(1.0f - m_weakAge / CompanionRules::WEAK_PROMPT_TIME, 0.0f) : -1.0f;
+        s.interactOnScreen = ia.kind == Interaction::WEAKENED; // el aviso de capturar al debilitado va fijo en la pantalla del jugador
         fillLocation(s);
         fillWorldState(s);
         s.habitatMap = &habitats;
@@ -404,43 +413,43 @@ struct Scene {
             }
         }
         if (!noticeText.empty()) s.noticeText = &noticeText;
-        if (m_interaction.kind == Interaction::WEAKENED && m_weak) {
+        if (ia.kind == Interaction::WEAKENED && m_weak) {
             const PokemonSpecies* species = m_data->speciesById(m_weak->speciesId());
             s.interactVerb = CAPTURE_VERB;
             s.interactTarget = species ? &species->name : &GROUND_NAME;
-        } else if (m_interaction.kind == Interaction::CHEST) {
+        } else if (ia.kind == Interaction::CHEST) {
             s.interactVerb = CHEST_VERB;
-            s.interactTarget = &m_data->chests[chests.entities[m_interaction.index].typeIndex()].name;
-        } else if (m_interaction.kind == Interaction::PLOT) {
+            s.interactTarget = &m_data->chests[chests.entities[ia.index].typeIndex()].name;
+        } else if (ia.kind == Interaction::PLOT) {
             s.interactVerb = PLANT_VERB;
             const std::vector<int> seedCrops = availableSeeds();
             const Material* seeds = seedCrops.size() == 1 ? seedMaterial(seedCrops.front()) : nullptr;
             s.interactTarget = seeds ? &seeds->name : &PLOT_NAME;
-        } else if (m_interaction.kind == Interaction::NODE) {
-            const ResourceNode& node = nodes[m_interaction.index];
+        } else if (ia.kind == Interaction::NODE) {
+            const ResourceNode& node = nodes[ia.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
             const Skill* skill = node.growing() ? m_data->skill(type.skillId) : nullptr;
             s.interactVerb = skill ? skill->name.c_str() : type.action.c_str();
             s.interactTarget = &type.name;
             const Material* material = m_data->material(type.materialId);
             if (!skill && material && type.action == PICK_VERB) s.interactTarget = &material->name; // "Recoger Baya"; los árboles siguen en "Talar Roble"
-        } else if (m_interaction.kind == Interaction::GROUND) {
+        } else if (ia.kind == Interaction::GROUND) {
             s.interactVerb = PICK_VERB;
             s.interactTarget = &GROUND_NAME;
-            const GroundItem& item = groundItems.entities[m_interaction.index];
+            const GroundItem& item = groundItems.entities[ia.index];
             if (item.reward() >= 0) {
                 if (const Item* found = m_data->rewardItem(m_data->rewards[item.reward()])) s.interactTarget = &m_data->itemName(*found);
             }
-        } else if (m_interaction.kind == Interaction::FRUIT) {
+        } else if (ia.kind == Interaction::FRUIT) {
             s.interactVerb = PICK_VERB;
-            s.interactTarget = &fruitName(fruits[m_interaction.index]);
-        } else if (m_interaction.kind == Interaction::PROFESSOR) {
+            s.interactTarget = &fruitName(fruits[ia.index]);
+        } else if (ia.kind == Interaction::PROFESSOR) {
             s.interactVerb = TALK_VERB;
             s.interactTarget = &PROFESSOR_NAME;
-        } else if (m_interaction.kind == Interaction::TRAINER) {
-            s.interactVerb = trainers[m_interaction.index].style == Trainer::Style::SHOP ? SHOP_VERB : FIGHT_VERB;
-            s.interactTarget = &trainers[m_interaction.index].name;
-        } else if (m_interaction.kind == Interaction::MACHINE) {
+        } else if (ia.kind == Interaction::TRAINER) {
+            s.interactVerb = trainers[ia.index].style == Trainer::Style::SHOP ? SHOP_VERB : FIGHT_VERB;
+            s.interactTarget = &trainers[ia.index].name;
+        } else if (ia.kind == Interaction::MACHINE) {
             s.interactVerb = USE_VERB;
             s.interactTarget = &MACHINE_NAME;
         }
@@ -451,6 +460,7 @@ struct Scene {
         if (m_aimTarget) {
             const CaptureTarget& t = *m_aimTarget;
             s.hasAimTarget = true;
+            s.aimOwned = aimingAtTrainerPokemon();
             s.behind = isBehind(t);
             s.hidden = m_concealed;
             s.eating = t.eating();
@@ -583,16 +593,17 @@ struct Scene {
 
     // Punto del mundo sobre lo que se interactúa, donde se dibuja la ayuda de cómo hacerlo.
     DirectX::XMFLOAT3 interactionAnchor() const {
+        const Interaction ia = validInteraction();
         const auto above = [](const Physics::Body& body, float height) { return DirectX::XMFLOAT3{ body.position.x, body.position.y + height, body.position.z }; };
-        switch (m_interaction.kind) {
-            case Interaction::CHEST:   return above(chests.entities[m_interaction.index].body, Chest::HEIGHT + 0.5f);
-            case Interaction::NODE:    return nodeAnchor(nodes[m_interaction.index]);
-            case Interaction::PLOT:    return { plots[m_interaction.index].position.x, plots[m_interaction.index].position.y + 0.9f, plots[m_interaction.index].position.z };
-            case Interaction::GROUND:  return above(groundItems.entities[m_interaction.index].body, 0.9f);
-            case Interaction::FRUIT:   return above(fruits[m_interaction.index].body, 0.7f);
+        switch (ia.kind) {
+            case Interaction::CHEST:   return above(chests.entities[ia.index].body, Chest::HEIGHT + 0.5f);
+            case Interaction::NODE:    return nodeAnchor(nodes[ia.index]);
+            case Interaction::PLOT:    return { plots[ia.index].position.x, plots[ia.index].position.y + 0.9f, plots[ia.index].position.z };
+            case Interaction::GROUND:  return above(groundItems.entities[ia.index].body, 0.9f);
+            case Interaction::FRUIT:   return above(fruits[ia.index].body, 0.7f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
             case Interaction::PROFESSOR: return above(oak.body, Professor::HEIGHT + 0.5f);
-            case Interaction::TRAINER: return above(trainers[m_interaction.index].body, Trainer::HEIGHT + 0.5f);
+            case Interaction::TRAINER: return above(trainers[ia.index].body, Trainer::HEIGHT + 0.5f);
             case Interaction::WEAKENED: return m_weak ? DirectX::XMFLOAT3{ m_weak->body.position.x, m_weak->body.position.y + CaptureTarget::SIZE + 0.9f, m_weak->body.position.z } : DirectX::XMFLOAT3{};
             default:                   return {};
         }
@@ -768,7 +779,8 @@ struct Scene {
             owned.level = (std::min)(target.level(), progress.levelCap()); // no puede pasar del límite del jugador
             owned.shiny = target.shiny();
             owned.ballId = target.ballId();
-            owned.evCaps = EvRules::rollCaps(species->stats, CaptureRules::minimumRank(target.throwKind()));
+            owned.ivCaps = IvRules::rollCaps(CaptureRules::minimumRank(target.throwKind()));
+            owned.nature = m_data->randomNatureId();
             bool sentToPc = false;
             const bool stored = storage.add(owned, sentToPc);
             text = (owned.shiny ? "* " : "") + species->name + "  Nv. " + std::to_string(owned.level) +
@@ -776,9 +788,9 @@ struct Scene {
         }
         if (const int levels = progress.addXp(static_cast<int>(std::lround(static_cast<float>(Xp::CAPTURE) * rarityXp))); levels > 0) text += "   ¡Nivel " + std::to_string(progress.level()) + "!";
         if (event == CaptureTarget::Event::CAPTURED && storage.active()) { // el compañero también gana (menos que si lo derrotara: misma fórmula, reducida)
-            const int xp = ExperienceRules::pokemonXp(target.level(), storage.active()->level, 1, rarityXp, ExperienceRules::Source::CAPTURE);
+            const int xp = storage.active()->level >= progress.levelCap() ? 0 : ExperienceRules::pokemonXp(target.level(), storage.active()->level, 1, rarityXp, ExperienceRules::Source::CAPTURE);
             storage.addXp(storage.activeIndex(), xp, progress.levelCap());
-            text += "   +" + std::to_string(xp) + " PX";
+            if (xp > 0) text += "   +" + std::to_string(xp) + " PX";
         }
         switch (target.throwKind()) {
             case CaptureRules::Throw::LUCKY:       showNotice(Notice::LUCKY, text); break;
@@ -836,7 +848,6 @@ struct Scene {
     void captureDirect(const CaptureTarget& wildTarget) {
         const int basic = inventory.basicIndex();
         if (basic < 0) {
-            showNotice(Notice::OUT_OF_STOCK);
             return;
         }
         const DirectX::XMFLOAT3 target = wildTarget.center();
@@ -1252,7 +1263,7 @@ struct Scene {
         int activeXp = 0;
         PokemonStorage::XpResult activeResult;
         for (const int index : winners) {
-            const int xp = ExperienceRules::pokemonXp(target.level(), storage.team()[static_cast<size_t>(index)].level, static_cast<int>(winners.size()), rarity);
+            const int xp = storage.team()[static_cast<size_t>(index)].level >= progress.levelCap() ? 0 : ExperienceRules::pokemonXp(target.level(), storage.team()[static_cast<size_t>(index)].level, static_cast<int>(winners.size()), rarity);
             const PokemonStorage::XpResult result = storage.addXp(index, xp, progress.levelCap());
             if (index == storage.activeIndex()) { activeXp = xp; activeResult = result; }
             if (result.evolved) Sound::emit(Sound::Sfx::EVOLVE, companion.center());
@@ -1262,7 +1273,7 @@ struct Scene {
             const int mine = ExperienceRules::playerXp(target.level(), progress.level());
             if (progress.addXp(mine) > 0) text = "¡Nivel " + std::to_string(progress.level()) + "!  ";
         }
-        text += name + "  +" + std::to_string(activeXp) + " PX";
+        if (activeXp > 0) text += name + "  +" + std::to_string(activeXp) + " PX";
         if (activeResult.levels > 0) text += "   ¡Nivel " + std::to_string(storage.active()->level) + "!";
         showNotice(Notice::REWARD, std::move(text));
     }
@@ -1403,6 +1414,7 @@ struct Scene {
     }
 
     void interact() {
+        m_interaction = validInteraction();
         if (m_interaction.kind == Interaction::WEAKENED && m_weak) {
             captureDirect(*m_weak);
             return;
@@ -1848,11 +1860,13 @@ struct Scene {
         m_aimTarget = nearestHit(camera.eye(player.body.position), camera.forward(), distance, true);
     }
 
+    // Se apunta al pokémon de otro entrenador: no se puede capturar, así que tampoco se lanza la pokéball contra él.
+    bool aimingAtTrainerPokemon() const { return m_aimTarget && wild.foe() && m_aimTarget == wild.foe(); }
+
     // Pulsar lanzar: empieza la animación; la bola sale de la mano un instante después (throwBall).
     void startThrow() {
         throwCooldown = THROW_COOLDOWN;
         if (!inventory.canThrow()) {
-            showNotice(Notice::OUT_OF_STOCK);
             return;
         }
         m_throwDelay = THROW_DELAY;
@@ -1962,9 +1976,8 @@ struct Scene {
                 ball.age += h;
                 for (CaptureTarget* target : wild.loaded()) {
                     if (!target->hitBy(ball.body.position, Pokeball::RADIUS + Pokeball::CONTACT_MARGIN)) continue;
-                    if (target == wild.foe()) { // el pokémon de un entrenador no se captura: la bola rebota y se recupera
-                        showNotice(Notice::REWARD, "¡No puedes capturar a los pokémon de otros entrenadores!");
-                        ball.age = Pokeball::LIFETIME;
+                    if (target == wild.foe()) { // el pokémon de un entrenador no se captura: la bola rebota en su cuerpo y se recupera al desaparecer
+                        bounceOff(ball, *target);
                         break;
                     }
                     target->beginCapture(ball, CaptureRules::roll(chancePercent(*target, ball.multiplierFor(target->shiny()))), camera.yaw(), world);
@@ -1976,6 +1989,26 @@ struct Scene {
         }
         for (const Pokeball& ball : balls) if (ball.expired()) returnBall(ball);
         balls.erase(std::remove_if(balls.begin(), balls.end(), [](const Pokeball& b) { return b.expired(); }), balls.end());
+    }
+
+    // Rebote de una pokéball contra el cuerpo de un pokémon que no se puede capturar: se refleja la velocidad respecto a la normal (del centro del
+    // pokémon a la bola) y se saca la bola de su hitbox para que no lo atraviese.
+    void bounceOff(Pokeball& ball, const CaptureTarget& target) {
+        const DirectX::XMFLOAT3 c = target.center();
+        DirectX::XMFLOAT3& p = ball.body.position;
+        DirectX::XMFLOAT3 n = { p.x - c.x, p.y - c.y, p.z - c.z };
+        const float length = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+        if (length < 0.01f) n = { -std::sin(camera.yaw()), 0.3f, -std::cos(camera.yaw()) }; // justo en el centro: rebota hacia el jugador
+        else n = { n.x / length, n.y / length, n.z / length };
+        DirectX::XMFLOAT3& v = ball.body.velocity;
+        const float along = v.x * n.x + v.y * n.y + v.z * n.z;
+        if (along < 0.0f) { // solo si se acerca (si ya se aleja, no se vuelve a reflejar)
+            const float k = (1.0f + BALL_BOUNCE) * along;
+            v = { v.x - k * n.x, v.y - k * n.y, v.z - k * n.z };
+            Sound::emit(Sound::Sfx::BALL_HIT, p);
+        }
+        for (int i = 0; i < 16 && target.hitBy(p, Pokeball::RADIUS + Pokeball::CONTACT_MARGIN); ++i) p = { p.x + n.x * 0.1f, p.y + n.y * 0.1f, p.z + n.z * 0.1f };
+        if (!ball.bounced) { ball.bounced = true; showNotice(Notice::REWARD, "¡No puedes capturar a los pokémon de otros entrenadores!"); }
     }
 
     // Suena al tocar el suelo o caer al agua (una sola vez por contacto).
@@ -2000,6 +2033,26 @@ struct Scene {
         enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PROFESSOR, WEAKENED, FRUIT, PLOT, TRAINER } kind = NONE;
         int index = -1;
     };
+
+    // La interacción vigente con su índice comprobado: la lista a la que apunta pudo cambiar de tamaño (un objeto recogido o borrado) desde que se calculó.
+    // Si ya no es válida se descarta y queda en el registro (un índice viejo leyendo fuera de la lista sería un cierre del juego).
+    Interaction validInteraction() const {
+        const Interaction i = m_interaction;
+        size_t count = static_cast<size_t>(-1);
+        switch (i.kind) {
+            case Interaction::CHEST:   count = chests.entities.size(); break;
+            case Interaction::NODE:    count = nodes.size(); break;
+            case Interaction::GROUND:  count = groundItems.entities.size(); break;
+            case Interaction::FRUIT:   count = fruits.size(); break;
+            case Interaction::TRAINER: count = trainers.size(); break;
+            case Interaction::PLOT:    count = plots.size(); break;
+            default: break;
+        }
+        if (count == static_cast<size_t>(-1) || (i.index >= 0 && static_cast<size_t>(i.index) < count)) return i;
+        static int reported = 0;
+        if (reported++ < 20) Logger::logInfo("WARN_INTERACTION", "Índice de interacción fuera de rango: tipo=" + std::to_string(static_cast<int>(i.kind)) + " índice=" + std::to_string(i.index) + " tamaño=" + std::to_string(count));
+        return {};
+    }
 
     // Hay algún pokémon al alcance al que fijar la cámara (o ya hay uno fijado).
     bool anyLockable() const {
@@ -2052,6 +2105,7 @@ struct Scene {
     static constexpr float CASCADE_PLAYER_RANGE = 3.5f; // a esta distancia de una cascada el jugador está en ella
     static constexpr float CASCADE_TOGETHER = 9.0f;     // el pokémon debe estar así de cerca del jugador
     static constexpr float THROW_BUFFER = 0.35f;      // segundos que se recuerda un clic de lanzar que no pudo salir al instante
+    static constexpr float BALL_BOUNCE = 0.55f; // fracción de la velocidad que conserva la bola al rebotar en un pokémon
     float m_throwQueued = 0.0f;
     float m_radioHold = 0.0f; // al elegir emisora, lo que le queda a la rueda antes de irse
     float m_throwDelay = -1.0f; // >= 0: lanzando (la bola sale al llegar a 0)
@@ -2093,7 +2147,7 @@ struct Scene {
     }
     int leadLevel() const { const OwnedPokemon* lead = storage.active(); return lead ? lead->level : 5; }
 
-    static BattleRules::OwnedLike likeOf(const OwnedPokemon& o, int source) { return { o.speciesId, o.level, o.shiny, o.hp, o.heldItemId, o.moves, o.pp, o.evs, source }; }
+    static BattleRules::OwnedLike likeOf(const OwnedPokemon& o, int source) { return { o.speciesId, o.level, o.shiny, o.hp, o.heldItemId, o.moves, o.pp, o.ivs, o.evs, o.nature, source }; }
 
     // Empieza el duelo con un entrenador: en tiempo real (su pokémon sale al mundo y peleamos como contra los salvajes) o por turnos (pantalla propia).
     void startDuel(int index) {
@@ -2110,14 +2164,16 @@ struct Scene {
         }
         std::vector<BattleRules::Fighter> mine, foes;
         for (int i = 0; i < static_cast<int>(storage.team().size()); ++i) mine.push_back(BattleRules::makeFighter(*m_data, likeOf(storage.team()[i], i)));
+        const bool doubles = trainer.style == Trainer::Style::DOUBLES;
         for (int i = 0; i < DUEL_POKEMON; ++i) foes.push_back(BattleRules::makeFighter(*m_data, likeOf(rivalPokemon(leadLevel()), -1)));
         int first = -1; // siempre sale el primero del equipo (que no esté debilitado), sea cual sea el que nos siga en el mundo
         for (int i = 0; i < static_cast<int>(storage.team().size()) && first < 0; ++i) if (!storage.fainted(storage.team()[static_cast<size_t>(i)])) first = i;
-        battle = std::make_shared<Battle>(*m_data, std::move(mine), first, std::move(foes), trainer.name);
+        battle = std::make_shared<Battle>(*m_data, std::move(mine), first, std::move(foes), trainer.name, doubles);
         m_battleTrainer = index;
+        Logger::logInfo("BATTLE", "Empieza el combate por turnos contra " + trainer.name + " | dobles=" + std::to_string(doubles) + " | equipo propio=" + std::to_string(storage.team().size()) + " | rivales=" + std::to_string(DUEL_POKEMON) + " | nivel del líder=" + std::to_string(leadLevel()));
         m_battleOrigin = player.body.position;     // a donde vuelve el jugador al terminar
         m_trainerHome = trainer.body.position;     // y el entrenador
-        m_battleOrbit = 0.0f;
+        m_battleOrbit = BATTLE_START_ORBIT;        // la cámara empieza detrás de nuestro pokémon, algo girada: el nuestro a la izquierda y el rival a la derecha
         m_battleTilt = 0.35f;
         m_battleSlide = 0.0f;                      // durante la carga ambos se desplazan a los bordes de la zona de combate
         m_battleYaw = std::atan2(arenaDirection().x, arenaDirection().z);
@@ -2166,6 +2222,7 @@ struct Scene {
     // Termina el combate por turnos: PS y PP vuelven a los pokémon del jugador y los que combatieron ganan experiencia si ganó.
     void finishBattle() {
         if (!battle) return;
+        Logger::logInfo("BATTLE", std::string("Termina el combate: ") + (battle->outcome() == Battle::Outcome::WON ? "victoria" : battle->outcome() == Battle::Outcome::LOST ? "derrota" : "sin resultado") + " | rivales derrotados=" + std::to_string(battle->defeatedLevels().size()));
         for (const BattleRules::Fighter& f : battle->playerTeam()) {
             OwnedPokemon* owned = storage.mutableAt(true, f.source);
             if (!owned) continue;
@@ -2175,7 +2232,7 @@ struct Scene {
         // Sin dinero ni premios: cada pokémon cobra lo que ganó al derrotar rivales (ya repartido entre los que seguían en pie) y el jugador, la suya.
         std::string text;
         for (const BattleRules::Fighter& f : battle->playerTeam()) {
-            if (f.xpGain <= 0) continue;
+            if (f.xpGain <= 0 || storage.team()[static_cast<size_t>(f.source)].level >= progress.levelCap()) continue; // al nivel máximo no gana experiencia
             const PokemonStorage::XpResult result = storage.addXp(f.source, f.xpGain, progress.levelCap());
             text += (text.empty() ? "" : "  ") + f.name + " +" + std::to_string(f.xpGain) + " PX";
             if (result.levels > 0) text += " (Nv. " + std::to_string(storage.team()[static_cast<size_t>(f.source)].level) + ")";
@@ -2185,6 +2242,12 @@ struct Scene {
         if (playerGain > 0) {
             text += (text.empty() ? "" : "  ") + std::string("Tú +") + std::to_string(playerGain) + " PX";
             if (progress.addXp(playerGain) > 0) text += " (Nv. " + std::to_string(progress.level()) + ")";
+        }
+        if (m_battleTrainer >= 0 && battle->outcome() == Battle::Outcome::WON && trainers[m_battleTrainer].gym && !trainers[m_battleTrainer].badgeGiven) {
+            trainers[m_battleTrainer].badgeGiven = true; // medalla de prueba: una sola vez por sesión
+            progress.addBadge();
+            Logger::logInfo("BATTLE", "Medalla de gimnasio de " + trainers[m_battleTrainer].name + " | medallas=" + std::to_string(progress.badges()) + " | nivel máximo=" + std::to_string(progress.levelCap()));
+            text += (text.empty() ? "" : "  ") + std::string("¡Medalla de gimnasio! Nivel máximo ") + std::to_string(progress.levelCap());
         }
         if (!text.empty()) showNotice(Notice::REWARD, text);
         if (m_battleTrainer >= 0) {
@@ -2240,9 +2303,11 @@ struct Scene {
 
     // --- Zona de combate por turnos: un círculo en el suelo junto al inicio. El entrenador está en un punto del borde (por fuera) y el jugador
     // en el opuesto, uno frente al otro; los pokémon pelean en medio. ---
-    static constexpr float ARENA_RADIUS = 7.0f;       // radio de la zona (m)
+    static constexpr float ARENA_RADIUS = 10.0f;      // radio de la zona (m)
+    static constexpr float DOUBLES_SPREAD = 2.0f;     // en dobles, cada pokémon de un lado se separa así del eje central
+    static constexpr float BATTLE_START_ORBIT = 0.95f; // giro inicial de la cámara (rad) desde la vista lateral hacia la espalda de nuestro pokémon
     static constexpr float ARENA_EDGE_GAP = 0.9f;     // los entrenadores están así de lejos del borde, por fuera
-    static constexpr float ARENA_POKEMON = 3.0f;      // cada pokémon, así de lejos del centro
+    static constexpr float ARENA_POKEMON = 4.0f;      // cada pokémon, así de lejos del centro
     DirectX::XMFLOAT3 arenaCenter() const {
         const float x = ARENA_X, z = ARENA_Z;
         return { x, (std::max)(Physics::World::START_HEIGHT, world.surfaceHeight(x, z)), z };
@@ -2258,18 +2323,21 @@ struct Scene {
     }
 
     // Vista del combate por turnos: detrás de nuestro pokémon, mirando hacia el rival.
-    DirectX::XMFLOAT3 battleSpot(int side) const {
+    // 'slot' = hueco del campo (Battle::slotOf): lado * 2 + posición. En dobles los dos de un lado se reparten a izquierda y derecha.
+    DirectX::XMFLOAT3 battleSpot(int slot) const {
         const DirectX::XMFLOAT3 c = arenaCenter(), d = arenaDirection();
+        const int side = Battle::sideOf(slot);
         const float k = side == 1 ? ARENA_POKEMON : -ARENA_POKEMON;
-        return { c.x + d.x * k, c.y, c.z + d.z * k };
+        const float lateral = battle && battle->doubles() ? (Battle::posOf(slot) == 0 ? -DOUBLES_SPREAD : DOUBLES_SPREAD) : 0.0f;
+        return { c.x + d.x * k - d.z * lateral, c.y, c.z + d.z * k + d.x * lateral };
     }
     // Tiempo y desplazamiento de la embestida del que ataca y el temblor del que recibe (en metros hacia delante y a un lado).
-    DirectX::XMFLOAT3 battleOffset(int side) const {
+    DirectX::XMFLOAT3 battleOffset(int slot) const {
         const float t = battleFx.time;
         const float dx = std::sin(m_battleYaw), dz = std::cos(m_battleYaw);
         float forward = 0.0f, lateral = 0.0f;
-        if (battleFx.attacker == side) forward = (side == 0 ? 1.0f : -1.0f) * 1.4f * std::sin((std::min)(t / 0.35f, 1.0f) * 3.14159265f);
-        else if (battleFx.attacker >= 0 && battleFx.hit && t > 0.25f && t < 0.75f) lateral = 0.18f * std::sin((t - 0.25f) * 60.0f);
+        if (battleFx.attacker == slot) forward = (Battle::sideOf(slot) == 0 ? 1.0f : -1.0f) * 1.4f * std::sin((std::min)(t / 0.35f, 1.0f) * 3.14159265f);
+        else if (battleFx.attacker >= 0 && battleFx.hit && battleFx.target == slot && t > 0.25f && t < 0.75f) lateral = 0.18f * std::sin((t - 0.25f) * 60.0f);
         return { dx * forward + dz * lateral, 0.0f, dz * forward - dx * lateral };
     }
     // Cámara del combate por turnos: de lado a la línea de los pokémon (el nuestro a la izquierda, el rival a la derecha) y se puede girar
@@ -2282,15 +2350,21 @@ struct Scene {
         const DirectX::XMFLOAT3 c = arenaCenter(), d = arenaDirection();
         const float yaw = std::atan2(-d.z, d.x) + m_battleOrbit; // mirando perpendicular a la línea nuestro→rival (nuestro pokémon a la izquierda)
         const float dx = std::sin(yaw), dz = std::cos(yaw);
-        const float dist = 9.5f - 2.0f * m_battleTilt, height = 1.6f + 6.5f * m_battleTilt;
+        const float dist = ARENA_RADIUS - 0.5f, height = 1.6f + 6.5f * m_battleTilt; // siempre desde el borde del círculo; la inclinación solo la sube o baja
         const DirectX::XMFLOAT3 eye = { c.x - dx * dist, c.y + height, c.z - dz * dist };
         const DirectX::XMFLOAT3 at = { c.x, c.y + 0.7f, c.z };
         return DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&eye), DirectX::XMLoadFloat3(&at), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
     }
     float battleYaw() const { return m_battleYaw; }
     int battleTrainer() const { return m_battleTrainer; }
+    DirectX::XMFLOAT3 battleHand(int side) const { const DirectX::XMFLOAT3 stand = arenaStand(side); return { stand.x, stand.y + 1.3f, stand.z }; }
     void advanceBattleFx(float dt) {
         battleFx.time += dt;
+        if (battle) for (int slot = 0; slot < Battle::SLOTS; ++slot) {
+            if (!m_battleBalls[slot].active()) continue;
+            const DirectX::XMFLOAT3 spot = battleSpot(slot);
+            m_battleBalls[slot].update(dt, { spot.x, spot.y + 1.6f, spot.z }, battleHand(Battle::sideOf(slot)));
+        }
         if (!battle || m_battleSlide >= 1.0f) return;
         // Durante la pantalla de carga el entrenador y el jugador caminan hasta sus sitios del borde (con suavizado).
         m_battleSlide = (std::min)(1.0f, m_battleSlide + dt / BATTLE_SLIDE_TIME);
@@ -2300,7 +2374,18 @@ struct Scene {
         if (m_battleTrainer >= 0) trainers[m_battleTrainer].body.position = { m_trainerHome.x + (theirs.x - m_trainerHome.x) * e, m_trainerHome.y + (theirs.y - m_trainerHome.y) * e, m_trainerHome.z + (theirs.z - m_trainerHome.z) * e };
     }
     // Empieza la animación de un mensaje del combate (quién ataca y si llega el golpe).
-    void playBattleFx(int attacker, bool hit) { battleFx = { attacker, hit, 0.0f }; }
+    void playBattleFx(const Battle::Message& m) {
+        battleFx = { m.attacker, m.target, m.hit, 0.0f };
+        if (!battle || (m.animKind != 1 && m.animKind != 2) || m.animSide < 0) return;
+        const int slot = m.animSide, side = Battle::sideOf(slot);
+        const DirectX::XMFLOAT3 hand = battleHand(side);
+        int ball = -1; // los del jugador, con la pokéball de cada uno; los del rival, la Poké Ball de siempre
+        if (side == 0 && battle->occupied(slot)) if (const OwnedPokemon* owned = storage.mutableAt(true, battle->fighter(slot).source)) ball = owned->ballId;
+        const bool release = m.animKind == 2;
+        m_battleBalls[slot].start(release ? BallTransfer::Mode::RELEASE : BallTransfer::Mode::ABSORB, m_battleYaw + (side == 0 ? 0.0f : 3.14159265f), hand, ball);
+        Sound::emit(release ? Sound::Sfx::BALL_RELEASE : Sound::Sfx::BALL_RECALL, hand);
+    }
+    const BallTransfer* battleBall(int slot) const { return m_battleBalls[slot].active() ? &m_battleBalls[slot] : nullptr; }
 
     private:
 
@@ -2311,6 +2396,7 @@ struct Scene {
     DirectX::XMFLOAT3 m_trainerHome = {};
     std::map<int, int> m_shopBought; // unidades compradas de cada objeto que aún no han dado regalo
     float m_battleSlide = 1.0f;
+    BallTransfer m_battleBalls[Battle::SLOTS]; // pokéballs de los pokémon que salen o vuelven en el combate por turnos
     float m_battleOrbit = 0.0f, m_battleTilt = 0.35f; // giro y altura de la cámara del combate
     int m_duelTrainer = -1;
     int m_duelLeft = 0;
@@ -2346,6 +2432,7 @@ struct Scene {
     std::vector<char> m_sandHabitats;
     const CaptureTarget* m_weak = nullptr; // salvaje debilitado por el acompañante que se puede capturar ahora (Interaction::WEAKENED)
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
+    bool m_wasAiming = false; // el fotograma anterior estaba en modo captura (para elegir la primera pokéball al entrar)
     float m_lockHidden = 0.0f; // segundos que lleva tapado el pokémon fijado
     CaptureTarget* m_aimTarget = nullptr;  // pokémon al que apunta la cruceta dentro del alcance
 };

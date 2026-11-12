@@ -20,6 +20,7 @@ class CrashUtil {
     // Instalar una sola vez, lo primero de main.
     static void install() {
         SetUnhandledExceptionFilter(&onException);
+        AddVectoredExceptionHandler(1, &onVectored); // ve la excepción fatal antes que nadie: así el volcado lleva la dirección y el contexto reales del fallo
         std::set_terminate(&onTerminate);
         std::signal(SIGABRT, &onSignal);
         std::signal(SIGSEGV, &onSignal);
@@ -38,6 +39,24 @@ class CrashUtil {
         std::memcpy(s_detail, text, sizeof(s_detail)); // línea corta: una carrera con el informe solo mezcla caracteres
     }
 
+    // Aserción fallida (ImGui): informa y cierra.
+    static void assertFailed(const char* expression, const char* file, int line) {
+        char extra[400];
+        std::snprintf(extra, sizeof(extra), ": %s (%s:%d)", expression, file, line);
+        report("Aserción fallida", extra);
+        backtrace();
+        dump(nullptr);
+        std::_Exit(3);
+    }
+
+    // Apunta un hecho reciente (cambio de estado, orden, combate...) en un anillo que se vuelca en el informe del cierre: sirve para saber qué pasó justo antes.
+    static void note(const char* format, double a = 0.0, double b = 0.0, double c = 0.0) {
+        char text[sizeof(s_notes[0])];
+        std::snprintf(text, sizeof(text), format, a, b, c);
+        const unsigned i = s_noteNext.fetch_add(1, std::memory_order_relaxed) % NOTES;
+        std::memcpy(s_notes[i], text, sizeof(text));
+    }
+
     // Cada vuelta del bucle principal: sin latidos durante WATCHDOG_SECONDS el juego se da por bloqueado.
     static void heartbeat() { s_beat.store(GetTickCount64(), std::memory_order_relaxed); }
     // El bucle espera a propósito (menús sin animación): el vigilante no cuenta ese tiempo.
@@ -46,6 +65,7 @@ class CrashUtil {
     private:
     static constexpr ULONGLONG WATCHDOG_MS = 6000;
     static constexpr int MAX_FRAMES = 32;
+    static constexpr unsigned NOTES = 24;
 
     // Escritura directa al archivo: no usa el Logger (su cerrojo o su buffer pueden ser lo que falla).
     static void write(const char* text) {
@@ -60,6 +80,15 @@ class CrashUtil {
         char text[1024];
         std::snprintf(text, sizeof(text), "[ERROR][CRASH] %s%s\n[ERROR][CRASH] Etapa: %s | %s\n", title, extra, s_stage.load() ? s_stage.load() : "?", s_detail);
         write(text);
+        const unsigned next = s_noteNext.load(std::memory_order_relaxed);
+        write("[ERROR][CRASH] Últimos hechos (del más antiguo al más reciente):\n");
+        for (unsigned k = 0; k < NOTES; ++k) {
+            const char* note = s_notes[(next + k) % NOTES];
+            if (!*note) continue;
+            char line[sizeof(s_notes[0]) + 24];
+            std::snprintf(line, sizeof(line), "[ERROR][CRASH]   - %s\n", note);
+            write(line);
+        }
     }
 
     // Módulo y desplazamiento de una dirección ("PokemonEdge.exe+0x1a2b3").
@@ -91,10 +120,30 @@ class CrashUtil {
         if (done.exchange(true)) return;
         const HANDLE file = CreateFileW(PathsUtil::CRASH_DUMP_PATH.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE) return;
+        CONTEXT context = {};
+        EXCEPTION_RECORD record = {};
+        EXCEPTION_POINTERS synthetic = { &record, &context };
+        if (!info) { // sin excepción real (abort, señal, bloqueo): se fabrica una con el contexto de ahora para que el volcado tenga hilo y pila
+            RtlCaptureContext(&context);
+            record.ExceptionCode = 0xE0000001;
+            info = &synthetic;
+        }
         MINIDUMP_EXCEPTION_INFORMATION exception = { GetCurrentThreadId(), info, FALSE };
-        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, MiniDumpNormal, info ? &exception : nullptr, nullptr, nullptr);
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, static_cast<MINIDUMP_TYPE>(MiniDumpWithIndirectlyReferencedMemory | MiniDumpWithDataSegs | MiniDumpWithThreadInfo), &exception, nullptr, nullptr);
         CloseHandle(file);
         write("[ERROR][CRASH] Volcado guardado en app/logs/crash.dmp\n");
+    }
+
+    // Excepciones que casi siempre son el fin: se informa (una vez) con la dirección real antes de que el sistema decida nada.
+    static LONG WINAPI onVectored(EXCEPTION_POINTERS* info) {
+        const DWORD code = info->ExceptionRecord->ExceptionCode;
+        const bool fatal = code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR || code == EXCEPTION_STACK_OVERFLOW || code == EXCEPTION_ILLEGAL_INSTRUCTION ||
+                           code == EXCEPTION_INT_DIVIDE_BY_ZERO || code == EXCEPTION_ARRAY_BOUNDS_EXCEEDED || code == EXCEPTION_PRIV_INSTRUCTION || code == 0xC0000409 /* fallo rápido: __fastfail, desbordamiento de búfer */;
+        if (!fatal) return EXCEPTION_CONTINUE_SEARCH;
+        static std::atomic<bool> reported{ false };
+        if (reported.exchange(true)) return EXCEPTION_CONTINUE_SEARCH;
+        onException(info);
+        return EXCEPTION_CONTINUE_SEARCH;
     }
 
     static LONG WINAPI onException(EXCEPTION_POINTERS* info) {
@@ -110,6 +159,8 @@ class CrashUtil {
         }
         char title[96];
         std::snprintf(title, sizeof(title), "Excepción 0x%08lx", static_cast<unsigned long>(record->ExceptionCode));
+        static std::atomic<bool> done{ false };
+        if (done.exchange(true)) return EXCEPTION_EXECUTE_HANDLER; // ya informado por el manejador vectorial
         report(title, extra);
         backtrace();
         dump(info);
@@ -170,4 +221,6 @@ class CrashUtil {
     inline static std::atomic<const char*> s_stage{ "inicio" };
     inline static std::atomic<ULONGLONG> s_beat{ 0 };
     inline static char s_detail[160] = "";
+    inline static char s_notes[NOTES][160] = {};
+    inline static std::atomic<unsigned> s_noteNext{ 0 };
 };

@@ -5,6 +5,7 @@
 #include "../engine/world/style/styleRegistry.hpp"
 #include "../daos/abilityDao.hpp"
 #include "../daos/moveDao.hpp"
+#include "../daos/natureDao.hpp"
 #include "../daos/dexRewardDao.hpp"
 #include "../daos/generationDao.hpp"
 #include "../daos/habitatDao.hpp"
@@ -41,6 +42,7 @@ class DatabaseManager {
         MoveDao().load(data);
         data.rarities = RarityDao().findAll();
         data.generations = GenerationDao().findAll();
+        data.natures = NatureDao().findAll();
         const TypeDao types;
         data.typeChart = types.findChart();
         data.types = types.findAll();
@@ -55,7 +57,7 @@ class DatabaseManager {
         Logger::logInfo("DB_MANAGER", "Datos de juego: " + std::to_string(data.items.size()) + " objetos, " + std::to_string(data.balls.size()) + " pokéballs, " +
             std::to_string(data.materials.size()) + " materiales, " + std::to_string(data.chests.size()) + " cofres, " + std::to_string(data.rewards.size()) + " recompensas, " +
             std::to_string(data.nodes.size()) + " nodos de recolección, " + std::to_string(data.skills.size()) + " habilidades de recolección, " + std::to_string(data.tools.size()) +
-            " herramientas, " + std::to_string(data.species.size()) + " pokémon, " + std::to_string(data.abilities.size()) + " habilidades, " + std::to_string(data.moves.size()) + " movimientos, " + std::to_string(data.habitats.size()) +
+            " herramientas, " + std::to_string(data.species.size()) + " pokémon, " + std::to_string(data.abilities.size()) + " habilidades, " + std::to_string(data.moves.size()) + " movimientos, " + std::to_string(data.natures.size()) + " naturalezas, " + std::to_string(data.habitats.size()) +
             " hábitats, " + std::to_string(data.weathers.size()) + " climas, " + std::to_string(Radio::stations().size()) + " emisoras.");
         return data;
     }

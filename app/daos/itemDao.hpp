@@ -5,7 +5,7 @@
 #include "../utils/core/stringUtil.hpp"
 #include "daoRow.hpp"
 
-// Objetos (tabla item + su efecto + su categoría). Cada fila se reparte según el efecto: CAPTURE -> pokéball, HEAL / REVIVE / LEVEL / EV ->
+// Objetos (tabla item + su efecto + su categoría). Cada fila se reparte según el efecto: CAPTURE -> pokéball, HEAL / REVIVE / LEVEL / IV / IV_CAP / IV_MAX ->
 // objeto de entrenamiento, EVOLVE -> piedra evolutiva. Los materiales y las herramientas también entran en el inventario como objetos.
 class ItemDao {
     public:
@@ -61,8 +61,8 @@ class ItemDao {
     }
 
     static const TrainingItem::Effect* trainingEffect(const std::string& kind) {
-        static const TrainingItem::Effect LEVEL = TrainingItem::Effect::LEVEL, EV = TrainingItem::Effect::EV, HEAL = TrainingItem::Effect::HEAL, REVIVE = TrainingItem::Effect::REVIVE;
-        return kind == "LEVEL" ? &LEVEL : kind == "EV" ? &EV : kind == "HEAL" || kind == "HEAL_PERCENT" ? &HEAL : kind == "REVIVE" ? &REVIVE : nullptr;
+        static const TrainingItem::Effect LEVEL = TrainingItem::Effect::LEVEL, IV = TrainingItem::Effect::IV, IV_CAP = TrainingItem::Effect::IV_CAP, IV_MAX = TrainingItem::Effect::IV_MAX, HEAL = TrainingItem::Effect::HEAL, REVIVE = TrainingItem::Effect::REVIVE;
+        return kind == "LEVEL" ? &LEVEL : kind == "IV" || kind == "EV" ? &IV : kind == "IV_CAP" ? &IV_CAP : kind == "IV_MAX" ? &IV_MAX : kind == "HEAL" || kind == "HEAL_PERCENT" ? &HEAL : kind == "REVIVE" ? &REVIVE : nullptr;
     }
 
     static constexpr const char* SELECT_ITEMS =

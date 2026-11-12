@@ -40,3 +40,32 @@ constexpr bool isFullscreen(GameState state) {
 constexpr bool isAnimated(GameState state) {
     return state == GameState::TITLE_SCREEN || state == GameState::LOADING || state == GameState::PLAYING || state == GameState::UPDATING || state == GameState::STARTER || state == GameState::BATTLE;
 }
+
+// Nombre de cada pantalla (registro y etapa del informe de cierres).
+inline const char* gameStateName(GameState state) {
+    switch (state) {
+        case GameState::TITLE_SCREEN: return "TITLE_SCREEN";
+        case GameState::MAIN_MENU: return "MAIN_MENU";
+        case GameState::LOAD_MENU: return "LOAD_MENU";
+        case GameState::REPLACE_MENU: return "REPLACE_MENU";
+        case GameState::LOADING: return "LOADING";
+        case GameState::PLAYING: return "PLAYING";
+        case GameState::PAUSED: return "PAUSED";
+        case GameState::CONTROLS: return "CONTROLS";
+        case GameState::MAP: return "MAP";
+        case GameState::INVENTORY: return "INVENTORY";
+        case GameState::POKEDEX: return "POKEDEX";
+        case GameState::TYPES: return "TYPES";
+        case GameState::POKEMON: return "POKEMON";
+        case GameState::STARTER: return "STARTER";
+        case GameState::PLAYER: return "PLAYER";
+        case GameState::RESEARCH: return "RESEARCH";
+        case GameState::BATTLE: return "BATTLE";
+        case GameState::SHOP: return "SHOP";
+        case GameState::LEARN: return "LEARN";
+        case GameState::SEEDS: return "SEEDS";
+        case GameState::PC: return "PC";
+        case GameState::UPDATING: return "UPDATING";
+    }
+    return "?";
+}

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 #include "playerProgress.hpp"
-#include "../rules/evRules.hpp"
+#include "../rules/ivRules.hpp"
 #include "../../../models/gameData.hpp"
 
 // Progreso de cada especie en la Pokédex (capturas, variocolor, mejor rango, nivel más alto) y las recompensas ya reclamadas.
@@ -16,7 +16,7 @@ class DexProgress {
     struct Entry {
         int captures = 0;
         int shiny = 0;
-        int bestRank = -1;           // índice de EvRules::RANKS del mejor analizado (-1 = ninguno)
+        int bestRank = -1;           // índice de IvRules::RANKS del mejor analizado (-1 = ninguno)
         int maxLevel = 0;
         std::vector<int> claimed;    // ids de dex_reward ya reclamados
     };
@@ -33,7 +33,7 @@ class DexProgress {
             e->maxLevel = (std::max)(e->maxLevel, level);
         }
     }
-    void ranked(int speciesId, EvRules::Rank rank) { if (Entry* e = entry(speciesId)) e->bestRank = (std::max)(e->bestRank, static_cast<int>(rank)); }
+    void ranked(int speciesId, IvRules::Rank rank) { if (Entry* e = entry(speciesId)) e->bestRank = (std::max)(e->bestRank, static_cast<int>(rank)); }
     void leveled(int speciesId, int level) { if (Entry* e = entry(speciesId)) e->maxLevel = (std::max)(e->maxLevel, level); }
 
     const Entry* find(int speciesId) const {

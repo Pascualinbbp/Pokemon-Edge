@@ -3,10 +3,12 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../utils/core/randomUtil.hpp"
 #include "pokemon/ability.hpp"
 #include "pokemon/move.hpp"
 #include "pokemon/dexReward.hpp"
 #include "pokemon/generation.hpp"
+#include "pokemon/nature.hpp"
 #include "pokemon/rarity.hpp"
 #include "pokemon/typeChart.hpp"
 #include "world/chestType.hpp"
@@ -41,6 +43,7 @@ struct GameData {
     TypeChart typeChart;
     std::vector<Rarity> rarities;
     std::vector<Generation> generations;
+    std::vector<Nature> natures;
     std::vector<RewardEntry> rewards; // ordenadas por grupo
     std::vector<TrainingItem> trainingItems;
     std::vector<HeldItem> heldItems;
@@ -69,6 +72,9 @@ struct GameData {
     const PokemonType* type(int id) const { return find(types, id); }
     const Rarity* rarity(int id) const { return find(rarities, id); }
     const Generation* generation(int id) const { return find(generations, id); }
+    const Nature* nature(int id) const { return id <= 0 ? nullptr : find(natures, id); } // 0 = sin naturaleza (neutra)
+    // Id de una naturaleza al azar (0 si no hay ninguna cargada).
+    int randomNatureId() const { return natures.empty() ? 0 : natures[static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(natures.size()) - 1))].id; }
     const Rarity* rarityOf(const PokemonSpecies& species) const { return rarity(species.rarityId); }
     float spawnWeight(const ChestType& chest) const { const Rarity* r = rarity(chest.rarity); return r ? r->spawnMultiplier : 1.0f; }
     float spawnMultiplier(const PokemonSpecies& species) const { const Rarity* r = rarityOf(species); return r ? r->spawnMultiplier : 1.0f; }

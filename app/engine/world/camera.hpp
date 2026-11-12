@@ -26,6 +26,7 @@ class Camera {
     static constexpr float AIM_MIN_PITCH    = -1.1f;   // al apuntar se puede mirar bien hacia arriba
     static constexpr float AIM_SENSITIVITY_SCALE = 0.6f; // más precisión al apuntar
     static constexpr float BLEND_SPEED      = 7.0f;    // la transición dura ~1/7 s
+    static constexpr float RELEASE_SPEED    = 2.2f;    // al salir del modo captura la cámara vuelve despacio (~0,45 s)
     static constexpr float LOCK_SMOOTH      = 10.0f;   // rapidez con la que la cámara se fija al objetivo
 
     // Rotación libre alrededor del jugador (no afecta a hacia dónde camina el personaje).
@@ -63,7 +64,7 @@ class Camera {
     // Avanza la transición entre cámara normal y de apuntado.
     void update(float dt, bool aiming) {
         const float target = aiming ? 1.0f : 0.0f;
-        const float step = BLEND_SPEED * dt;
+        const float step = (aiming ? BLEND_SPEED : RELEASE_SPEED) * dt;
         m_aim = m_aim < target ? (std::min)(m_aim + step, target) : (std::max)(m_aim - step, target);
         const float low = minPitch();
         if (m_pitch < low) m_pitch += (low - m_pitch) * (std::min)(1.0f, 8.0f * dt); // al salir del agua el límite sube poco a poco: la vista no da un tirón

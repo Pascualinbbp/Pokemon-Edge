@@ -16,7 +16,9 @@
 #include "moveEditor.hpp"
 #include "../window/guiInput.hpp"
 #include "../../engine/core/inputDevice.hpp"
-#include "../../engine/world/rules/evRules.hpp"
+#include "../../engine/world/rules/ivRules.hpp"
+#include "../../engine/world/rules/statRules.hpp"
+#include "statEditor.hpp"
 #include "../../engine/world/state/inventory.hpp"
 #include "../../engine/world/state/itemUse.hpp"
 #include "../../engine/world/state/playerProgress.hpp"
@@ -65,6 +67,7 @@ namespace PokemonComponent {
         inline int rankFilter = -1;              // potencial mínimo (-1 = todos)
         inline bool shinyFilter = false;
         inline bool editingMoves = false;        // editor de movimientos abierto para el pokémon seleccionado
+        inline bool editingStats = false;        // editor de EVs y naturaleza abierto para el pokémon seleccionado
 
         inline void select(const Place& place) {
             selection = place;
@@ -113,7 +116,7 @@ namespace PokemonComponent {
         // mando) y, en un clic (o ✕ del mando), suelta lo que se lleve. Devuelve true si es un clic normal para seleccionarla o marcarla.
         inline bool slotInput(PokemonStorage& storage, const Place& place, bool filled, bool clicked) {
             slots.push_back({ place, ImGui::GetItemRectMin(), ImGui::GetItemRectMax() });
-            if (manage && filled && !selecting && !held.active) {
+            if ((manage || place.inTeam) && filled && !selecting && !held.active) { // en el menú rápido solo se reordena el equipo
                 if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f)) held = { true, false, place };
                 else if (ImGui::IsItemFocused() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)) held = { true, true, place };
             }
@@ -131,8 +134,12 @@ namespace PokemonComponent {
             const ImVec2 mouse = ImGui::GetIO().MousePos;
             const auto inside = [&](const ImVec2& a, const ImVec2& b) { return mouse.x >= a.x && mouse.x <= b.x && mouse.y >= a.y && mouse.y <= b.y; };
             for (const SlotRect& slot : slots) {
-                if (inside(slot.a, slot.b)) return drop(storage, slot.place);
+                if (inside(slot.a, slot.b)) {
+                    if (!manage && !ownedAt(storage, slot.place)) break; // menú rápido: solo se intercambia con otro pokémon del equipo
+                    return drop(storage, slot.place);
+                }
             }
+            if (!manage) { held.active = false; return; }
             if (inside(teamArea[0], teamArea[1])) return drop(storage, { true, static_cast<int>(storage.team().size()) });
             if (inside(boxArea[0], boxArea[1])) return drop(storage, { false, static_cast<int>(storage.pc().size()) });
             held.active = false;
@@ -210,7 +217,7 @@ namespace PokemonComponent {
             if (typeFilter >= 0 && typeFilter < static_cast<int>(data.types.size()) &&
                 std::find(species->types.begin(), species->types.end(), data.types[typeFilter].id) == species->types.end()) return false;
             if (shinyFilter && !owned.shiny) return false;
-            if (rankFilter >= 0 && !(owned.analyzed && EvRules::rank(species->stats, owned.evCaps) >= EvRules::RANKS[rankFilter])) return false;
+            if (rankFilter >= 0 && !(owned.analyzed && IvRules::rank(owned.ivCaps) >= IvRules::RANKS[rankFilter])) return false;
             return true;
         }
 
@@ -293,8 +300,8 @@ namespace PokemonComponent {
             float x = pos.x;
             x += barButton("##fType", "TIPO: " + (typeFilter < 0 ? std::string("TODOS") : capital(data.types[typeFilter].name)), x, pos.y, true, NEUTRAL, pressed);
             if (pressed) typeFilter = typeFilter + 1 < static_cast<int>(data.types.size()) ? typeFilter + 1 : -1;
-            x += barButton("##fRank", std::string("POTENCIAL: ") + (rankFilter < 0 ? "TODOS" : std::string(">= ") + EvRules::label(EvRules::RANKS[rankFilter])), x, pos.y, true, NEUTRAL, pressed);
-            if (pressed) rankFilter = rankFilter + 1 < static_cast<int>(std::size(EvRules::RANKS)) ? rankFilter + 1 : -1;
+            x += barButton("##fRank", std::string("POTENCIAL: ") + (rankFilter < 0 ? "TODOS" : std::string(">= ") + IvRules::label(IvRules::RANKS[rankFilter])), x, pos.y, true, NEUTRAL, pressed);
+            if (pressed) rankFilter = rankFilter + 1 < static_cast<int>(std::size(IvRules::RANKS)) ? rankFilter + 1 : -1;
             x += barButton("##fShiny", shinyFilter ? "VARIOCOLOR: SÍ" : "VARIOCOLOR", x, pos.y, true, shinyFilter ? IM_COL32(190, 150, 30, 255) : NEUTRAL, pressed);
             if (pressed) shinyFilter = !shinyFilter;
 
@@ -345,8 +352,8 @@ namespace PokemonComponent {
         }
 
         // --- Ficha ---
-        // Gráfico hexagonal: estadísticas base (azul) y, encima, su crecimiento por EVs (naranja). En cada vértice: nombre y
-        // base y EV actual / máximo con el que salió. Las vitaminas se gastan desde la mochila.
+        // Gráfico hexagonal: estadísticas base (azul) y, encima, lo que suman sus IV y EVs (naranja). En cada vértice: nombre, base y
+        // estadística real (con nivel, IV, EVs y naturaleza), y el IV actual / tope con el que salió. Las vitaminas y chapas se usan desde la mochila.
         inline void drawStats(const GameData& data, PokemonStorage& storage, Inventory& inventory, const OwnedPokemon& owned,
                               const PokemonSpecies& species, const ImVec2& area, float avail) {
             constexpr int ORDER[6] = { 0, 1, 3, 5, 4, 2 }; // vértices de arriba en sentido horario (índices de BaseStats)
@@ -355,7 +362,7 @@ namespace PokemonComponent {
             float base[6], grown[6];
             for (int i = 0; i < 6; ++i) {
                 base[i] = static_cast<float>(species.stats.at(ORDER[i])) / MAX_STAT;
-                grown[i] = static_cast<float>(species.stats.at(ORDER[i]) + owned.evs[ORDER[i]]) / MAX_STAT;
+                grown[i] = static_cast<float>(species.stats.at(ORDER[i])) / MAX_STAT + static_cast<float>(owned.ivs[ORDER[i]] + owned.evs[ORDER[i]] / 4) / (2.0f * MAX_STAT);
             }
             const float radius = (std::clamp)((avail - 2.0f * BLOCK_H - 16.0f) * 0.5f, 34.0f, 86.0f);
             const ImVec2 center(area.x + (DETAIL_WIDTH - 32.0f) * 0.5f, area.y + BLOCK_H + 8.0f + radius);
@@ -374,7 +381,7 @@ namespace PokemonComponent {
 
                 std::snprintf(line, sizeof(line), "%s %d", BaseStats::name(stat), species.stats.at(stat));
                 GuiCards::text(dl, ImVec2(x, y), IM_COL32(255, 255, 255, 230), line, 0.85f);
-                std::snprintf(line, sizeof(line), "%d/%d", owned.evs[stat], owned.evCaps[stat]);
+                std::snprintf(line, sizeof(line), "%d  IV %d/%d", storage.statOf(owned, stat), owned.ivs[stat], owned.ivCaps[stat]);
                 GuiCards::text(dl, ImVec2(x, y + lineH), IM_COL32(255, 170, 60, 255), line, 0.85f);
 
             }
@@ -430,7 +437,7 @@ namespace PokemonComponent {
             const OwnedPokemon owned = *found;
 
             // Cabecera con el color de su tipo.
-            const float headerHeight = 142.0f;
+            const float headerHeight = 172.0f;
             dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + headerHeight), tone(*species), GuiCards::ROUNDING, ImDrawFlags_RoundCornersTop);
             ItemIcon::creature(dl, ImVec2(pos.x + 56.0f, pos.y + 54.0f), 34.0f, species->id);
             GuiCards::text(dl, ImVec2(pos.x + 108.0f, pos.y + 12.0f), IM_COL32(255, 255, 255, 255), title(*species, owned).c_str(), 1.4f);
@@ -440,8 +447,8 @@ namespace PokemonComponent {
             GuiCards::text(dl, ImVec2(pos.x + 108.0f, pos.y + 72.0f), IM_COL32(255, 255, 255, 230), text, 1.0f);
             ImVec2 chipAt(pos.x + 108.0f + GuiCards::textWidth(text) + 12.0f, pos.y + 72.0f);
             if (owned.analyzed) {
-                const EvRules::Rank rank = EvRules::rank(species->stats, owned.evCaps);
-                std::snprintf(text, sizeof(text), "Potencial %s", EvRules::label(rank));
+                const IvRules::Rank rank = IvRules::rank(owned.ivCaps);
+                std::snprintf(text, sizeof(text), "Potencial %s", IvRules::label(rank));
                 chipAt.x += GuiCards::chip(dl, chipAt, text, GuiCards::rankColor(rank), 0.8f) + 6.0f;
             } else chipAt.x += GuiCards::chip(dl, chipAt, "Sin analizar", IM_COL32(90, 90, 100, 255), 0.8f) + 6.0f;
             if (owned.shiny) chipAt.x += GuiCards::chip(dl, chipAt, "Variocolor", IM_COL32(210, 170, 40, 255), 0.8f) + 6.0f;
@@ -460,7 +467,7 @@ namespace PokemonComponent {
                 GuiCards::text(dl, ImVec2(bar.x + 8.0f, bar.y + 1.0f), IM_COL32(255, 255, 255, 245), text, 0.75f);
 
                 // Objeto equipable: se da desde la mochila; aquí se ve y se puede quitar (vuelve a la mochila).
-                const ImVec2 slot(pos.x + 16.0f, pos.y + headerHeight - 30.0f);
+                const ImVec2 slot(pos.x + 16.0f, pos.y + headerHeight - 58.0f);
                 if (const HeldItem* held = storage.heldOf(owned)) {
                     ItemIcon::held(dl, ImVec2(slot.x + 12.0f, slot.y + 13.0f), 11.0f, *held);
                     GuiCards::text(dl, ImVec2(slot.x + 30.0f, slot.y + 5.0f), IM_COL32(255, 255, 255, 235), held->name.c_str(), 0.85f);
@@ -475,6 +482,12 @@ namespace PokemonComponent {
 
             ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 132.0f, pos.y + headerHeight - 30.0f));
             if (GuiCards::button("##moves", "MOVIMIENTOS", ImVec2(116.0f, 24.0f), true, IM_COL32(200, 70, 50, 255))) { editingMoves = true; MoveEditor::reset(); }
+            ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 132.0f - 176.0f, pos.y + headerHeight - 30.0f));
+            if (GuiCards::button("##train", "EVs Y NATURALEZA", ImVec2(164.0f, 24.0f), true, IM_COL32(60, 130, 200, 255))) editingStats = true;
+            if (const Nature* nature = data.nature(owned.nature)) {
+                std::snprintf(text, sizeof(text), "Naturaleza: %s", nature->name.c_str());
+                GuiCards::text(dl, ImVec2(pos.x + 16.0f, pos.y + headerHeight - 26.0f), IM_COL32(255, 255, 255, 220), text, 0.85f);
+            }
 
             const float left = pos.x + 16.0f, width = size.x - 32.0f;
             float y = pos.y + headerHeight + 10.0f;
@@ -539,13 +552,20 @@ namespace PokemonComponent {
 
         const float boxX = detail::MARGIN + teamWidth + 36.0f;
         const float boxWidth = screen.x - boxX - detail::DETAIL_WIDTH - detail::MARGIN - 28.0f;
-        detail::drawBox(data, storage, ImVec2(boxX, top), ImVec2(boxWidth, height));
-        detail::drawBar(data, storage, ImVec2(boxX, barY), boxWidth);
+        if (manage) {
+            detail::drawBox(data, storage, ImVec2(boxX, top), ImVec2(boxWidth, height));
+            detail::drawBar(data, storage, ImVec2(boxX, barY), boxWidth);
+        } else { // menú rápido: solo el equipo (los pokémon del PC se ven y se mueven desde la máquina del inicio)
+            GuiCards::panel(dl, ImVec2(boxX, top), ImVec2(boxX + boxWidth, top + height));
+            GuiCards::centeredText(dl, ImVec2(boxX + boxWidth * 0.5f, top + height * 0.42f), IM_COL32(255, 255, 255, 235), "Arrastra un pokémon sobre otro para cambiar el orden del equipo", 1.0f);
+            GuiCards::centeredText(dl, ImVec2(boxX + boxWidth * 0.5f, top + height * 0.42f + 30.0f), GuiStyle::MUTED, "Si cambia de sitio el que te acompaña, sale el que ocupa su posición", 0.85f);
+            GuiCards::centeredText(dl, ImVec2(boxX + boxWidth * 0.5f, top + height * 0.42f + 56.0f), GuiStyle::MUTED, "Los pokémon del PC se ven y se cambian desde la máquina del inicio", 0.85f);
+        }
 
         detail::drawDetail(data, storage, inventory, progress, ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));
 
         const ImVec2 hint(detail::MARGIN + 300.0f, detail::MARGIN - 4.0f);
-        if (!manage) GuiCards::text(dl, ImVec2(hint.x, hint.y + 4.0f), GuiStyle::MUTED, "Para cambiar pokémon entre equipo y PC usa el PC de la máquina del inicio", 0.9f);
+        if (!manage) GuiCards::text(dl, ImVec2(hint.x, hint.y + 4.0f), GuiStyle::MUTED, "Arrastra un pokémon sobre otro para reordenar el equipo", 0.9f);
         else if (!isGamepad(device)) GuiCards::text(dl, ImVec2(hint.x, hint.y + 4.0f), GuiStyle::MUTED, "Arrastra un pokémon para colocarlo o intercambiarlo", 0.9f);
         else {
             const float w = GuiPrompts::draw(dl, hint, GuiPrompts::Action::INTERACT, "Coger", device);
@@ -554,6 +574,10 @@ namespace PokemonComponent {
         detail::drawHeld(data, storage);
         detail::finishDrag(storage);
 
+        if (detail::editingStats) {
+            if (!StatEditor::render(data, storage, detail::selection.inTeam, detail::selection.index)) detail::editingStats = false;
+            return; // el editor se queda con ESC y los clics este fotograma
+        }
         if (detail::editingMoves) {
             if (!MoveEditor::render(data, storage, detail::selection.inTeam, detail::selection.index)) detail::editingMoves = false;
             return; // el editor se queda con ESC y los clics este fotograma

@@ -238,8 +238,14 @@ namespace HudComponent {
         // y el multiplicador de captura. Q / E o la rueda en teclado; L1 / R1 en mando.
         inline void drawBallSelector(ImDrawList* dl, const GameStatus& status, InputDevice device) {
             const Inventory& inventory = *status.inventory;
-            std::vector<int> shown; // solo las que se tienen (si no hay ninguna, no se muestra nada)
+            // Solo las que se tienen. Al gastar la última el selector no desaparece de golpe: se desvanece con la cámara mostrando las últimas que había.
+            static std::vector<int> lastShown;
+            static int lastSelected = -1;
+            std::vector<int> shown;
             for (int i = 0; i < inventory.ballCount(); ++i) if (inventory.owned(i)) shown.push_back(i);
+            const bool fading = shown.empty();
+            if (fading) shown = lastShown;
+            else { lastShown = shown; lastSelected = inventory.selectedIndex(); }
             if (shown.empty()) return;
             const int count = static_cast<int>(shown.size());
             const float alpha = status.aimBlend;
@@ -253,19 +259,19 @@ namespace HudComponent {
 
             for (int k = 0; k < count; ++k) {
                 const int i = shown[k];
-                const bool selected = i == inventory.selectedIndex();
+                const bool selected = i == (fading ? lastSelected : inventory.selectedIndex());
                 const ImVec2 c(startX + SPACING * static_cast<float>(k), centerY);
                 if (selected) dl->AddCircle(c, SELECTED_RADIUS + 6.0f, IM_COL32(255, 255, 255, a), 32, 2.5f);
                 ItemIcon::ball(dl, c, selected ? SELECTED_RADIUS : OTHER_RADIUS, PokeballStyle::look(inventory.ball(i).type.id), selected ? alpha : alpha * 0.55f);
-                if (!selected) {
+                if (!selected && !fading) {
                     std::snprintf(buffer, sizeof(buffer), "x%d", inventory.ball(i).count);
                     centered(dl, ImVec2(c.x, c.y + OTHER_RADIUS + 6.0f), buffer, 0.8f, IM_COL32(220, 220, 220, static_cast<int>(a * 0.7f)));
                 }
             }
 
-            const Inventory::BallSlot slot = inventory.selectedBall();
-            std::snprintf(buffer, sizeof(buffer), "%s   x%d   Captura %s", slot.type.name.c_str(), slot.count, slot.type.ratio().c_str());
-            const ImU32 textColor = slot.count > 0 ? IM_COL32(255, 255, 255, a) : IM_COL32(235, 70, 60, a);
+            const Inventory::BallSlot slot = inventory.ball(fading ? lastSelected : inventory.selectedIndex());
+            std::snprintf(buffer, sizeof(buffer), "%s   x%d   Captura %s", slot.type.name.c_str(), (std::max)(slot.count, fading ? 0 : slot.count), slot.type.ratio().c_str());
+            const ImU32 textColor = IM_COL32(255, 255, 255, a);
             const float nameY = centerY + SELECTED_RADIUS + 26.0f;
             centered(dl, ImVec2(screen.x * 0.5f, nameY), buffer, 1.0f, textColor);
 
@@ -428,7 +434,7 @@ namespace HudComponent {
             const ImVec2 size = ImGui::GetIO().DisplaySize;
             const ImVec2 c(size.x * 0.5f, size.y * 0.5f);
             const int a = static_cast<int>(status.aimBlend * 255.0f);
-            const ImU32 color = status.hasAimTarget ? chanceColor(status.chancePercent, a) : IM_COL32(255, 255, 255, a);
+            const ImU32 color = status.hasAimTarget && status.aimOwned ? IM_COL32(235, 70, 60, a) : status.hasAimTarget ? chanceColor(status.chancePercent, a) : IM_COL32(255, 255, 255, a);
             const ImU32 shadow = IM_COL32(0, 0, 0, static_cast<int>(a * 0.6f));
             constexpr float RADIUS = 14.0f;
 
@@ -437,7 +443,10 @@ namespace HudComponent {
             dl->AddCircleFilled(c, 3.0f, shadow);
             dl->AddCircleFilled(c, 2.0f, color);
 
-            if (status.hasAimTarget) {
+            if (status.hasAimTarget && status.aimOwned) {
+                centered(dl, ImVec2(c.x, c.y + RADIUS + 8.0f), "No se puede capturar", 1.1f, IM_COL32(235, 70, 60, a));
+                centered(dl, ImVec2(c.x, c.y + RADIUS + 8.0f + ImGui::GetFontSize() * 1.1f + 2.0f), "el pokémon de otro entrenador", 0.85f, IM_COL32(255, 255, 255, static_cast<int>(a * 0.8f)));
+            } else if (status.hasAimTarget) {
                 char buffer[32];
                 std::snprintf(buffer, sizeof(buffer), "%d%%", status.chancePercent);
                 centered(dl, ImVec2(c.x, c.y + RADIUS + 8.0f), buffer, 1.6f, color);

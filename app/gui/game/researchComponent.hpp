@@ -6,7 +6,7 @@
 #include "../style/guiStyle.hpp"
 #include "../style/icons/itemIcon.hpp"
 #include "../window/guiInput.hpp"
-#include "../../engine/world/rules/evRules.hpp"
+#include "../../engine/world/rules/ivRules.hpp"
 #include "../../engine/world/state/inventory.hpp"
 #include "../../engine/world/state/pokemonStorage.hpp"
 #include "../../models/gameData.hpp"
@@ -47,7 +47,7 @@ namespace ResearchComponent {
                 std::snprintf(text, sizeof(text), "+%d", entry.reward);
                 x -= GuiCards::textWidth(text, 0.95f);
                 GuiCards::text(cdl, ImVec2(x, a.y + 13.0f), IM_COL32(255, 215, 90, 255), text, 0.95f);
-                std::snprintf(text, sizeof(text), "%s", EvRules::label(entry.rank));
+                std::snprintf(text, sizeof(text), "%s", IvRules::label(entry.rank));
                 x -= GuiCards::textWidth(text, 0.9f) + 24.0f;
                 GuiCards::chip(cdl, ImVec2(x, a.y + 10.0f), text, GuiCards::rankColor(entry.rank), 0.9f);
                 if (entry.released) GuiCards::text(cdl, ImVec2(x - 92.0f, a.y + 13.0f), IM_COL32(255, 120, 100, 255), "liberado", 0.9f);
@@ -85,10 +85,10 @@ namespace ResearchComponent {
 
         GuiCards::text(dl, ImVec2(sidePos.x + 20.0f, sidePos.y + 96.0f), IM_COL32(255, 255, 255, 255), "Liberar automáticamente por debajo de:", 0.9f);
         float x = sidePos.x + 20.0f;
-        const EvRules::Rank current = storage.autoRelease();
-        for (const EvRules::Rank rank : EvRules::RANKS) {
-            const bool off = rank == EvRules::Rank::D; // D = no liberar nada
-            const char* label = off ? "NO" : EvRules::label(rank);
+        const IvRules::Rank current = storage.autoRelease();
+        for (const IvRules::Rank rank : IvRules::RANKS) {
+            const bool off = rank == IvRules::Rank::D; // D = no liberar nada
+            const char* label = off ? "NO" : IvRules::label(rank);
             const float w = GuiCards::textWidth(label, 0.95f) + 28.0f;
             ImGui::SetCursorScreenPos(ImVec2(x, sidePos.y + 124.0f));
             ImGui::PushID(static_cast<int>(rank));

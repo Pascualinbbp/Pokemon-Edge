@@ -6,7 +6,7 @@
 #include "imgui.h"
 #include "guiStyle.hpp"
 #include "../../engine/world/style/pokemonStyle.hpp"
-#include "../../engine/world/rules/evRules.hpp"
+#include "../../engine/world/rules/ivRules.hpp"
 #include "../../models/pokemon/pokemonType.hpp"
 
 // Piezas visuales de los paneles del juego (menú lateral, mochila, pokémon): tarjetas redondeadas, fichas,
@@ -36,14 +36,14 @@ namespace GuiCards {
     }
 
     // Color de cada rango de potencial (D..S+).
-    inline ImU32 rankColor(EvRules::Rank rank) {
+    inline ImU32 rankColor(IvRules::Rank rank) {
         switch (rank) {
-            case EvRules::Rank::D:      return IM_COL32(120, 120, 130, 255);
-            case EvRules::Rank::C:      return IM_COL32(90, 150, 200, 255);
-            case EvRules::Rank::B:      return IM_COL32(80, 180, 110, 255);
-            case EvRules::Rank::A:      return IM_COL32(230, 170, 50, 255);
-            case EvRules::Rank::S:      return IM_COL32(230, 100, 60, 255);
-            case EvRules::Rank::S_PLUS: return IM_COL32(200, 70, 200, 255);
+            case IvRules::Rank::D:      return IM_COL32(120, 120, 130, 255);
+            case IvRules::Rank::C:      return IM_COL32(90, 150, 200, 255);
+            case IvRules::Rank::B:      return IM_COL32(80, 180, 110, 255);
+            case IvRules::Rank::A:      return IM_COL32(230, 170, 50, 255);
+            case IvRules::Rank::S:      return IM_COL32(230, 100, 60, 255);
+            case IvRules::Rank::S_PLUS: return IM_COL32(200, 70, 200, 255);
         }
         return IM_COL32(120, 120, 130, 255);
     }

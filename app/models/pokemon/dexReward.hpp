@@ -4,7 +4,7 @@
 // Hito de la Pokédex (tabla dex_reward): se gana por especie al llegar a cierto logro con ella y da experiencia al jugador y progreso de la especie.
 struct DexReward {
     // CAPTURES: pokémon de la especie capturados · SHINY: variocolor capturados · RANK: mejor rango analizado (índice de
-    // EvRules::RANKS: 0 = D ... 4 = S, 5 = S+) · LEVEL: nivel más alto alcanzado por uno de la especie.
+    // IvRules::RANKS: 0 = D ... 4 = S, 5 = S+) · LEVEL: nivel más alto alcanzado por uno de la especie.
     enum class Kind { CAPTURES, SHINY, RANK, LEVEL };
 
     int id = -1;

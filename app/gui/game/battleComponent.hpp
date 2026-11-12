@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include <vector>
 #include "imgui.h"
 #include "hudComponent.hpp"
 #include "../gameState.hpp"
@@ -18,20 +19,21 @@ namespace BattleComponent {
         inline constexpr float LOADING_TIME = 2.2f;   // pantalla de carga al entrar
         inline constexpr float LOADING_FADE = 0.5f;   // y lo que tarda en desvanecerse al final
         inline constexpr float MESSAGE_TIME = 1.15f;  // lo que dura cada mensaje (un clic lo salta)
+        inline constexpr float BALL_MESSAGE_TIME = 1.75f; // los que sacan o guardan a un pokémon con su pokéball duran lo que dura esa animación
         inline constexpr float BAR_SPEED = 0.9f;      // fracción de la vida que baja por segundo la barra animada
 
-        enum class Menu { MAIN, MOVES, TEAM };
+        enum class Menu { MAIN, MOVES, TARGET, TEAM };
 
         struct Show { // lo que se dibuja (foto de un mensaje o el estado actual)
-            std::string name[2];
-            int level[2] = { 1, 1 };
-            int hp[2] = { 1, 1 };
-            int maxHp[2] = { 1, 1 };
-            EffectSpec::Status status[2] = { EffectSpec::Status::NONE, EffectSpec::Status::NONE };
-            int types[2][2] = { { -1, -1 }, { -1, -1 } };
-            int stages[2][static_cast<int>(EffectSpec::Stat::COUNT)] = {};
-            int speciesId[2] = { -1, -1 };
-            bool onField[2] = { true, true };
+            std::string name[Battle::SLOTS];
+            int level[Battle::SLOTS] = { 1, 1, 1, 1 };
+            int hp[Battle::SLOTS] = { 1, 1, 1, 1 };
+            int maxHp[Battle::SLOTS] = { 1, 1, 1, 1 };
+            EffectSpec::Status status[Battle::SLOTS] = { EffectSpec::Status::NONE, EffectSpec::Status::NONE, EffectSpec::Status::NONE, EffectSpec::Status::NONE };
+            int types[Battle::SLOTS][2] = { { -1, -1 }, { -1, -1 }, { -1, -1 }, { -1, -1 } };
+            int stages[Battle::SLOTS][static_cast<int>(EffectSpec::Stat::COUNT)] = {};
+            int speciesId[Battle::SLOTS] = { -1, -1, -1, -1 };
+            bool onField[Battle::SLOTS] = { false, false, false, false }; // hueco con pokémon que se dibuja
         };
 
         struct State {
@@ -41,7 +43,11 @@ namespace BattleComponent {
             float messageTime = 0.0f;
             std::string text;
             Show shown;
-            float bar[2] = { -1.0f, -1.0f }; // PS que muestra cada barra (animados)
+            float bar[Battle::SLOTS] = { -1.0f, -1.0f, -1.0f, -1.0f }; // PS que muestra cada barra (animados)
+            float messageLimit = MESSAGE_TIME;                          // lo que dura el mensaje en curso (más si lleva animación de pokéball)
+            int step = 0;                                               // (dobles) a qué hueco del jugador se le está dando la orden
+            std::vector<Battle::Action> picked;                         // órdenes ya elegidas este turno
+            int pendingMove = -1;                                       // movimiento elegido que espera objetivo
             // Aviso visual del mensaje en curso: sube/baja una estadística o se activa una habilidad.
             int fxSide = -1, fxKind = 0, fxAmount = 0;
             std::string fxText;
@@ -54,8 +60,10 @@ namespace BattleComponent {
 
         inline Show live(const Battle& battle) {
             Show s;
-            for (int side = 0; side < 2; ++side) {
+            for (int side = 0; side < Battle::SLOTS; ++side) {
+                if (!battle.occupied(side)) continue;
                 const Battle::Fighter& f = battle.fighter(side);
+                s.onField[side] = true;
                 s.name[side] = f.name; s.level[side] = f.level; s.hp[side] = f.hp; s.maxHp[side] = f.maxHp; s.status[side] = f.status; s.speciesId[side] = f.speciesId;
                 for (int i = 0; i < 2; ++i) s.types[side][i] = i < static_cast<int>(f.types.size()) ? f.types[static_cast<size_t>(i)] : -1;
                 for (int i = 0; i < static_cast<int>(EffectSpec::Stat::COUNT); ++i) s.stages[side][i] = f.stages[static_cast<size_t>(i)];
@@ -109,7 +117,7 @@ namespace BattleComponent {
             }
             const float fraction = animatedHp / static_cast<float>((std::max)(1, s.maxHp[side]));
             GuiCards::bar(dl, ImVec2(pos.x + 14.0f, pos.y + size.y - 24.0f), size.x - 28.0f, fraction, hpColor(fraction), 12.0f);
-            if (side == 0) {
+            if (Battle::sideOf(side) == 0) {
                 std::snprintf(text, sizeof(text), "%d / %d", static_cast<int>(std::ceil(animatedHp)), s.maxHp[side]);
                 GuiCards::text(dl, ImVec2(pos.x + size.x - 14.0f - GuiCards::textWidth(text, 0.85f), y + 2.0f), IM_COL32(255, 255, 255, 235), text, 0.85f);
             }
@@ -176,7 +184,7 @@ namespace BattleComponent {
     inline void begin() { detail::reset(); }
 
     // Dibuja la pantalla y avanza el combate. Devuelve a PLAYING al terminar.
-    inline void render(GameState& state, GameEngine& engine) {
+    inline void render(GameState& state, GameState& backState, GameEngine& engine) {
         using namespace detail;
         State& s = detail::state();
         const float dt = (std::min)(ImGui::GetIO().DeltaTime, 0.1f);
@@ -204,23 +212,24 @@ namespace BattleComponent {
                 s.messageTime = 0.0f;
                 const Battle::Message& m = battle->front();
                 s.text = m.text;
-                for (int side = 0; side < 2; ++side) {
+                s.messageLimit = m.animKind == 1 || m.animKind == 2 ? BALL_MESSAGE_TIME : MESSAGE_TIME;
+                for (int side = 0; side < Battle::SLOTS; ++side) {
                     s.shown.name[side] = m.name[side]; s.shown.level[side] = m.level[side]; s.shown.hp[side] = m.hp[side]; s.shown.maxHp[side] = m.maxHp[side]; s.shown.status[side] = m.status[side]; s.shown.speciesId[side] = m.speciesId[side]; s.shown.onField[side] = m.onField[side];
                     for (int i = 0; i < 2; ++i) s.shown.types[side][i] = m.types[side][i];
                     for (int i = 0; i < static_cast<int>(EffectSpec::Stat::COUNT); ++i) s.shown.stages[side][i] = m.stages[side][i];
                 }
                 s.fxSide = m.fxSide; s.fxKind = m.fxKind; s.fxAmount = m.fxAmount; s.fxText = m.fxText; s.fxTime = 0.0f;
-                engine.battlePlayFx(m.attacker, m.hit);
+                engine.battlePlayFx(m);
             }
             s.messageTime += dt;
-            if (s.messageTime >= MESSAGE_TIME || (skip && s.messageTime > 0.15f)) { battle->pop(); s.messageActive = false; }
+            if (s.messageTime >= s.messageLimit || (skip && s.messageTime > 0.15f)) { battle->pop(); s.messageActive = false; }
         } else {
             s.messageActive = false;
             s.shown = live(*battle);
         }
 
         // Barras de PS: se desplazan hacia el valor mostrado.
-        for (int side = 0; side < 2; ++side) {
+        for (int side = 0; side < Battle::SLOTS; ++side) {
             const float target = static_cast<float>(s.shown.hp[side]);
             if (s.bar[side] < 0.0f) s.bar[side] = target;
             const float step = BAR_SPEED * static_cast<float>(s.shown.maxHp[side]) * dt;
@@ -245,20 +254,29 @@ namespace BattleComponent {
         const float boxTop = screen.y - 200.0f, boxBottom = screen.y - 24.0f;
         const float textRight = screen.x * 0.33f;
         const float menuLeft = textRight + 14.0f, menuRight = screen.x - 30.0f;
-        const float cardWidth = (std::min)(400.0f, menuRight - menuLeft), cardHeight = 112.0f;
-        const ImVec2 foePos(40.0f, 50.0f), foeSize(360.0f, 112.0f), minePos(menuLeft, boxTop - cardHeight - 10.0f), mineSize(cardWidth, cardHeight);
-        if (s.shown.onField[1]) drawBox(dl, data, foePos, foeSize, s.shown, 1, s.bar[1]);
-        if (s.shown.onField[0]) drawBox(dl, data, minePos, mineSize, s.shown, 0, s.bar[0]);
-        else GuiCards::panel(dl, minePos, ImVec2(minePos.x + mineSize.x, minePos.y + mineSize.y));
-        if (s.fxSide == 1) drawFx(dl, s, foePos, foeSize);
-        else if (s.fxSide == 0) drawFx(dl, s, ImVec2(minePos.x, minePos.y - 4.0f), mineSize);
+        const float cardWidth = 400.0f, cardHeight = 112.0f, cardGap = 10.0f;
+        // Tarjetas: las del rival arriba a la izquierda (una bajo otra en dobles); las nuestras encima del menú, pegadas al borde derecho (en dobles, una junto a otra).
+        const auto cardPos = [&](int slot) {
+            if (Battle::sideOf(slot) == 1) return ImVec2(40.0f, 50.0f + static_cast<float>(Battle::posOf(slot)) * (cardHeight + cardGap));
+            const float right = menuRight - static_cast<float>(1 - Battle::posOf(slot)) * (cardWidth + cardGap) * (battle->doubles() ? 1.0f : 0.0f);
+            return ImVec2(right - cardWidth, boxTop - cardHeight - 10.0f);
+        };
+        const ImVec2 cardSize(Battle::sideOf(0) == 0 ? cardWidth : cardWidth, cardHeight);
+        for (int slot = 0; slot < Battle::SLOTS; ++slot) {
+            if (!s.shown.onField[slot] && !(Battle::sideOf(slot) == 0 && slot == 0)) continue;
+            const ImVec2 pos = cardPos(slot);
+            if (s.shown.onField[slot]) drawBox(dl, data, pos, cardSize, s.shown, slot, s.bar[slot]);
+            else GuiCards::panel(dl, pos, ImVec2(pos.x + cardSize.x, pos.y + cardSize.y));
+            if (s.fxSide == slot) drawFx(dl, s, ImVec2(pos.x, pos.y - 4.0f), cardSize);
+        }
+        const ImVec2 minePos = cardPos(0);
 
         GuiCards::panel(dl, ImVec2(30.0f, boxTop), ImVec2(textRight, boxBottom));
         std::string line = s.messageActive ? s.text : std::string();
         const bool choosing = battle->ready() && battle->phase() != Battle::Phase::OVER;
         if (!s.messageActive) {
             if (battle->phase() == Battle::Phase::FORCED_SWITCH) line = "Tu pokémon se ha debilitado. Elige al siguiente.";
-            else if (choosing) line = "¿Qué hará " + battle->fighter(0).name + "?";
+            else if (choosing) { const std::vector<int> mineSlots = battle->playerSlots(); const int who = mineSlots.empty() ? 0 : mineSlots[static_cast<size_t>((std::min)(s.step, static_cast<int>(mineSlots.size()) - 1))]; line = "¿Qué hará " + battle->fighter(who).name + "?"; if (s.menu == Menu::TARGET) line = "¿A quién ataca " + battle->fighter(who).name + "?"; }
             else if (battle->phase() == Battle::Phase::OVER) line = battle->outcome() == Battle::Outcome::WON ? "¡Has ganado el combate!" : "Has perdido el combate...";
         }
         ImGui::SetCursorScreenPos(ImVec2(48.0f, boxTop + 18.0f));
@@ -267,8 +285,29 @@ namespace BattleComponent {
         ImGui::PopTextWrapPos();
 
         const float areaWidth = menuRight - menuLeft;
+        if (!choosing) { s.step = 0; s.picked.clear(); s.pendingMove = -1; }
         if (choosing) {
             const bool forced = battle->phase() == Battle::Phase::FORCED_SWITCH;
+            const std::vector<int> mineSlots = battle->playerSlots();
+            if (mineSlots.empty() && !forced) { ImGui::Dummy(ImVec2(0.0f, 0.0f)); return; }
+            if (s.step >= static_cast<int>(mineSlots.size())) { s.step = 0; s.picked.clear(); }
+            const int slot = forced ? battle->pendingSlot() : mineSlots[static_cast<size_t>(s.step)]; // hueco al que se le da la orden
+            // Orden elegida para ese hueco: cuando están todas (una en individuales, dos en dobles) se juega el turno.
+            const auto commit = [&](const Battle::Action& action) {
+                s.picked.push_back(action);
+                ++s.step;
+                s.menu = Menu::MAIN;
+                s.pendingMove = -1;
+                if (s.step >= static_cast<int>(mineSlots.size())) {
+                    if (!battle->submit(s.picked)) std::fprintf(stderr, "[combate] órdenes rechazadas (%zu)\n", s.picked.size());
+                    s.picked.clear();
+                    s.step = 0;
+                }
+            };
+            int reserved = -1; // pokémon que ya va a sacar el otro hueco
+            for (const Battle::Action& a : s.picked) if (a.kind == Battle::Action::Kind::SWITCH) reserved = a.index;
+            const std::vector<int> foes = battle->foeSlots();
+            const int firstFoe = foes.empty() ? -1 : foes.front();
             if (forced) s.menu = Menu::TEAM;
             if (s.menu != Menu::MOVES) s.infoMove = -1;
             if (s.menu == Menu::MAIN) {
@@ -278,16 +317,23 @@ namespace BattleComponent {
                 ImGui::SetCursorScreenPos(ImVec2(menuLeft + w + 14.0f, boxTop));
                 if (GuiCards::button("##team", "POKÉMON", ImVec2(w, h), true, IM_COL32(60, 150, 90, 255))) s.menu = Menu::TEAM;
                 ImGui::SetCursorScreenPos(ImVec2(menuLeft, boxTop + h + 14.0f));
-                GuiCards::button("##bag", "MOCHILA (próximamente)", ImVec2(w, h), false);
+                if (GuiCards::button("##types", "TABLA DE TIPOS", ImVec2(w, h), true, IM_COL32(70, 110, 190, 255))) { backState = GameState::BATTLE; state = GameState::TYPES; }
                 ImGui::SetCursorScreenPos(ImVec2(menuLeft + w + 14.0f, boxTop + h + 14.0f));
                 GuiCards::button("##run", "NO SE PUEDE HUIR", ImVec2(w, h), false);
+                if (s.step > 0) { // dobles: volver a elegir lo del primer pokémon
+                    ImGui::SetCursorScreenPos(ImVec2(48.0f, boxBottom - 36.0f));
+                    if (GuiCards::button("##undo", "< ANTERIOR", ImVec2(120.0f, 28.0f), true, IM_COL32(70, 70, 92, 255))) { s.picked.pop_back(); --s.step; }
+                }
             } else if (s.menu == Menu::MOVES) {
-                const Battle::Fighter& me = battle->fighter(0);
-                const bool struggle = battle->mustStruggle();
+                const Battle::Fighter& me = battle->fighter(slot);
+                const bool struggle = battle->mustStruggle(slot);
                 const float gap = 10.0f, w = (areaWidth - gap) * 0.5f, h = 66.0f;
                 if (struggle) {
                     ImGui::SetCursorScreenPos(ImVec2(menuLeft, boxTop));
-                    if (GuiCards::button("##struggle", "FORCEJEO (sin PP)", ImVec2(areaWidth, h), true, IM_COL32(150, 70, 70, 255))) { Battle::Action a; a.index = 0; battle->submit(a); s.menu = Menu::MAIN; }
+                    if (GuiCards::button("##struggle", "FORCEJEO (sin PP)", ImVec2(areaWidth, h), true, IM_COL32(150, 70, 70, 255))) {
+                        if (battle->needsTarget(slot, 0)) { s.pendingMove = 0; s.menu = Menu::TARGET; }
+                        else { Battle::Action a; a.index = 0; commit(a); }
+                    }
                 }
                 bool infoClicked = false;
                 for (int i = 0; i < MoveRules::MAX_KNOWN && !struggle; ++i) {
@@ -295,7 +341,7 @@ namespace BattleComponent {
                     const Move* move = data.move(me.moves[i]);
                     ImGui::SetCursorScreenPos(ImVec2(x, y));
                     ImGui::PushID(i);
-                    const bool usable = move && battle->canUse(i);
+                    const bool usable = move && battle->canUse(slot, i);
                     const bool clicked = ImGui::InvisibleButton("##move", ImVec2(w, h)) && usable;
                     const bool over = ImGui::IsItemHovered();
                     if (over && move && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && ImGui::GetIO().MouseDragMaxDistanceSqr[1] < 16.0f) { s.infoMove = s.infoMove == i ? -1 : i; infoClicked = true; }
@@ -303,8 +349,8 @@ namespace BattleComponent {
                     const ImVec2 a(x, y), b(x + w, y + h);
                     dl->AddRectFilled(a, b, !move ? IM_COL32(40, 40, 50, 160) : !usable ? IM_COL32(50, 50, 60, 230) : over ? IM_COL32(52, 55, 78, 255) : IM_COL32(34, 36, 52, 245), 12.0f);
                     if (!move) { GuiCards::centeredText(dl, ImVec2(x + w * 0.5f, y + h * 0.5f), GuiStyle::MUTED, "—", 1.0f); continue; }
-                    // Borde: el normal de la tarjeta; cambia de color según lo eficaz que sea contra el rival.
-                    const Effect effect = effectiveness(data, *move, battle->fighter(1));
+                    // Borde: el normal de la tarjeta; cambia de color según lo eficaz que sea contra el rival (en dobles, contra el objetivo: se ve al elegirlo).
+                    const Effect effect = foes.size() == 1 ? effectiveness(data, *move, battle->fighter(firstFoe)) : Effect{ "", 0 };
                     if (*effect.label) dl->AddRect(a, b, effect.color, 12.0f, 0, 4.0f);
                     else dl->AddRect(a, b, over && usable ? GuiCards::SELECT : IM_COL32(120, 125, 150, 255), 12.0f, 0, over && usable ? 2.5f : 1.5f);
                     const ImU32 ink = usable ? IM_COL32(255, 255, 255, 255) : IM_COL32(255, 255, 255, 120);
@@ -330,7 +376,10 @@ namespace BattleComponent {
                         dl->AddRect(lo, hi, edge, th * 0.5f, 0, 2.0f);
                         GuiCards::centeredText(dl, ImVec2((lo.x + hi.x) * 0.5f, y), IM_COL32(255, 255, 255, 255), effect.label, labelScale);
                     }
-                    if (clicked) { Battle::Action act; act.index = i; battle->submit(act); s.menu = Menu::MAIN; }
+                    if (clicked) {
+                        if (battle->needsTarget(slot, i)) { s.pendingMove = i; s.menu = Menu::TARGET; }
+                        else { Battle::Action act; act.index = i; commit(act); }
+                    }
                 }
                 if (!infoClicked && s.infoMove >= 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) s.infoMove = -1;
                 if (s.infoMove >= 0 && s.infoMove < MoveRules::MAX_KNOWN) { // descripción y efecto: solo con clic derecho en la tarjeta
@@ -338,7 +387,7 @@ namespace BattleComponent {
                         const float ph = 84.0f, py = minePos.y - ph - 10.0f;
                         GuiCards::panel(dl, ImVec2(menuLeft, py), ImVec2(menuRight, py + ph));
                         GuiCards::text(dl, ImVec2(menuLeft + 14.0f, py + 8.0f), IM_COL32(255, 255, 255, 255), move->name.c_str(), 1.0f);
-                        const Effect effect = effectiveness(data, *move, battle->fighter(1));
+                        const Effect effect = firstFoe >= 0 && foes.size() == 1 ? effectiveness(data, *move, battle->fighter(firstFoe)) : Effect{ "", 0 };
                         if (*effect.label) GuiCards::chip(dl, ImVec2(menuRight - 14.0f - GuiCards::textWidth(effect.label, 0.7f) - 16.0f, py + 8.0f), effect.label, effect.color, 0.7f);
                         ImGui::SetCursorScreenPos(ImVec2(menuLeft + 14.0f, py + 34.0f));
                         ImGui::PushTextWrapPos(menuRight - 14.0f - ImGui::GetWindowPos().x);
@@ -349,6 +398,25 @@ namespace BattleComponent {
                 ImGui::SetCursorScreenPos(ImVec2(menuLeft, boxBottom - 28.0f));
                 if (GuiCards::button("##back", "< ATRÁS", ImVec2(110.0f, 28.0f), true, IM_COL32(70, 70, 92, 255))) s.menu = Menu::MAIN;
                 if (!struggle) GuiCards::text(dl, ImVec2(menuLeft + 126.0f, boxBottom - 24.0f), GuiStyle::MUTED, "Clic derecho en un movimiento: descripción", 0.8f);
+            } else if (s.menu == Menu::TARGET) { // dobles: a cuál de los dos rivales se ataca
+                const Battle::Fighter& me = battle->fighter(slot);
+                const Move* move = s.pendingMove >= 0 ? data.move(me.moves[s.pendingMove]) : nullptr;
+                const float gap = 14.0f, w = (areaWidth - gap) * 0.5f, h = boxBottom - boxTop - 44.0f;
+                for (size_t k = 0; k < foes.size(); ++k) {
+                    const Battle::Fighter& foe = battle->fighter(foes[k]);
+                    const float x = menuLeft + static_cast<float>(k) * (w + gap);
+                    ImGui::SetCursorScreenPos(ImVec2(x, boxTop));
+                    ImGui::PushID(200 + static_cast<int>(k));
+                    char label[96];
+                    std::snprintf(label, sizeof(label), "%s  Nv. %d", foe.name.c_str(), foe.level);
+                    const Effect effect = move ? effectiveness(data, *move, foe) : Effect{ "", 0 };
+                    const bool clicked = GuiCards::button("##target", label, ImVec2(w, h), true, IM_COL32(200, 70, 50, 255));
+                    ImGui::PopID();
+                    if (*effect.label) GuiCards::chip(dl, ImVec2(x + 14.0f, boxTop + h - 34.0f), effect.label, effect.color, 0.75f);
+                    if (clicked) { Battle::Action act; act.index = s.pendingMove; act.target = foes[k]; commit(act); }
+                }
+                ImGui::SetCursorScreenPos(ImVec2(menuLeft, boxBottom - 28.0f));
+                if (GuiCards::button("##back", "< ATRÁS", ImVec2(110.0f, 28.0f), true, IM_COL32(70, 70, 92, 255))) s.menu = Menu::MOVES;
             } else { // equipo: dos columnas en la misma zona de los controles
                 const float gap = 8.0f, w = (areaWidth - gap) * 0.5f, rowH = 46.0f;
                 const int n = static_cast<int>(battle->team(0).size());
@@ -357,11 +425,12 @@ namespace BattleComponent {
                     const float x = menuLeft + static_cast<float>(i % 2) * (w + gap), y = boxTop + static_cast<float>(i / 2) * (rowH + gap);
                     ImGui::SetCursorScreenPos(ImVec2(x, y));
                     ImGui::PushID(100 + i);
-                    const bool ok = battle->canSwitchTo(i);
+                    const bool ok = battle->canSwitchTo(i, reserved);
                     const bool clicked = ImGui::InvisibleButton("##member", ImVec2(w, rowH)) && ok;
                     const bool over = ImGui::IsItemHovered() && ok;
                     ImGui::PopID();
-                    dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + rowH), over ? IM_COL32(70, 70, 96, 255) : i == battle->active(0) ? IM_COL32(50, 80, 60, 230) : GuiStyle::SURFACE, 12.0f);
+                    const bool onField = i == battle->active(0) || i == battle->active(1);
+                    dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + rowH), over ? IM_COL32(70, 70, 96, 255) : onField ? IM_COL32(50, 80, 60, 230) : GuiStyle::SURFACE, 12.0f);
                     ItemIcon::creature(dl, ImVec2(x + 26.0f, y + rowH * 0.5f), 16.0f, f.speciesId);
                     char text[64];
                     std::snprintf(text, sizeof(text), "%s  Nv. %d", f.name.c_str(), f.level);
@@ -372,9 +441,8 @@ namespace BattleComponent {
                     std::snprintf(text, sizeof(text), f.fainted() ? "Debilitado" : "%d/%d", f.hp, f.maxHp);
                     GuiCards::text(dl, ImVec2(x + w - 74.0f, y + 26.0f), IM_COL32(255, 255, 255, 210), text, 0.7f);
                     if (clicked) {
-                        if (forced) battle->forceSwitch(i);
-                        else { Battle::Action a; a.kind = Battle::Action::Kind::SWITCH; a.index = i; battle->submit(a); }
-                        s.menu = Menu::MAIN;
+                        if (forced) { battle->forceSwitch(i); s.menu = Menu::MAIN; }
+                        else { Battle::Action a; a.kind = Battle::Action::Kind::SWITCH; a.index = i; commit(a); }
                     }
                 }
                 if (!forced) {

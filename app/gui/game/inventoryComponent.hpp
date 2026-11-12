@@ -1,4 +1,5 @@
 #pragma once
+#include "../../engine/world/rules/ivRules.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -166,8 +167,15 @@ namespace InventoryComponent {
 
         // Objetos que se usan sobre un pokémon (pociones, revivir, caramelo, piedras evolutivas): el equipo, y al pulsar uno se usa sobre él.
         inline void drawUse(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, const Item& item, int count) {
-            const TrainingItem* vitamin = item.category == ItemCategory::TRAINING && data.training(item.refId) && data.training(item.refId)->effect == TrainingItem::Effect::EV ? data.training(item.refId) : nullptr;
-            if (ItemUse::kind(data, item) == ItemUse::Kind::NONE && !vitamin) return;
+            // Vitamina (sube IV), chapa plateada (un tope de IV a 31) y chapa dorada (todos los topes): las dos primeras piden después la estadística; la dorada actúa al elegir el pokémon.
+            const TrainingItem* vitamin = nullptr;
+            if (item.category == ItemCategory::TRAINING) {
+                const TrainingItem* training = data.training(item.refId);
+                if (training && (training->effect == TrainingItem::Effect::IV || training->effect == TrainingItem::Effect::IV_CAP)) vitamin = training;
+            }
+            const TrainingItem* gold = item.category == ItemCategory::TRAINING && data.training(item.refId) && data.training(item.refId)->effect == TrainingItem::Effect::IV_MAX ? data.training(item.refId) : nullptr;
+            const bool silver = vitamin && vitamin->effect == TrainingItem::Effect::IV_CAP;
+            if (ItemUse::kind(data, item) == ItemUse::Kind::NONE && !vitamin && !gold) return;
             if (useMessageItem != item.id) { useMessage.clear(); useMessageItem = item.id; vitaminTarget = -1; }
             heading("Usar sobre");
             ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -183,34 +191,47 @@ namespace InventoryComponent {
                 const bool hovered = ImGui::IsItemHovered();
                 ImGui::PopID();
                 bool works = count > 0 && ItemUse::applies(data, storage, progress, item, team[i]);
-                if (vitamin) {
+                if (vitamin || gold) {
                     works = false;
-                    for (int stat = 0; stat < 6; ++stat) works = works || (count > 0 && team[i].evs[stat] < team[i].evCaps[stat]);
+                    for (int stat = 0; stat < 6; ++stat) {
+                        if (count <= 0) break;
+                        if (silver || gold) works = works || team[i].ivCaps[stat] < IvRules::MAX_IV;
+                        else works = works || team[i].ivs[stat] < team[i].ivCaps[stat];
+                    }
                 }
                 const ImVec2 c(at.x + R + 3.0f, at.y + R + 10.0f);
                 TeamCircle::draw(dl, c, R, data, *species, team[i].level, team[i].shiny, team[i].ballId, hovered && works, 0, works ? 1.0f : 0.35f, storage.fainted(team[i]));
                 if (vitamin) {
                     if (clicked && works) { vitaminTarget = i; useMessage.clear(); }
                     if (vitaminTarget == i) dl->AddCircle(c, R + 3.0f, IM_COL32(255, 190, 80, 255), 32, 2.5f);
+                } else if (gold) {
+                    if (clicked && works && storage.raiseAllIvCaps(true, i)) {
+                        inventory.add(item.id, -1);
+                        useMessage = "¡Todos los IV de " + species->name + " pueden llegar a 31! Potencial S+";
+                    }
                 } else if (clicked && works) { useMessage = ItemUse::apply(data, storage, inventory, progress, item, { true, i }); useMessageItem = item.id; }
             }
             if (vitamin && vitaminTarget >= 0 && vitaminTarget < static_cast<int>(team.size())) {
                 const OwnedPokemon& target = team[vitaminTarget];
                 ImGui::Dummy(ImVec2(0.0f, 4.0f));
                 for (int stat = 0; stat < 6; ++stat) {
-                    const int missing = target.evCaps[stat] - target.evs[stat];
+                    const int missing = silver ? (target.ivCaps[stat] < IvRules::MAX_IV ? 1 : 0) : target.ivCaps[stat] - target.ivs[stat];
                     char label[64];
-                    std::snprintf(label, sizeof(label), "%s  %d/%d", BaseStats::name(stat), target.evs[stat], target.evCaps[stat]);
+                    if (silver) std::snprintf(label, sizeof(label), "%s  tope %d%s", BaseStats::name(stat), target.ivCaps[stat], missing > 0 ? " > 31" : "");
+                    else std::snprintf(label, sizeof(label), "%s  IV %d/%d", BaseStats::name(stat), target.ivs[stat], target.ivCaps[stat]);
                     ImGui::PushID(3000 + stat);
-                    if (GuiCards::button("##vit", label, ImVec2(150.0f, 28.0f), missing > 0 && inventory.count(item.id) > 0, IM_COL32(230, 140, 40, 255)) && storage.train(true, vitaminTarget, stat, vitamin->amount)) {
+                    const bool pressed = GuiCards::button("##vit", label, ImVec2(170.0f, 28.0f), missing > 0 && inventory.count(item.id) > 0, silver ? IM_COL32(170, 180, 200, 255) : IM_COL32(230, 140, 40, 255));
+                    if (pressed && (silver ? storage.raiseIvCap(true, vitaminTarget, stat) : storage.trainIv(true, vitaminTarget, stat, vitamin->amount))) {
                         inventory.add(item.id, -1);
-                        useMessage = std::string(BaseStats::name(stat)) + " entrenado";
+                        useMessage = silver ? std::string(BaseStats::name(stat)) + ": ya puede llegar a 31" : std::string(BaseStats::name(stat)) + " entrenado";
                     }
                     ImGui::PopID();
                     if (stat % 2 == 0) ImGui::SameLine();
                 }
             }
             if (!useMessage.empty()) GuiCards::muted(useMessage.c_str());
+            else if (silver && count > 0) GuiCards::muted("Elige un pokémon y después la estadística cuyo tope subirá a 31.");
+            else if (gold && count > 0) GuiCards::muted("Elige un pokémon: todos sus IV podrán llegar a 31.");
             else if (vitamin && count > 0) GuiCards::muted("Elige un pokémon y después la estadística a entrenar.");
             else if (count > 0) GuiCards::muted("Elige un pokémon del equipo (los apagados no sacan provecho).");
         }

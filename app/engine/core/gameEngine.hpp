@@ -145,7 +145,7 @@ class GameEngine {
     bool takeLearnRequest() { const bool requested = m_scene.learnRequested; m_scene.learnRequested = false; return requested; }
     std::shared_ptr<Battle> battle() const { return m_scene.battle; }
     void battleAdvance(float dt) { m_scene.advanceBattleFx(dt); }
-    void battlePlayFx(int attacker, bool hit) { m_scene.playBattleFx(attacker, hit); }
+    void battlePlayFx(const Battle::Message& message) { m_scene.playBattleFx(message); }
     void battleFinish() { m_scene.finishBattle(); }
 
     GameStatus status() const {

@@ -26,3 +26,13 @@ El Tendero (junto al inicio) abre la tienda: pestañas COMPRAR / VENDER, categor
 
 ## Plátanos
 `assets/models/fruits/banana_bunch.glb` (nodos `corona` y `platano_1..5`). Un racimo cae del árbol y cada plátano tiene un 30 % de soltarse al tocar el suelo (cada uno es un cuerpo físico). Cuando un pokémon come, se quita un solo plátano del racimo (se encoge suelto); sin plátanos, el racimo desaparece. El jugador recoge el racimo entero como «Racimo de plátanos» (material nuevo) o, si le faltan, tantos «Plátano» como queden.
+
+## Combate por turnos: dobles y detalles
+- Hueco del campo = lado × 2 + posición (0–1 jugador, 2–3 rival). En individuales solo se usan 0 y 2. El Entrenador Verde lucha en dobles (2 contra 2): se da una orden por pokémon y, si el movimiento ataca al rival y quedan dos, se elige a cuál.
+- La tarjeta de cada pokémon propio va pegada al borde derecho; hay un botón «Tabla de tipos» (al volver, el combate sigue donde estaba).
+- Al salir y volver a su pokéball se usa la misma animación que el acompañante (`BallTransfer`, con la bola de cada pokémon).
+- Cámara: empieza detrás de nuestro pokémon (el nuestro a la izquierda, el rival a la derecha) y orbita siempre desde el borde del círculo (radio 10 m).
+- El Entrenador Azul da una medalla de gimnasio al derrotarlo (una vez por sesión: mecánica de prueba).
+- En el duelo en tiempo real, al apuntar al pokémon de un entrenador sale «No se puede capturar» y no se lanza la pokéball; si le llega una, rebota en su cuerpo.
+## Registro de cierres
+`CrashUtil` instala un manejador vectorial (dirección real del fallo), guarda el volcado con la excepción, anota los últimos hechos (`note`) y la pantalla en curso. `IM_ASSERT` de ImGui se redirige con `/FI imguiAssert.hpp`. La compilación genera `PokemonEdge.pdb` (se publica aparte).

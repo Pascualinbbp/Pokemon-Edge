@@ -1,4 +1,5 @@
 #include "../../utils/core/crashUtil.hpp"
+#include "../../utils/core/loggerUtil.hpp"
 #include "mainWindow.hpp"
 #include "graphicsDevice.hpp"
 #include "guiInput.hpp"
@@ -344,6 +345,12 @@ void MainWindow::run() {
         ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
         ImGui::Begin("MainCanvas", nullptr,
             ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus);
+        {
+            static const char* const STAGES[] = { "interfaz: TITLE_SCREEN", "interfaz: MAIN_MENU", "interfaz: LOAD_MENU", "interfaz: REPLACE_MENU", "interfaz: LOADING", "interfaz: PLAYING", "interfaz: PAUSED", "interfaz: CONTROLS",
+                "interfaz: MAP", "interfaz: INVENTORY", "interfaz: POKEDEX", "interfaz: TYPES", "interfaz: POKEMON", "interfaz: STARTER", "interfaz: PLAYER", "interfaz: RESEARCH", "interfaz: BATTLE",
+                "interfaz: SHOP", "interfaz: LEARN", "interfaz: SEEDS", "interfaz: PC", "interfaz: UPDATING" };
+            CrashUtil::stage(STAGES[static_cast<int>(g_state)]); // la etapa dice en qué pantalla estaba el juego al cerrarse
+        }
         switch (g_state) {
             case GameState::TITLE_SCREEN:
                 TitleComponent::render(g_state, logoId, g_logo.width, g_logo.height);
@@ -416,7 +423,7 @@ void MainWindow::run() {
                 SeedComponent::render(g_state, g_backState, engine);
                 break;
             case GameState::BATTLE:
-                BattleComponent::render(g_state, engine);
+                BattleComponent::render(g_state, g_backState, engine);
                 break;
             case GameState::SHOP:
                 ShopComponent::render(g_state, g_backState, engine);
@@ -444,6 +451,8 @@ void MainWindow::run() {
         GraphicsDevice::present();
 
         if (g_state != prevState) {
+            Logger::logInfo("STATE", std::string(gameStateName(prevState)) + " -> " + gameStateName(g_state));
+            CrashUtil::note("pantalla %.0f -> %.0f", static_cast<double>(prevState), static_cast<double>(g_state));
             redrawFrames = 2;
             if (prevState == GameState::PAUSED && (g_state == GameState::INVENTORY || g_state == GameState::POKEMON || g_state == GameState::POKEDEX || g_state == GameState::TYPES || g_state == GameState::MAP || g_state == GameState::PLAYER)) g_backState = GameState::PAUSED;
             g_fullscreen.set(g_hwnd, isFullscreen(g_state));

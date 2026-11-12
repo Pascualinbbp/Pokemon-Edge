@@ -136,6 +136,7 @@ class WildField {
     void dismissFoe() { m_foeActive = false; m_foe.discard(); }
     bool foeActive() const { return m_foeActive; }
     CaptureTarget* foe() { return m_foeActive ? &m_foe : nullptr; }
+    const CaptureTarget* foe() const { return m_foeActive ? &m_foe : nullptr; }
     bool foeDefeated() const { return m_foeActive && m_foe.gone(); }
 
     // --- Pesca: un único pokémon picado, fuera de los chunks ---

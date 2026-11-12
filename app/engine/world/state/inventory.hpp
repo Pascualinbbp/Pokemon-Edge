@@ -145,6 +145,8 @@ class Inventory {
         return best;
     }
     void selectBasic() { if (const int i = basicIndex(); i >= 0) m_selected = i; }
+    // Al entrar en el modo captura se elige la primera pokéball que se tenga, sea cual fuera la última usada.
+    void selectFirst() { for (int i = 0; i < ballCount(); ++i) if (owned(i)) { m_selected = i; return; } }
 
     // direction: +1 siguiente, -1 anterior (circular), saltando las que no se tienen.
     void cycle(int direction) {

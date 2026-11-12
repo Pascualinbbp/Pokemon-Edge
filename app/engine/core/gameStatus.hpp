@@ -91,6 +91,7 @@ struct GameStatus {
 
     // Pokémon al que se apunta dentro del rango de lanzamiento.
     bool hasAimTarget = false;
+    bool aimOwned = false;      // el objetivo es el pokémon de otro entrenador: no se captura (sin probabilidad)
     int chancePercent = 0;      // porcentaje de captura (ya con bonificaciones)
     bool behind = false;        // bonificación por la espalda
     bool hidden = false;        // bonificación por sigilo (oculto entre matorrales)

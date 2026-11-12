@@ -8,7 +8,7 @@ Los datos de juego viven en **Neon (PostgreSQL)**. En cada compilación, GitHub 
 
 | Tabla | Columnas | Para qué |
 |---|---|---|
-| `effect` | `id`, `name`, `kind`, `type_id`, `multiplier`, `shiny_multiplier`, `hp_below`, `amount`, `color` | Efecto de una habilidad o de un objeto. `kind`: `TYPE_BOOST`, `FLOAT`, `WATER_BREATHING`, `CAPTURE`, `CAPTURE_EXCLUSIVE`, `HEAL`, `HEAL_PERCENT` (`amount` = % de los PS máximos; la Max poción usa 100), `REVIVE`, `LEVEL`, `EV`, `EVOLVE`. Un efecto lo pueden usar varias habilidades u objetos |
+| `effect` | `id`, `name`, `kind`, `type_id`, `multiplier`, `shiny_multiplier`, `hp_below`, `amount`, `color` | Efecto de una habilidad o de un objeto. `kind`: `TYPE_BOOST`, `FLOAT`, `WATER_BREATHING`, `CAPTURE`, `CAPTURE_EXCLUSIVE`, `HEAL`, `HEAL_PERCENT` (`amount` = % de los PS máximos; la Max poción usa 100), `REVIVE`, `LEVEL`, `IV` (vitamina: sube `amount` puntos de IV), `IV_CAP` (chapa plateada: tope de un IV a 31), `IV_MAX` (chapa dorada: todos los topes a 31), `EVOLVE`. Un efecto lo pueden usar varias habilidades u objetos |
 | `ability` | `id`, `name`, `description`, `effect_id` | Habilidades de los pokémon |
 | `rarity` | `id`, `name`, `spawn_weight`, `xp_multiplier` | Rareza de pokémon y cofres (probabilidad de aparecer y experiencia) |
 | `category` | `id`, `name` | Pestaña de la mochila (objetos, materiales y herramientas) |
@@ -40,7 +40,7 @@ Equipables (categoría 9): efectos `HOLD_EXP_SHARE`, `HOLD_QUICK_CLAW`, `HOLD_RA
 
 ## Cómo se reparte `item` en el código
 
-Cada fila se clasifica por su efecto: `CAPTURE` → `PokeballType`; `HEAL`/`HEAL_PERCENT`/`REVIVE`/`LEVEL`/`EV` → `TrainingItem`; `EVOLVE` → piedra evolutiva. Los materiales y las herramientas entran en el inventario con ids `1000 + id` y `2000 + id`. `CAPTURE_EXCLUSIVE` es la bola del pokémon inicial (no es un objeto).
+Cada fila se clasifica por su efecto: `CAPTURE` → `PokeballType`; `HEAL`/`HEAL_PERCENT`/`REVIVE`/`LEVEL`/`IV`/`IV_CAP`/`IV_MAX` → `TrainingItem`; `EVOLVE` → piedra evolutiva. Los materiales y las herramientas entran en el inventario con ids `1000 + id` y `2000 + id`. `CAPTURE_EXCLUSIVE` es la bola del pokémon inicial (no es un objeto).
 
 ## Assets según la base de datos
 
@@ -61,3 +61,6 @@ assets/
 Mochila: `category.section` agrupa las categorías en apartados (Pokémon, Herramientas, Recursos); la interfaz muestra primero los apartados y debajo las categorías del elegido. Un apartado nuevo basta con escribir su nombre en esa columna.
 
 Parcelas de cultivo: cualquier parcela admite cualquier cultivo; junto a una parcela, Q / E cambia las semillas que se siembran (solo se ofrecen las que se tienen).
+
+`nature`: `id`, `name`, `increased_stat`, `decreased_stat` (índices de estadística: 0 PS, 1 ataque, 2 ataque especial, 3 defensa, 4 defensa especial, 5 velocidad; vacíos = naturaleza neutra). 25 naturalezas; la sube y la baja un 10 %.
+Las chapas son objetos de la categoría Entrenamiento: la plateada sale en el cofre épico y la dorada en el legendario (grupos de la tabla `reward`).

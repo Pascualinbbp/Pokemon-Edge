@@ -107,6 +107,19 @@ namespace ItemIcon {
             if (revive) dl->AddTriangleFilled(ImVec2(c.x, c.y - r * 0.05f), ImVec2(c.x - r * 0.25f, c.y + r * 0.45f), ImVec2(c.x + r * 0.25f, c.y + r * 0.45f), IM_COL32(255, 255, 255, a));
             return;
         }
+        if (effect == TrainingItem::Effect::IV_CAP || effect == TrainingItem::Effect::IV_MAX) { // chapa: disco acanalado (plateada: un tope; dorada: todos) con una estrella
+            const bool gold = effect == TrainingItem::Effect::IV_MAX;
+            const ImU32 rim = gold ? IM_COL32(190, 140, 20, a) : IM_COL32(120, 130, 150, a), face = gold ? IM_COL32(255, 205, 60, a) : IM_COL32(205, 214, 228, a), shine = gold ? IM_COL32(255, 240, 160, a) : IM_COL32(245, 248, 255, a);
+            dl->AddCircleFilled(c, r * 0.95f, rim, 28);
+            for (int i = 0; i < 16; ++i) { const float t = static_cast<float>(i) / 16.0f * 6.2831853f; dl->AddCircleFilled(ImVec2(c.x + std::cos(t) * r * 0.9f, c.y + std::sin(t) * r * 0.9f), r * 0.09f, face, 8); }
+            dl->AddCircleFilled(c, r * 0.78f, face, 28);
+            dl->AddCircle(c, r * 0.78f, rim, 28, 1.5f);
+            ImVec2 star[10];
+            for (int i = 0; i < 10; ++i) { const float t = -1.5707963f + static_cast<float>(i) * 0.6283185f, k = i % 2 == 0 ? r * 0.5f : r * 0.22f; star[i] = ImVec2(c.x + std::cos(t) * k, c.y + std::sin(t) * k); }
+            dl->AddConvexPolyFilled(star, 10, rim);
+            dl->AddCircleFilled(ImVec2(c.x - r * 0.35f, c.y - r * 0.4f), r * 0.12f, shine, 10);
+            return;
+        }
         if (effect == TrainingItem::Effect::LEVEL) {
             const ImU32 wrap = IM_COL32(120, 200, 255, a);
             dl->AddTriangleFilled(ImVec2(c.x - r * 0.55f, c.y), ImVec2(c.x - r * 1.0f, c.y - r * 0.4f), ImVec2(c.x - r * 1.0f, c.y + r * 0.4f), wrap);

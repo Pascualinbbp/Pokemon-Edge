@@ -39,7 +39,7 @@ struct SaveData {
     std::vector<std::string> dexSeen;   // Pokédex: especies vistas y capturadas (por nombre)
     std::vector<std::string> dexCaught;
     std::vector<std::string> dexProgress; // logros por especie y recompensas reclamadas (DexProgress::store)
-    int autoReleaseRank = 0;          // potencial mínimo que conserva la máquina de investigación (índice de EvRules::RANKS)
+    int autoReleaseRank = 0;          // potencial mínimo que conserva la máquina de investigación (índice de IvRules::RANKS)
 };
 
 // Resumen de una ranura de partida para mostrarla en los menús.

@@ -54,6 +54,7 @@ struct Pokeball {
 
     Physics::Body body;
     float age = 0.0f;
+    bool bounced = false;                           // ya rebotó contra el pokémon de un entrenador (el aviso sale una sola vez)
     bool wasGround = false, wet = false;            // para sonar una sola vez al tocar el suelo o el agua
     bool spent = false;                             // alcanzó a un pokémon: se gasta aunque falle la captura
     int typeId = -1;                                // tabla pokeball: el tipo de bola lanzada

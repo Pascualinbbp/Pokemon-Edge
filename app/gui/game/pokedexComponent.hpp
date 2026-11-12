@@ -80,7 +80,7 @@ namespace PokedexComponent {
         // Texto de lo que pide un logro y cómo va ("Captura 5   3 / 5").
         inline std::string progressText(const PokemonStorage& storage, const DexReward& reward, int speciesId) {
             const int value = storage.dexProgress.value(speciesId, reward.kind);
-            if (reward.kind == DexReward::Kind::RANK) return value >= 0 ? std::string("mejor: ") + EvRules::label(EvRules::RANKS[value]) : "sin analizar";
+            if (reward.kind == DexReward::Kind::RANK) return value >= 0 ? std::string("mejor: ") + IvRules::label(IvRules::RANKS[value]) : "sin analizar";
             return std::to_string((std::min)(value, reward.threshold)) + " / " + std::to_string(reward.threshold);
         }
 

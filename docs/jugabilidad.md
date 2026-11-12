@@ -141,3 +141,12 @@ Más información en [Guardado de partidas](guardado.md).
 - Un pokémon sin PS sale en gris (equipo, PC y HUD) y no se puede sacar. Si el acompañante cae, vuelve a su bola y sale el siguiente disponible; si todo el equipo está debilitado, el jugador vuelve al inicio y el equipo se cura.
 - Durante la aventura el menú de Pokémon solo permite ver y usar objetos. Cambiar pokémon entre el equipo y el PC (y liberar) solo se hace en el PC de la máquina de investigación del inicio.
 - Un pokémon capturado va al equipo si hay hueco y, si no, al PC.
+
+## IV, EV y naturaleza
+- **IV** (innatos, 0–31): cada pokémon nace con un valor y un *tope* por estadística. Las vitaminas suben el valor hasta su tope. El rango sale de cuántos topes valen 31: S+ = 6, S = 5, A = 3–4, B = 2, C = 1, D = 0. Los IV no cambian al evolucionar. El pokémon inicial es S+.
+- **Chapa plateada**: lleva el tope de una estadística a 31 sin tocar su valor (puede subir el rango). **Chapa dorada**: todos los topes a 31 (S+). Salen de los cofres épico y legendario.
+- **EV**: 510 puntos en total y 252 como máximo por estadística, repartidos libremente en cualquier momento (pantalla «EVs y naturaleza» del pokémon). No se suman a la base: entran en la fórmula normal de estadísticas (nivel, IV, EV y naturaleza).
+- **Naturaleza**: cada pokémon nuevo recibe una al azar y se puede cambiar cuando se quiera.
+- El menú Pokémon del juego solo muestra el equipo y permite reordenarlo arrastrando; si el acompañante cambia de puesto sale el pokémon por el que se cambió (salvo que esté debilitado). El PC solo se ve desde la máquina.
+- Un pokémon en el nivel máximo no gana experiencia; la experiencia necesaria crece más con cada nivel.
+- Salir del modo captura es gradual y al entrar se elige la primera clase de pokéball que haya.
