@@ -206,7 +206,7 @@ jobs:
           dir /b /s app\*.cpp > sources.txt
           echo main.cpp >> sources.txt
 
-          cl.exe /nologo /MP /std:c++17 /EHsc /O2 /Zi /Fd:build\vc.pdb /FI app/utils/core/imguiAssert.hpp /I app/utils/sqlite /I app/utils/imgui /Fo:build\ @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link /DEBUG /OPT:REF /OPT:ICF winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
+          cl.exe /nologo /MP /std:c++17 /EHsc /O2 /Zi /Fd:build\vc.pdb /I . /FI app/utils/core/imguiAssert.hpp /I app/utils/sqlite /I app/utils/imgui /Fo:build\ @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link /DEBUG /OPT:REF /OPT:ICF winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
       - name: 🗂️ Preparar ZIP Final
         shell: pwsh
