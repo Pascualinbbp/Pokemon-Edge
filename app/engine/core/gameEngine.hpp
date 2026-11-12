@@ -86,6 +86,7 @@ class GameEngine {
 
     // Devuelve true si se pide pausar (ESC fuera del modo lanzamiento).
     bool update(float dt, const InputState& input) {
+        CRASH_SCOPE();
         const DirectX::XMFLOAT3& at = m_scene.player.body.position;
         CrashUtil::detail("x=%.1f y=%.1f z=%.1f", at.x, at.y, at.z);
         CrashUtil::stage("juego: actualizar");
@@ -98,6 +99,7 @@ class GameEngine {
     }
 
     void render(ID3D11DeviceContext* context, int screenW, int screenH) {
+        CRASH_SCOPE();
         CrashUtil::stage("juego: dibujar");
         m_renderer.render(context, m_scene, screenW, screenH);
         CrashUtil::stage("juego: dibujado");
@@ -139,6 +141,7 @@ class GameEngine {
     // Combate por turnos y aprendizaje de movimientos (la interfaz abre su pantalla y la partida queda congelada).
     bool takeBattleRequest() { const bool requested = m_scene.battleRequested; m_scene.battleRequested = false; return requested; }
     void battleOrbit(float yaw, float tilt) { m_scene.battleOrbit(yaw, tilt); }
+    bool battleFirstOnLeft() const { return m_scene.battleFirstOnLeft(); }
     bool takeShopRequest() { const bool requested = m_scene.shopRequested; m_scene.shopRequested = false; return requested; }
     std::vector<const Item*> shopStock() const { return m_scene.shopStock(); }
     std::string shopBuy(int itemId, int quantity) { return m_scene.shopBuy(itemId, quantity); }

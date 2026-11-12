@@ -2,6 +2,7 @@
 #include <deque>
 #include <string>
 #include <vector>
+#include "../../../utils/core/crashScope.hpp"
 #include "../rules/battleRules.hpp"
 #include "../rules/experienceRules.hpp"
 
@@ -101,10 +102,21 @@ class Battle {
     bool mustStruggle(int slot) const { return inField(slot) && !fighter(slot).usable(); }
     // ¿Hay que elegir a quién ataca ese movimiento? (solo en dobles, si ataca al rival y quedan dos rivales en pie)
     bool needsTarget(int slot, int move) const {
-        if (!m_doubles || foeSlots().size() < 2 || !inField(slot)) return false;
+        if (!m_doubles || !inField(slot)) return false;
+        const Move* m = mustStruggle(slot) ? nullptr : moveOf(fighter(slot), move);
+        if (m && m->scope == Move::Scope::ANY) return true; // aliado, uno mismo o rival
+        if (foeSlots().size() < 2) return false;
         if (mustStruggle(slot)) return true;
-        const Move* m = moveOf(fighter(slot), move);
-        return m && targetsFoeOf(*m);
+        if (!m) return false;
+        if (m->scope == Move::Scope::ALL_OTHERS || m->scope == Move::Scope::FOES) return false; // alcanzan a varios: no se elige
+        return m->scope == Move::Scope::ANY || targetsFoeOf(*m);
+    }
+    // Huecos a los que puede apuntar ese movimiento: los rivales y, si su alcance lo permite (Move::Scope::ANY), también el aliado y él mismo.
+    std::vector<int> targetChoices(int slot, int move) const {
+        std::vector<int> list = foeSlots();
+        const Move* m = mustStruggle(slot) ? nullptr : moveOf(fighter(slot), move);
+        if (m && m->scope == Move::Scope::ANY) for (int other = 0; other < SLOTS; ++other) if (sideOf(other) == sideOf(slot) && inField(other)) list.push_back(other);
+        return list;
     }
     // Cambio a ese pokémon del equipo: en pie y fuera del campo ('reserved' = el que ya va a sacar el otro hueco este turno).
     bool canSwitchTo(int index, int reserved = -1) const {
@@ -131,6 +143,7 @@ class Battle {
 
     // Manda las órdenes del jugador (una por cada hueco de playerSlots(), en ese orden) y resuelve el turno (el rival decide solo).
     bool submit(const std::vector<Action>& actions) {
+        CRASH_SCOPE();
         if (m_phase != Phase::CHOOSE || !ready()) return false;
         const std::vector<int> mine = playerSlots();
         if (actions.size() != mine.size() || mine.empty()) return false;
@@ -349,14 +362,16 @@ class Battle {
         const Fighter& me = cur(slot);
         const Move* move = me.usable() ? moveOf(me, action.index) : &struggle();
         if (!move) return -1;
-        if (!targetsFoeOf(*move)) return slot;
         const int wanted = action.target;
+        if (move->scope == Move::Scope::ANY && wanted >= 0 && wanted < SLOTS && inField(wanted)) return wanted; // aliado, uno mismo o rival
+        if (!targetsFoeOf(*move)) return slot;
         if (wanted >= 0 && wanted < SLOTS && sideOf(wanted) != sideOf(slot) && inField(wanted)) return wanted;
         return opponentOf(slot);
     }
 
     // --- Un movimiento ---
     void act(int slot, int moveSlot, int targetSlot) {
+        CRASH_SCOPE();
         Fighter& me = cur(slot);
         if (me.flinched) { say(who(me, slot) + " se amedrentó y no pudo moverse."); me.flinched = false; return; }
         if (me.status == Status::PARALYSIS && chance(BattleRules::PARALYSIS_SKIP)) { say(who(me, slot) + " está paralizado: ¡no se puede mover!"); return; }
@@ -365,8 +380,9 @@ class Battle {
         if (!chosen) return;
         const Move& move = *chosen;
         if (!struggling) --me.pp[static_cast<size_t>(moveSlot)];
-        const bool targetsFoe = targetsFoeOf(move);
-        say(who(me, slot) + " usó " + move.name + ".", slot, move.typeId, false, targetsFoe ? targetSlot : slot);
+        const bool targetsFoe = targetsFoeOf(move) || move.scope == Move::Scope::ANY;
+        const std::vector<int> targets = targetsOf(slot, move, targetSlot);
+        say(who(me, slot) + " usó " + move.name + ".", slot, move.typeId, false, targetsFoe ? targets.front() : slot);
 
         if (move.effect.kind == EffectSpec::Kind::PROTECT) {
             const float p = std::pow(1.0f / 3.0f, static_cast<float>(me.protectStreak));
@@ -376,19 +392,46 @@ class Battle {
         }
         me.protectStreak = 0;
 
-        int target = targetsFoe ? targetSlot : slot;
+        for (const int wanted : targets) {
+            if (me.fainted() && wanted != slot) break;
+            strike(slot, move, targetsFoe ? wanted : slot, targetsFoe);
+        }
+        if (me.fainted() && m_onField[slot]) { say(who(me, slot) + " se debilitó."); anim(slot, 3); m_onField[slot] = false; }
+        resolveFaints();
+    }
+
+    // Objetivos de un movimiento según su alcance (Move::Scope): uno solo, todos los demás del campo o los dos rivales.
+    std::vector<int> targetsOf(int slot, const Move& move, int chosen) const {
+        std::vector<int> list;
+        if (move.scope == Move::Scope::ALL_OTHERS || move.scope == Move::Scope::FOES) {
+            for (int other = 0; other < SLOTS; ++other) {
+                if (other == slot || !inField(other)) continue;
+                if (move.scope == Move::Scope::FOES && sideOf(other) == sideOf(slot)) continue;
+                list.push_back(other);
+            }
+        }
+        if (list.empty()) list.push_back(chosen);
+        return list;
+    }
+
+    // El movimiento sobre un objetivo: protección, puntería, daño y efecto.
+    void strike(int slot, const Move& move, int target, bool targetsFoe) {
+        CRASH_SCOPE();
+        Fighter& me = cur(slot);
+        if (target < 0) return;
         if (targetsFoe && !inField(target)) target = opponentOf(slot); // su objetivo ya cayó este turno
         if (target < 0) return;
         Fighter& foe = cur(target);
-        if (targetsFoe && foe.protecting) { say(who(foe, target) + " se protegió."); return; }
-        if (targetsFoe && !chance(BattleRules::hitChance(*m_data, me, foe, move))) { say("¡" + who(me, slot) + " falló!"); return; }
+        const bool hostile = targetsFoe && sideOf(target) != sideOf(slot);
+        if (hostile && foe.protecting) { say(who(foe, target) + " se protegió."); return; }
+        if (hostile && !chance(BattleRules::hitChance(*m_data, me, foe, move))) { say("¡" + who(me, slot) + " falló!"); return; }
 
         int dealt = 0;
         if (move.damaging()) {
             const bool crit = chance(BattleRules::critChance(BattleRules::critStages(*m_data, me, move)));
             const BattleRules::Damage d = BattleRules::damage(*m_data, me, foe, move, crit, RandomUtil::range(0.0f, 1.0f));
             if (d.immune) { say("No afecta a " + who(foe, target) + "..."); return; }
-            int amount = d.amount;
+            int amount = (std::max)(1, d.amount);
             if (const HeldItem* held = m_data->held(foe.heldId)) {
                 if (held->effect == HeldItem::Effect::FOCUS_BAND && amount >= foe.hp && foe.hp > 1 && chance(static_cast<float>(held->amount) / 100.0f)) {
                     amount = foe.hp - 1;
@@ -413,8 +456,6 @@ class Battle {
             if (foe.fainted()) { say(who(foe, target) + " se debilitó."); anim(target, 3); m_onField[target] = false; }
         }
         if (move.effect.active()) applyEffect(move.effect, slot, target, dealt, &move);
-        if (me.fainted()) { say(who(me, slot) + " se debilitó."); anim(slot, 3); m_onField[slot] = false; }
-        resolveFaints();
     }
 
     // Aplica un efecto de 'user' (en 'target' si no es propio). 'dealt' = daño hecho (retroceso, absorción).
@@ -495,6 +536,7 @@ class Battle {
 
     // Los pokémon del jugador que estuvieron frente al rival derrotado y siguen en pie se reparten su experiencia (según el nivel de cada uno).
     void awardXp(int foeSlot) {
+        CRASH_SCOPE();
         const Fighter& foe = cur(foeSlot);
         m_defeated.push_back(foe.level);
         std::vector<int> winners;
@@ -506,6 +548,7 @@ class Battle {
 
     // Quien cae: el rival saca al siguiente solo; si es el jugador, elige él (o pierde si no le queda ninguno).
     void resolveFaints() {
+        CRASH_SCOPE();
         if (m_phase == Phase::OVER) return;
         for (const int slot : { 2, 3 }) {
             if (m_active[slot] < 0 || !cur(slot).fainted() || m_counted[slot]) continue;

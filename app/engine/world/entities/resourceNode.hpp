@@ -42,6 +42,7 @@ namespace ResourceStyle {
             case 23: return { Shape::ROCK, { 0.45f, 0.45f, 0.48f }, { 0.99f, 0.82f, 0.18f }, true, 0.85f, 1.1f };  // filón de oro
             case 24: return { Shape::CROP, { 0.22f, 0.55f, 0.18f }, { 0.96f, 0.50f, 0.10f }, true, 0.30f, 0.5f };   // zanahoria
             case 25: return { Shape::CROP, { 0.20f, 0.50f, 0.18f }, { 0.88f, 0.10f, 0.16f }, true, 0.30f, 0.45f };  // fresa
+            case 27: return { Shape::CROP, { 0.22f, 0.50f, 0.18f }, { 0.78f, 0.60f, 0.32f }, true, 0.30f, 0.5f };   // patata
             case 26: return { Shape::CROP, { 0.55f, 0.62f, 0.20f }, { 0.92f, 0.76f, 0.26f }, false, 0.30f, 1.0f };  // trigo
             case 4:  return { Shape::ROCK, { 0.42f, 0.42f, 0.45f }, { 0.07f, 0.07f, 0.08f }, true,  0.85f, 1.1f }; // filón de carbón
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca

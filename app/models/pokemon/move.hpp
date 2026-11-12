@@ -36,6 +36,9 @@ struct Move {
     std::vector<int> tags;         // id de move_tag
     std::vector<std::string> tagNames;
     int priority = 0;              // suma de las etiquetas de prioridad
+    // Alcance (etiquetas del movimiento): NORMAL = un rival (o él mismo si es propio), ALL_OTHERS = todos los demás del campo ("Todos los demás"), FOES = los dos rivales ("Ambos rivales"), ANY = el que se elija, aliado o él mismo incluidos ("Cualquier objetivo").
+    enum class Scope { NORMAL, ALL_OTHERS, FOES, ANY };
+    Scope scope = Scope::NORMAL;
     bool contact = false;          // etiqueta "Contacto"
     std::vector<int> learnTags;    // si no está vacía, solo lo aprenden los pokémon con alguna de estas etiquetas (sea cual sea su tipo)
 

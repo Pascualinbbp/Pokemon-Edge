@@ -19,36 +19,23 @@ namespace StatEditor {
         inline constexpr int STEP = 4;                       // 4 EV = 1 punto de estadística
     }
 
-    inline bool render(const GameData& data, PokemonStorage& storage, bool inTeam, int index) {
-        const std::vector<OwnedPokemon>& list = inTeam ? storage.team() : storage.pc();
-        if (index < 0 || index >= static_cast<int>(list.size())) return false;
-        const OwnedPokemon owned = list[static_cast<size_t>(index)];
-        const PokemonSpecies* species = data.speciesById(owned.speciesId);
-        if (!species) return false;
-        const ImVec2 screen = ImGui::GetIO().DisplaySize;
-        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-        ImGui::SetNextWindowSize(screen);
-        ImGui::SetNextWindowFocus();
-        ImGui::Begin("##statEditor", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse);
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled(ImVec2(0.0f, 0.0f), screen, IM_COL32(0, 0, 0, 170));
-
+    // Contenido del entrenamiento dentro de un rectángulo ('o', ancho W, alto H). 'embedded' = va dentro de una pestaña de la ficha: sin marco, título ni botón de cerrar.
+    inline void content(ImDrawList* dl, const GameData& data, PokemonStorage& storage, bool inTeam, int index, const OwnedPokemon& owned, const PokemonSpecies* species, const ImVec2& o, float W, float H, bool embedded) {
         constexpr float PAD = 22.0f, ROW_H = 44.0f, NATURE_W = 150.0f, NATURE_H = 50.0f;
-        const float W = (std::min)(screen.x - 40.0f, 1180.0f), H = (std::min)(screen.y - 40.0f, 700.0f);
-        const ImVec2 o((screen.x - W) * 0.5f, (screen.y - H) * 0.5f);
-        GuiCards::panel(dl, o, ImVec2(o.x + W, o.y + H));
+        const float t = embedded ? -36.0f : 0.0f; // sin título todo sube
+        if (!embedded) GuiCards::panel(dl, o, ImVec2(o.x + W, o.y + H));
 
         const Nature* nature = data.nature(owned.nature);
         char text[128];
         std::snprintf(text, sizeof(text), "Entrenamiento de %s  (Nv. %d)", species->name.c_str(), owned.level);
-        GuiCards::text(dl, ImVec2(o.x + PAD, o.y + 14.0f), IM_COL32(255, 255, 255, 255), text, 1.3f);
+        if (!embedded) GuiCards::text(dl, ImVec2(o.x + PAD, o.y + 14.0f), IM_COL32(255, 255, 255, 255), text, 1.3f);
         const int left = StatRules::remaining(owned.evs);
         std::snprintf(text, sizeof(text), "EVs: %d / %d repartidos   ·   quedan %d   ·   máximo %d por estadística", StatRules::total(owned.evs), StatRules::TOTAL_EV, left, StatRules::MAX_EV);
-        GuiCards::text(dl, ImVec2(o.x + PAD, o.y + 50.0f), left > 0 ? IM_COL32(255, 200, 90, 255) : GuiStyle::MUTED, text, 0.9f);
+        GuiCards::text(dl, ImVec2(o.x + PAD, o.y + 50.0f + t), left > 0 ? IM_COL32(255, 200, 90, 255) : GuiStyle::MUTED, text, 0.9f);
 
         // --- EVs por estadística (izquierda) ---
         const float colW = (W - 3.0f * PAD) * 0.52f;
-        float y = o.y + 84.0f;
+        float y = o.y + 84.0f + t;
         GuiCards::text(dl, ImVec2(o.x + PAD, y), GuiStyle::MUTED, "ESTADÍSTICA", 0.75f);
         GuiCards::text(dl, ImVec2(o.x + PAD + 112.0f, y), GuiStyle::MUTED, "BASE  IV", 0.75f);
         GuiCards::text(dl, ImVec2(o.x + PAD + colW - 74.0f, y), GuiStyle::MUTED, "TOTAL", 0.75f);
@@ -103,14 +90,14 @@ namespace StatEditor {
 
         // --- Naturaleza (derecha): cuadrícula 5x5 ---
         const float nx = o.x + 2.0f * PAD + colW;
-        GuiCards::text(dl, ImVec2(nx, o.y + 84.0f), GuiStyle::MUTED, "NATURALEZA (sube un 10 % una estadística y baja otra; clic para cambiarla)", 0.75f);
+        GuiCards::text(dl, ImVec2(nx, o.y + 84.0f + t), GuiStyle::MUTED, "NATURALEZA (sube un 10 % una estadística y baja otra; clic para cambiarla)", 0.75f);
         const std::vector<Nature>& natures = data.natures;
         const int perRow = (std::max)(1, static_cast<int>((W - PAD - (nx - o.x)) / (NATURE_W + 8.0f)));
         for (size_t i = 0; i < natures.size(); ++i) {
             const Nature& n = natures[i];
             const float cx = nx + static_cast<float>(static_cast<int>(i) % perRow) * (NATURE_W + 8.0f);
-            const float cy = o.y + 108.0f + static_cast<float>(static_cast<int>(i) / perRow) * (NATURE_H + 8.0f);
-            if (cy + NATURE_H > o.y + H - 60.0f) break;
+            const float cy = o.y + 108.0f + t + static_cast<float>(static_cast<int>(i) / perRow) * (NATURE_H + 8.0f);
+            if (cy + NATURE_H > o.y + H - (embedded ? 8.0f : 60.0f)) break;
             ImGui::SetCursorScreenPos(ImVec2(cx, cy));
             ImGui::PushID(300 + n.id);
             const bool clicked = ImGui::InvisibleButton("##nature", ImVec2(NATURE_W, NATURE_H));
@@ -130,8 +117,26 @@ namespace StatEditor {
             if (clicked) storage.setNature(inTeam, index, n.id);
         }
 
+    }
+
+    inline bool render(const GameData& data, PokemonStorage& storage, bool inTeam, int index) {
+        const std::vector<OwnedPokemon>& list = inTeam ? storage.team() : storage.pc();
+        if (index < 0 || index >= static_cast<int>(list.size())) return false;
+        const OwnedPokemon owned = list[static_cast<size_t>(index)];
+        const PokemonSpecies* species = data.speciesById(owned.speciesId);
+        if (!species) return false;
+        const ImVec2 screen = ImGui::GetIO().DisplaySize;
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowSize(screen);
+        ImGui::SetNextWindowFocus();
+        ImGui::Begin("##statEditor", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(ImVec2(0.0f, 0.0f), screen, IM_COL32(0, 0, 0, 170));
+        const float W = (std::min)(screen.x - 40.0f, 1180.0f), H = (std::min)(screen.y - 40.0f, 700.0f);
+        const ImVec2 o((screen.x - W) * 0.5f, (screen.y - H) * 0.5f);
+        content(dl, data, storage, inTeam, index, owned, species, o, W, H, false);
         bool open = true;
-        ImGui::SetCursorScreenPos(ImVec2(o.x + W - PAD - 140.0f, o.y + H - 50.0f));
+        ImGui::SetCursorScreenPos(ImVec2(o.x + W - 22.0f - 140.0f, o.y + H - 50.0f));
         if (GuiCards::button("##closeStats", "CERRAR", ImVec2(140.0f, 36.0f), true, IM_COL32(70, 70, 92, 255)) || GuiInput::backPressed()) open = false;
         ImGui::End();
         return open;

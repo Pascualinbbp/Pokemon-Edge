@@ -35,4 +35,19 @@ El Tendero (junto al inicio) abre la tienda: pestañas COMPRAR / VENDER, categor
 - El Entrenador Azul da una medalla de gimnasio al derrotarlo (una vez por sesión: mecánica de prueba).
 - En el duelo en tiempo real, al apuntar al pokémon de un entrenador sale «No se puede capturar» y no se lanza la pokéball; si le llega una, rebota en su cuerpo.
 ## Registro de cierres
-`CrashUtil` instala un manejador vectorial (dirección real del fallo), guarda el volcado con la excepción, anota los últimos hechos (`note`) y la pantalla en curso. `IM_ASSERT` de ImGui se redirige con `/FI imguiAssert.hpp`. La compilación genera `PokemonEdge.pdb` (se publica aparte).
+`CrashUtil` instala un manejador vectorial (dirección real del fallo), guarda el volcado con la excepción, anota los últimos hechos (`note`) y la pantalla en curso. `IM_ASSERT` de ImGui se redirige con `/FI imguiAssert.hpp`. La compilación genera `PokemonEdge.pdb`, que solo se guarda como artefacto del workflow (no va en la release).
+
+## Interfaz del combate por turnos
+Estilo Pokémon Champions: al elegir, nuestras tarjetas abajo a la izquierda, las del rival arriba a la derecha y los controles (Luchar / Pokémon / Tabla de tipos, movimientos, equipo) en vertical a la derecha, sin cuadro de texto. Al jugarse el turno solo queda el texto, translúcido, abajo; cuando un pokémon recibe daño o cambia una estadística el texto cede su sitio a la tarjeta de ese pokémon (la barra baja o sube a la vista). En dobles la tarjeta de la izquierda es la del pokémon que se ve a la izquierda (`Scene::battleFirstOnLeft`).
+
+## Workflows de GitHub
+`build-release.yml` (al subir a main) solo orquesta: `ci-dependencies.yml` y `ci-database.yml` corren a la vez; `ci-thirdparty.yml` (SQLite e ImGui compilados y en caché) espera a las dependencias; `ci-build.yml` espera a terceros y base de datos, compila, empaqueta y publica. Cada uno pasa su resultado al siguiente como artefacto. La release solo lleva `PokemonEdge.zip` y `version.json`.
+
+## Alcance de los movimientos (dobles)
+Etiquetas de `move_tag`: **Todos los demás** (Terremoto: rivales y aliado), **Ambos rivales** (Surf) y **Cualquier objetivo** (se puede apuntar a un rival, al aliado o a uno mismo). Los que alcanzan a varios no preguntan a quién y hacen a cada uno el daño normal del cálculo (potencia, físico/especial, tipos...); sin etiqueta se elige entre los rivales. `Move::scope` se rellena en `moveDao.hpp` y `Battle::targetChoices` da los destinos posibles al menú.
+
+## En el campo de combate
+Al empezar un combate por turnos el jugador y el entrenador rival se colocan frente a frente por fuera del círculo, en lados opuestos (`Scene::arenaStand`), con los pokémon dentro entre ambos; el jugador mira al rival. Los pokémon de los entrenadores salen de una Honor Ball (`Scene::RIVAL_BALL`), igual que en el duelo del mundo, donde el entrenador también lanza su pokéball. En el duelo en tiempo real ningún pokémon se aleja de su entrenador más de `DUEL_LEASH` (9 m).
+
+## Crashes
+Si el juego falla, `app/logs/app.log` lleva las funciones activas con la línea por la que iba cada una (`CRASH_SCOPE()` / `CRASH_AT()` en `utils/core/crashScope.hpp`), la etapa, los últimos hechos y la dirección. No hacen falta símbolos.

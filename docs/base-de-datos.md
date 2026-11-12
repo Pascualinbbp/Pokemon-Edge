@@ -20,7 +20,7 @@ Los datos de juego viven en **Neon (PostgreSQL)**. En cada compilación, GitHub 
 | `reward` | `id` (grupo), `kind`, `target_id`, `probability`, `min_quantity`, `max_quantity` | Todas las recompensas. `kind`: `ITEM`, `MATERIAL`, `XP`. Al sortear un grupo sale **una** entrada según su probabilidad |
 | `move` | `id`, `name`, `description`, `type_id`, `class_id`, `pp`, `power`, `accuracy`, `effect_id`, `learn_weight` | Movimientos (potencia/precisión vacías = no daña / no falla; `learn_weight` = probabilidad relativa de que un pokémon lo intente aprender) |
 | `move_class` | `id`, `name` | Clase de movimiento: Físico, Especial, Estado (1:n con `move`) |
-| `move_tag` | `id`, `name`, `priority` | Etiquetas de movimiento (Contacto, Puño, Suelo, Sonido, Mordisco, Prioridad +1/+4). La prioridad de un movimiento es la suma de sus etiquetas |
+| `move_tag` | `id`, `name`, `priority` | Etiquetas de movimiento (Contacto, Puño, Suelo, Sonido, Mordisco, Prioridad +1/+4, y de alcance: Todos los demás, Ambos rivales, Cualquier objetivo). La prioridad de un movimiento es la suma de sus etiquetas |
 | `move_tag_link` | `move_id`, `tag_id` | n:m movimiento–etiqueta |
 | `learn_tag` | `id`, `name` | Etiquetas de aprendizaje (Universal, Ágil...) |
 | `move_learn_tag` / `pokemon_learn_tag` | `move_id`/`pokemon_id`, `learn_tag_id` | Un movimiento con etiquetas de aprendizaje solo lo aprenden los pokémon que comparten alguna (sea cual sea su tipo); sin ellas, solo los de su tipo |
@@ -36,7 +36,7 @@ Grupos de `reward`: 1-4 cofres (4 = legendario, rareza 7: pocas unidades, lo mej
 
 Objetos del suelo: aparecen por todo el mundo cerca del jugador (`GroundField`). Su grupo es `habitat.ground_reward_id` del hábitat dominante en ese punto (NULL = grupo 10). Así las semillas varían por clima (la fresa no sale en el árido).
 
-Equipables (categoría 9): efectos `HOLD_EXP_SHARE`, `HOLD_QUICK_CLAW`, `HOLD_RAZOR_CLAW`, `HOLD_FOCUS_BAND`, `HOLD_LEFTOVERS`, `HOLD_LIFE_ORB`; `amount` es el porcentaje de cada uno. Cultivos: materiales de semillas (categoría 10) cuyo nombre debe coincidir con `Crops::LIST` y nodos 24-26 (`waterable`, `ephemeral`, no están en `habitat_resource`; se siembran en las parcelas del inicio).
+Equipables (categoría 9): efectos `HOLD_EXP_SHARE`, `HOLD_QUICK_CLAW`, `HOLD_RAZOR_CLAW`, `HOLD_FOCUS_BAND`, `HOLD_LEFTOVERS`, `HOLD_LIFE_ORB`; `amount` es el porcentaje de cada uno. Cultivos: nodos 24-27 (zanahoria, fresa, trigo, patata); la fresa y el trigo se siembran con materiales de semillas (categoría 10) cuyo nombre debe coincidir con `Crops::LIST`, y la zanahoria y la patata con el propio producto (`seedName` nulo). Nodos (`waterable`, `ephemeral`, no están en `habitat_resource`; se siembran en las parcelas del inicio).
 
 ## Cómo se reparte `item` en el código
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "../../utils/core/crashScope.hpp"
 #include <algorithm>
 #include <map>
 #include <array>
@@ -159,6 +160,7 @@ struct Scene {
 
     // Devuelve true si hay que pausar el juego (ESC fuera del modo lanzamiento).
     bool update(float dt, const InputState& rawInput) {
+        CRASH_SCOPE();
         const InputState blank;
         const InputState& input = m_respawn > 0.0f ? blank : rawInput; // mientras carga tras desmayarse no se controla nada
         bool pause = false;
@@ -1353,6 +1355,12 @@ struct Scene {
     public:
     // Material de las semillas de un cultivo, y esas semillas como objeto del inventario.
     const Material* seedMaterial(int crop) const {
+        int materialId = -1;
+        if (!Crops::LIST[crop].seedName) { // se siembra el propio producto: el material que suelta el cultivo
+            for (const ResourceNodeType& type : m_data->nodes) if (type.id == Crops::LIST[crop].nodeId) materialId = type.materialId;
+            for (const Material& material : m_data->materials) if (material.id == materialId) return &material;
+            return nullptr;
+        }
         for (const Material& material : m_data->materials) if (material.name == Crops::LIST[crop].seedName) return &material;
         return nullptr;
     }
@@ -2151,6 +2159,7 @@ struct Scene {
 
     // Empieza el duelo con un entrenador: en tiempo real (su pokémon sale al mundo y peleamos como contra los salvajes) o por turnos (pantalla propia).
     void startDuel(int index) {
+        CRASH_SCOPE();
         Trainer& trainer = trainers[index];
         if (battle || m_duelTrainer >= 0 || trainer.busy) return;
         if (storage.team().empty() || storage.nextUsable() < 0) { showNotice(Notice::REWARD, "Tus pokémon no están en condiciones de combatir"); return; }
@@ -2192,11 +2201,30 @@ struct Scene {
         const float x = trainer.body.position.x + toPlayer.x / length * 3.0f, z = trainer.body.position.z + toPlayer.z / length * 3.0f;
         wild.spawnFoe(x, (std::max)(trainer.body.position.y, world.surfaceHeight(x, z)), z, std::atan2(toPlayer.x, toPlayer.z), index, rival.speciesId, rival.level);
         m_engaged = nullptr;
+        // El entrenador lanza su pokéball (la misma animación que el acompañante: vuela, se abre, el rayo saca al pokémon y vuelve).
+        m_trainerBall.start(BallTransfer::Mode::RELEASE, std::atan2(toPlayer.x, toPlayer.z), { trainer.body.position.x, trainer.body.position.y + 1.3f, trainer.body.position.z }, RIVAL_BALL);
     }
 
     // Duelo en tiempo real: cuando cae su pokémon saca otro; sin más, gana el jugador. Si el jugador cae, se termina.
+    // Correa del duelo en tiempo real: ningún pokémon se aleja de su entrenador más de DUEL_LEASH (el rival, del suyo; el nuestro, de nosotros).
+    static void leash(Physics::Body& body, const DirectX::XMFLOAT3& owner) {
+        const float dx = body.position.x - owner.x, dz = body.position.z - owner.z, d2 = dx * dx + dz * dz;
+        if (d2 <= DUEL_LEASH * DUEL_LEASH) return;
+        const float k = DUEL_LEASH / std::sqrt(d2);
+        body.position.x = owner.x + dx * k;
+        body.position.z = owner.z + dz * k;
+    }
     void updateTrainerDuel(float dt) {
+        CRASH_SCOPE();
+        if (m_trainerBall.active()) {
+            const CaptureTarget* foe = wild.foe();
+            const DirectX::XMFLOAT3 hover = foe ? foe->center() : m_trainerBall.pose().position;
+            const DirectX::XMFLOAT3 hand = m_duelTrainer >= 0 ? DirectX::XMFLOAT3{ trainers[m_duelTrainer].body.position.x, trainers[m_duelTrainer].body.position.y + 1.3f, trainers[m_duelTrainer].body.position.z } : hover;
+            m_trainerBall.update(dt, hover, hand);
+        }
         if (m_duelTrainer < 0) return;
+        if (CaptureTarget* foe = wild.foe()) leash(foe->body, trainers[m_duelTrainer].body.position);
+        if (storage.active()) leash(companion.body, player.body.position);
         if (m_respawn > 0.0f || storage.teamWiped()) { endDuel(false); return; }
         if (!wild.foeActive()) { // su pokémon ha caído
             if (!m_duelNext) {
@@ -2221,6 +2249,7 @@ struct Scene {
 
     // Termina el combate por turnos: PS y PP vuelven a los pokémon del jugador y los que combatieron ganan experiencia si ganó.
     void finishBattle() {
+        CRASH_SCOPE();
         if (!battle) return;
         Logger::logInfo("BATTLE", std::string("Termina el combate: ") + (battle->outcome() == Battle::Outcome::WON ? "victoria" : battle->outcome() == Battle::Outcome::LOST ? "derrota" : "sin resultado") + " | rivales derrotados=" + std::to_string(battle->defeatedLevels().size()));
         for (const BattleRules::Fighter& f : battle->playerTeam()) {
@@ -2306,7 +2335,7 @@ struct Scene {
     static constexpr float ARENA_RADIUS = 10.0f;      // radio de la zona (m)
     static constexpr float DOUBLES_SPREAD = 2.0f;     // en dobles, cada pokémon de un lado se separa así del eje central
     static constexpr float BATTLE_START_ORBIT = 0.95f; // giro inicial de la cámara (rad) desde la vista lateral hacia la espalda de nuestro pokémon
-    static constexpr float ARENA_EDGE_GAP = 0.9f;     // los entrenadores están así de lejos del borde, por fuera
+    static constexpr float ARENA_EDGE_GAP = 0.9f;     // el jugador y el entrenador rival están así de lejos del borde, por fuera del círculo y en lados opuestos
     static constexpr float ARENA_POKEMON = 4.0f;      // cada pokémon, así de lejos del centro
     DirectX::XMFLOAT3 arenaCenter() const {
         const float x = ARENA_X, z = ARENA_Z;
@@ -2355,16 +2384,24 @@ struct Scene {
         const DirectX::XMFLOAT3 at = { c.x, c.y + 0.7f, c.z };
         return DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&eye), DirectX::XMLoadFloat3(&at), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
     }
+    // En dobles: ¿el pokémon del hueco 0 de cada lado se ve a la izquierda de la pantalla? (depende de cómo se haya girado la cámara)
+    bool battleFirstOnLeft() const {
+        const DirectX::XMFLOAT3 d = arenaDirection();
+        const float yaw = std::atan2(-d.z, d.x) + m_battleOrbit;
+        return (-d.z * std::cos(yaw) - d.x * std::sin(yaw)) >= -0.01f;
+    }
     float battleYaw() const { return m_battleYaw; }
     int battleTrainer() const { return m_battleTrainer; }
     DirectX::XMFLOAT3 battleHand(int side) const { const DirectX::XMFLOAT3 stand = arenaStand(side); return { stand.x, stand.y + 1.3f, stand.z }; }
     void advanceBattleFx(float dt) {
+        CRASH_SCOPE();
         battleFx.time += dt;
         if (battle) for (int slot = 0; slot < Battle::SLOTS; ++slot) {
             if (!m_battleBalls[slot].active()) continue;
             const DirectX::XMFLOAT3 spot = battleSpot(slot);
             m_battleBalls[slot].update(dt, { spot.x, spot.y + 1.6f, spot.z }, battleHand(Battle::sideOf(slot)));
         }
+        if (battle) player.face(std::atan2(arenaStand(1).x - arenaStand(0).x, arenaStand(1).z - arenaStand(0).z)); // el jugador mira al rival
         if (!battle || m_battleSlide >= 1.0f) return;
         // Durante la pantalla de carga el entrenador y el jugador caminan hasta sus sitios del borde (con suavizado).
         m_battleSlide = (std::min)(1.0f, m_battleSlide + dt / BATTLE_SLIDE_TIME);
@@ -2375,16 +2412,19 @@ struct Scene {
     }
     // Empieza la animación de un mensaje del combate (quién ataca y si llega el golpe).
     void playBattleFx(const Battle::Message& m) {
+        CRASH_SCOPE();
         battleFx = { m.attacker, m.target, m.hit, 0.0f };
         if (!battle || (m.animKind != 1 && m.animKind != 2) || m.animSide < 0) return;
         const int slot = m.animSide, side = Battle::sideOf(slot);
         const DirectX::XMFLOAT3 hand = battleHand(side);
-        int ball = -1; // los del jugador, con la pokéball de cada uno; los del rival, la Poké Ball de siempre
+        int ball = RIVAL_BALL; // los del jugador, con la pokéball de cada uno; los del rival, la Honor Ball
         if (side == 0 && battle->occupied(slot)) if (const OwnedPokemon* owned = storage.mutableAt(true, battle->fighter(slot).source)) ball = owned->ballId;
         const bool release = m.animKind == 2;
         m_battleBalls[slot].start(release ? BallTransfer::Mode::RELEASE : BallTransfer::Mode::ABSORB, m_battleYaw + (side == 0 ? 0.0f : 3.14159265f), hand, ball);
         Sound::emit(release ? Sound::Sfx::BALL_RELEASE : Sound::Sfx::BALL_RECALL, hand);
     }
+    static constexpr int RIVAL_BALL = 6; // pokéball de los pokémon de los entrenadores (id de pokeball.hpp)
+    const BallTransfer* trainerBall() const { return m_trainerBall.active() ? &m_trainerBall : nullptr; }
     const BallTransfer* battleBall(int slot) const { return m_battleBalls[slot].active() ? &m_battleBalls[slot] : nullptr; }
 
     private:
@@ -2398,6 +2438,8 @@ struct Scene {
     float m_battleSlide = 1.0f;
     BallTransfer m_battleBalls[Battle::SLOTS]; // pokéballs de los pokémon que salen o vuelven en el combate por turnos
     float m_battleOrbit = 0.0f, m_battleTilt = 0.35f; // giro y altura de la cámara del combate
+    static constexpr float DUEL_LEASH = 9.0f; // metros máximos entre un pokémon del duelo en tiempo real y su entrenador
+    BallTransfer m_trainerBall; // pokéball del entrenador al sacar a su pokémon en un duelo en tiempo real
     int m_duelTrainer = -1;
     int m_duelLeft = 0;
     float m_duelPause = 0.0f;

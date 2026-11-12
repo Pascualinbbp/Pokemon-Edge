@@ -126,6 +126,7 @@ class Player {
     bool sliding() const { return m_sliding; }
     // Hacia dónde mira el personaje: hacia donde se mueve; al apuntar, trabajar o pescar, hacia donde mira la cámara.
     float facing() const { return m_facing; }
+    void face(float yaw) { m_facing = yaw; } // (combate por turnos) mira hacia el rival
 
     // --- Estados ---
     bool climbing() const { return m_climbing; }

@@ -9,9 +9,10 @@
 // sembrar. Cada parcela es un ResourceNode vacío (no hay que arar: el suelo ya está preparado). El cultivo crece solo y se riega una vez por jugador y por
 // pokémon (ver ResourceNode); recogido, la parcela vuelve a quedar libre para sembrar.
 namespace Crops {
-    struct Crop { int nodeId; const char* seedName; }; // nodo del cultivo (tabla resource_node) y material de sus semillas (tabla material)
-    inline constexpr Crop LIST[] = { { 24, "Semillas de zanahoria" }, { 25, "Semillas de fresa" }, { 26, "Semillas de trigo" } };
-    inline constexpr int COUNT = 3;
+    struct Crop { int nodeId; const char* seedName; }; // nodo del cultivo (tabla resource_node) y material de sus semillas (tabla material); nullptr = se siembra el propio producto (zanahoria, patata)
+    inline constexpr Crop LIST[] = { { 24, nullptr }, { 25, "Semillas de fresa" }, { 26, "Semillas de trigo" }, { 27, nullptr } };
+    inline constexpr int COUNT = 4;
+    inline constexpr int ZONES = 3;
     inline constexpr int PLOTS_PER_ZONE = 4;
     inline constexpr float ZONE_DISTANCE = 9.0f;  // del centro del mundo al centro de cada zona
     inline constexpr float PLOT_SPACING = 1.9f;   // entre parcelas (2 x 2)
@@ -38,7 +39,7 @@ namespace Crops {
     inline std::vector<Plot> generate(const GameData& data, const Physics::World& world, std::vector<ResourceNode>& nodes) {
         std::vector<Plot> plots;
         const float away = std::atan2(ResearchMachine::POSITION.z, ResearchMachine::POSITION.x) + 1.0472f;
-        for (int zone = 0; zone < COUNT; ++zone) {
+        for (int zone = 0; zone < ZONES; ++zone) {
             const int typeIndex = typeIndexOf(data, 0); // el tipo real lo fija la siembra (Plot vacío)
             if (typeIndex < 0) continue; // la base de datos aún no tiene los cultivos
             const float angle = away + zone * 2.0944f;

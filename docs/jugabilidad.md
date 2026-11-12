@@ -150,3 +150,6 @@ Más información en [Guardado de partidas](guardado.md).
 - El menú Pokémon del juego solo muestra el equipo y permite reordenarlo arrastrando; si el acompañante cambia de puesto sale el pokémon por el que se cambió (salvo que esté debilitado). El PC solo se ve desde la máquina.
 - Un pokémon en el nivel máximo no gana experiencia; la experiencia necesaria crece más con cada nivel.
 - Salir del modo captura es gradual y al entrar se elige la primera clase de pokéball que haya.
+
+## Menú de pokémon (menú rápido)
+Solo el equipo; se reordena arrastrando un pokémon sobre otro. La ficha lleva tres pestañas: FICHA (nombre, tipos, pokéball con la que se capturó, nivel, potencial, estadísticas base, habilidades, habilidad del mundo, naturaleza y EVs), ENTRENAMIENTO (EVs y naturaleza) y MOVIMIENTOS. En movimientos se arrastra uno sobre otro para reordenar y uno desbloqueado sobre uno de los 4 para sustituirlo; al aprender un movimiento con los 4 llenos se arrastra el nuevo sobre el que se olvida. El menú del PC de la máquina conserva su propia pantalla.

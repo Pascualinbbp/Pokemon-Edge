@@ -1032,6 +1032,7 @@ void Renderer3D::addModel(const RenderModel& model, CXMMATRIX world, const XMFLO
 static const auto kStart = std::chrono::steady_clock::now(); // origen del reloj de adornos
 
 void Renderer3D::collect(const Scene& scene) {
+    CRASH_SCOPE();
     m_draws.clear();
 
     for (const Physics::World::Box& wall : scene.world.obstacles) {
@@ -1039,7 +1040,8 @@ void Renderer3D::collect(const Scene& scene) {
     }
 
     const XMFLOAT3& p = scene.player.body.position;
-    if (!scene.battle) addPlayer(scene); // en el combate por turnos solo se ven los pokémon
+    CRASH_AT();
+    addPlayer(scene); // también en el combate por turnos: el jugador frente al entrenador rival
     const float time = scene.dayCycle.lighting().time;
     m_clock = std::fmod(std::chrono::duration<float>(std::chrono::steady_clock::now() - kStart).count(), 3600.0f);
     addSky(scene, time);
@@ -1078,6 +1080,8 @@ void Renderer3D::collect(const Scene& scene) {
         if (const BallTransfer* transfer = pet.transfer()) addTransfer(*transfer, pet.drawCenter(), Companion::SIZE * pet.scale());
     }
 
+    if (const BallTransfer* thrown = scene.trainerBall()) addTransfer(*thrown, scene.wild.foe() ? scene.wild.foe()->center() : thrown->pose().position, Companion::SIZE); // pokéball del entrenador del mundo
+
     for (const Scene::Strike& strike : scene.strikes) { // golpe del acompañante: rayo (a distancia) e impacto con el color de su tipo
         int r = 255, g = 255, b = 255;
         PokemonStyle::typeRgb(strike.typeId, r, g, b);
@@ -1103,9 +1107,13 @@ void Renderer3D::collect(const Scene& scene) {
     for (const Fruit& fruit : scene.fruits) addFruit(fruit);
     addFootprints(scene);
     addMachine();
+    CRASH_AT();
     addProfessor(scene);
+    CRASH_AT();
     addTrainers(scene);
-    if (scene.battle) { addArena(scene); addBattle(scene); }
+    CRASH_AT();
+    if (scene.battle) { addArena(scene); CRASH_AT(); addBattle(scene); }
+    CRASH_AT();
 
     for (const Pokeball& ball : scene.balls) addBall(ball);
 }
@@ -1519,7 +1527,7 @@ void Renderer3D::addNode(const ResourceNode& node) {
             }
             return;
         }
-        const bool carrot = node.typeId() == 24;
+        const bool carrot = node.typeId() == 24 || node.typeId() == 27; // raíces: la hoja arriba y el producto asoma de la tierra
         const int leaves = carrot ? 6 : 5;
         for (int i = 0; i < leaves; ++i) { // hojas en abanico
             const float a = static_cast<float>(i) * 6.2831853f / leaves, h = (carrot ? 0.42f : 0.2f) * k;
@@ -1736,6 +1744,7 @@ void Renderer3D::addTrainers(const Scene& scene) {
 
 // Combate por turnos: los dos pokémon frente a frente (con la embestida del que ataca, el temblor del que recibe y el destello del golpe).
 void Renderer3D::addBattle(const Scene& scene) {
+    CRASH_SCOPE();
     const Battle& battle = *scene.battle;
     const float size = Companion::SIZE * 1.15f;
     const Scene::BattleFx& animFx = scene.battleFx;
@@ -2110,6 +2119,7 @@ void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Light
 }
 
 void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int width, int height) {
+    CRASH_SCOPE();
     if (width <= 0 || height <= 0) return;
 
     if (!m_worldBuilt || m_worldSeed != scene.habitats.seed()) {

@@ -1,0 +1,115 @@
+name: Compilar y publicar
+
+# Une lo que han preparado los demás trabajos, compila el código del juego, empaqueta y publica la release.
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: 📥 Checkout Código
+        uses: actions/checkout@v4
+
+      - name: ⬇️ Bajar dependencias
+        uses: actions/download-artifact@v4
+        with:
+          name: dependencias
+          path: .
+
+      - name: ⬇️ Bajar base de datos
+        uses: actions/download-artifact@v4
+        with:
+          name: base-de-datos
+          path: app/data/db
+
+      - name: ⬇️ Bajar código de terceros compilado
+        uses: actions/download-artifact@v4
+        with:
+          name: terceros
+          path: .
+
+      - name: 🏷️ Extraer Configuración del Release
+        shell: pwsh
+        run: |
+          $json = Get-Content release_config.json -Raw | ConvertFrom-Json
+          $c = $json.configs
+
+          @(
+            "TAG=$($c.tag)",
+            "REL_NAME=$($c.name)",
+            "DESC=$($c.description)",
+            "PRE=$($c.prerelease.ToString().ToLower())",
+            "LATEST=$($c.make_latest.ToString().ToLower())"
+          ) | Add-Content -Path $env:GITHUB_ENV
+
+          $versionJson = $json.userjson | ConvertTo-Json
+          New-Item -ItemType Directory -Force -Path "app/data" | Out-Null
+          $versionJson | Out-File "app/data/version.json" -Encoding utf8
+          $versionJson | Out-File "version.json" -Encoding utf8
+          Write-Host "[LOG] Configuración de release y versión guardadas."
+
+      - name: 🎨 Incrustar assets (todo assets/ dentro del .exe)
+        shell: pwsh
+        run: |
+          # Cada fichero de assets/ (menos .ico, que va con su ID en resources.rc) pasa a ser un recurso RCDATA con ID numérico
+          # (assets.rc) y su ruta queda en el índice assets.idx ("1000 types/1.png"), que también va incrustado.
+          # Añadir un asset nuevo = dejarlo en assets/.
+          $root = (Resolve-Path "assets").Path
+          $files = Get-ChildItem "assets" -Recurse -File | Where-Object { $_.Extension -ne ".ico" -and $_.Name -ne ".gitkeep" } | Sort-Object FullName
+          $rc = @("// assets generados"); $idx = @(); $id = 1000
+          foreach ($f in $files) {
+              $rel = $f.FullName.Substring($root.Length + 1).Replace([string][char]92, "/")
+              $rc += ('{0} RCDATA "assets/{1}"' -f $id, $rel)
+              $idx += ('{0} {1}' -f $id, $rel)
+              $id++
+          }
+          $rc | Set-Content -Path "assets.rc" -Encoding ascii
+          if (-not $idx) { $idx = @("0 -") }
+          $idx | Set-Content -Path "assets.idx" -Encoding ascii
+          Write-Host "[LOG] $($files.Count) assets incrustados."
+
+      - name: 🔨 Compilar el juego (DirectX 11, sin consola)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
+          if not defined VS_PATH (
+            echo Error: No se encontro Visual Studio con las herramientas de C++.
+            exit /b 1
+          )
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+
+          rc.exe /nologo resources.rc || exit /b 1
+
+          if not exist build mkdir build
+          dir /b /s app\*.cpp | findstr /v /i /c:"\app\utils\imgui\" > sources.txt
+          echo main.cpp >> sources.txt
+
+          cl.exe /nologo /MP /std:c++17 /EHsc /O2 /I . /FI app/utils/core/imguiAssert.hpp /I app/utils/sqlite /I app/utils/imgui /Fo:build\ @sources.txt thirdparty.lib resources.res /Fe:PokemonEdge.exe /link /OPT:REF /OPT:ICF winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup || exit /b 1
+
+      - name: 🗂️ Preparar ZIP Final
+        shell: pwsh
+        run: |
+          $out = "release_build"
+          New-Item -ItemType Directory -Force -Path "$out/app/data" | Out-Null
+
+          Copy-Item "PokemonEdge.exe" "$out/"
+          Copy-Item "app/data/version.json" "$out/app/data/"
+          # assets/, icon.ico y la base de datos van incrustados en el .exe: no hace falta enviarlos aparte.
+
+          Compress-Archive -Path "$out/*" -DestinationPath "PokemonEdge.zip" -Force
+
+      - name: 🚀 Publicar en GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.REL_NAME }}
+          body: ${{ env.DESC }}
+          prerelease: ${{ env.PRE == 'true' }}
+          make_latest: ${{ env.LATEST == 'true' }}
+          files: |
+            PokemonEdge.zip
+            version.json
+          overwrite: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

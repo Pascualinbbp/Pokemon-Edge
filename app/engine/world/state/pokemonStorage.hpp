@@ -355,6 +355,14 @@ class PokemonStorage {
         owned->pp[slot] = -1;
         return true;
     }
+    // Intercambia dos huecos de movimientos (con sus PP): así se reordenan arrastrando.
+    bool swapMoves(bool inTeam, int index, int a, int b) {
+        OwnedPokemon* owned = at(inTeam, index);
+        if (!owned || a == b || a < 0 || b < 0 || a >= MoveRules::MAX_KNOWN || b >= MoveRules::MAX_KNOWN) return false;
+        std::swap(owned->moves[a], owned->moves[b]);
+        std::swap(owned->pp[a], owned->pp[b]);
+        return true;
+    }
     // Quita el hueco (siempre debe quedar al menos un movimiento).
     bool clearMove(bool inTeam, int index, int slot) {
         OwnedPokemon* owned = at(inTeam, index);

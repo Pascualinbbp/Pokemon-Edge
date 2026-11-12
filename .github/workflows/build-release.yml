@@ -1,5 +1,9 @@
 name: Build and Release PokemonEdge
 
+# Orquestador: al subir a main lanza los trabajos en el orden que necesitan.
+#   dependencias ─┬─> código de terceros ─┐
+#   base de datos ────────────────────────┴─> compilar y publicar
+# Cada trabajo vive en su propio fichero (ci-*.yml) y se puede reejecutar o corregir por separado.
 on:
   push:
     branches: [ main ]
@@ -7,231 +11,25 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: true
+
 jobs:
+  dependencies:
+    uses: ./.github/workflows/ci-dependencies.yml
+
+  database:
+    uses: ./.github/workflows/ci-database.yml
+    secrets: inherit
+
+  thirdparty:
+    needs: dependencies
+    uses: ./.github/workflows/ci-thirdparty.yml
+
   build:
-    runs-on: windows-latest
-
-    steps:
-      - name: 📥 Checkout Código
-        uses: actions/checkout@v4
-
-      - name: 🏷️ Extraer Configuración del Release
-        shell: pwsh
-        run: |
-          $json = Get-Content release_config.json -Raw | ConvertFrom-Json
-          $c = $json.configs
-
-          @(
-            "TAG=$($c.tag)",
-            "REL_NAME=$($c.name)",
-            "DESC=$($c.description)",
-            "PRE=$($c.prerelease.ToString().ToLower())",
-            "LATEST=$($c.make_latest.ToString().ToLower())"
-          ) | Add-Content -Path $env:GITHUB_ENV
-
-          $versionJson = $json.userjson | ConvertTo-Json
-          New-Item -ItemType Directory -Force -Path "app/data" | Out-Null
-          $versionJson | Out-File "app/data/version.json" -Encoding utf8
-          $versionJson | Out-File "version.json" -Encoding utf8
-          Write-Host "[LOG] Configuración de release y versión guardadas."
-
-      - name: 📥 Descargar Dependencias desde dependencies.json
-        shell: pwsh
-        run: |
-          $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest es MUCHO más rápido sin barra de progreso
-
-          # Descarga con reintentos: GitHub y otros servidores devuelven a veces errores 5xx pasajeros.
-          function Get-File($uri, $out) {
-              for ($try = 1; $try -le 6; $try++) {
-                  try { Invoke-WebRequest -Uri $uri -OutFile $out -ErrorAction Stop; return }
-                  catch {
-                      Write-Host "[LOG] Intento $try/6 fallido para ${uri}: $($_.Exception.Message.Substring(0, [Math]::Min(120, $_.Exception.Message.Length)))"
-                      if ($try -eq 6) { throw }
-                      Start-Sleep -Seconds (5 * $try)
-                  }
-              }
-          }
-
-          if (-not (Test-Path "dependencies.json")) { throw "dependencies.json no existe en la raíz." }
-          $dep = Get-Content dependencies.json -Raw | ConvertFrom-Json
-
-          function Copy-Mappings($mappings) {
-              if (-not $mappings) { return }
-              foreach ($src in $mappings.PSObject.Properties.Name) {
-                  $dest = $mappings.$src
-                  $dir = Split-Path $dest
-                  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-                  Write-Host "[LOG] Copiando $src -> $dest"
-                  Copy-Item -Path $src -Destination $dest -Force
-              }
-          }
-
-          foreach ($f in $dep.files) {
-              Write-Host "[LOG] Archivo: $($f.url) -> $($f.dest)"
-              $dir = Split-Path $f.dest
-              if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-              Get-File $f.url $f.dest
-          }
-
-          foreach ($z in $dep.zips) {
-              Write-Host "[LOG] ZIP: $($z.url)"
-              Get-File $z.url "temp_dl.zip"
-              Expand-Archive -Path "temp_dl.zip" -DestinationPath $z.extract_path -Force
-              Copy-Mappings $z.mappings
-              Remove-Item "temp_dl.zip" -Force
-              Remove-Item $z.extract_path -Recurse -Force
-          }
-
-          foreach ($g in $dep.gits) {
-              Write-Host "[LOG] Git: $($g.url)"
-              if (Test-Path $g.temp_dir) { Remove-Item $g.temp_dir -Recurse -Force }
-              git clone --quiet --depth 1 $g.url $g.temp_dir
-              if ($LASTEXITCODE -ne 0) { throw "git clone falló: $($g.url)" }
-              Copy-Mappings $g.mappings
-              Remove-Item $g.temp_dir -Recurse -Force
-          }
-          Write-Host "[LOG] Dependencias listas."
-
-      - name: 🗄️ Traducir la base de datos de Neon (PostgreSQL) a SQLite (se incrusta en el .exe)
-        shell: pwsh
-        env:
-          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $ProgressPreference = 'SilentlyContinue'
-          if (-not $env:NEON_DATABASE_URL) { throw "Falta el secret NEON_DATABASE_URL (Settings > Secrets and variables > Actions)." }
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $env:PGCLIENTENCODING = "UTF8"
-
-          # Descarga con reintentos: los servidores devuelven a veces errores 5xx pasajeros.
-          function Get-File($uri, $out) {
-              for ($try = 1; $try -le 6; $try++) {
-                  try { Invoke-WebRequest -Uri $uri -OutFile $out -ErrorAction Stop; return }
-                  catch {
-                      Write-Host "[LOG] Intento $try/6 fallido para ${uri}: $($_.Exception.Message.Substring(0, [Math]::Min(120, $_.Exception.Message.Length)))"
-                      if ($try -eq 6) { throw }
-                      Start-Sleep -Seconds (5 * $try)
-                  }
-              }
-          }
-
-          # psql viene en la imagen de Windows de GitHub; sqlite3 se descarga (herramientas oficiales).
-          $psql = (Get-Command psql -ErrorAction SilentlyContinue).Source
-          if (-not $psql) { $psql = (Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName }
-          if (-not $psql) { throw "No se encontró psql en el runner." }
-          Get-File "https://www.sqlite.org/2024/sqlite-tools-win-x64-3460000.zip" "sqlite-tools.zip"
-          Expand-Archive -Path "sqlite-tools.zip" -DestinationPath "sqlite-tools" -Force
-          $sqlite = (Get-ChildItem "sqlite-tools" -Recurse -Filter sqlite3.exe | Select-Object -First 1).FullName
-
-          function Pg([string]$sql) {
-              $out = & $psql $env:NEON_DATABASE_URL -X -A -t -q -v ON_ERROR_STOP=1 -c $sql
-              if ($LASTEXITCODE -ne 0) { throw "psql falló." }
-              return $out
-          }
-
-          # 1) Esquema: cada tabla de public con sus columnas (INTEGER / REAL / TEXT), NOT NULL y clave primaria.
-          $schema = @"
-          SELECT format('CREATE TABLE %I (%s%s);', c.relname,
-            (SELECT string_agg(format('%I %s%s', a.attname,
-                CASE WHEN a.atttypid IN (20,21,23,16) THEN 'INTEGER' WHEN a.atttypid IN (700,701,1700) THEN 'REAL' ELSE 'TEXT' END,
-                CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END), ', ' ORDER BY a.attnum)
-             FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
-            coalesce((SELECT ', PRIMARY KEY (' || string_agg(quote_ident(a.attname), ', ' ORDER BY k.ord) || ')'
-                      FROM pg_index i CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
-                      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
-                      WHERE i.indrelid = c.oid AND i.indisprimary), ''))
-          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-          WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname;
-          "@
-          $script = New-Object System.Collections.Generic.List[string]
-          $script.Add("BEGIN;")
-          foreach ($line in (Pg $schema)) { if ($line) { $script.Add($line) } }
-
-          # 2) Datos: un INSERT por fila, en el orden en que se insertaron (el juego lee algunas tablas por orden).
-          $tables = Pg "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname"
-          $count = 0
-          foreach ($t in $tables) {
-              if (-not $t) { continue }
-              $cols = Pg "SELECT string_agg(format('coalesce(chr(39) || replace(%I::text, chr(39), repeat(chr(39),2)) || chr(39), ''NULL'')', attname), ', ' ORDER BY attnum) FROM pg_attribute WHERE attrelid = 'public.""$t""'::regclass AND attnum > 0 AND NOT attisdropped"
-              $rows = Pg "SELECT 'INSERT INTO ""$t"" VALUES (' || concat_ws(',', $cols) || ');' FROM ""$t"" ORDER BY ctid"
-              foreach ($row in $rows) { if ($row) { $script.Add($row) } }
-              $count++
-          }
-          $script.Add("COMMIT;")
-          if ($count -eq 0) { throw "Neon no tiene tablas en el esquema public." }
-
-          New-Item -ItemType Directory -Force -Path "app/data/db" | Out-Null
-          if (Test-Path "app/data/db/pokemonEdge.db") { Remove-Item "app/data/db/pokemonEdge.db" -Force }
-          [System.IO.File]::WriteAllLines("$PWD/neon_to_sqlite.sql", $script, (New-Object System.Text.UTF8Encoding($false)))
-          & $sqlite "app/data/db/pokemonEdge.db" ".read neon_to_sqlite.sql"
-          if ($LASTEXITCODE -ne 0) { throw "sqlite3 no pudo crear la base de datos." }
-          $n = & $sqlite "app/data/db/pokemonEdge.db" "SELECT count(*) FROM sqlite_master WHERE type='table'"
-          Write-Host "[LOG] SQLite generado desde Neon: $n tablas."
-          Remove-Item "neon_to_sqlite.sql", "sqlite-tools.zip" -Force
-          Remove-Item "sqlite-tools" -Recurse -Force
-
-      - name: 🎨 Incrustar assets (todo assets/ dentro del .exe)
-        shell: pwsh
-        run: |
-          # Cada fichero de assets/ (menos .ico, que va con su ID en resources.rc) pasa a ser un recurso RCDATA con ID numérico
-          # (assets.rc) y su ruta queda en el índice assets.idx ("1000 types/1.png"), que también va incrustado.
-          # Añadir un asset nuevo = dejarlo en assets/.
-          $root = (Resolve-Path "assets").Path
-          $files = Get-ChildItem "assets" -Recurse -File | Where-Object { $_.Extension -ne ".ico" -and $_.Name -ne ".gitkeep" } | Sort-Object FullName
-          $rc = @("// assets generados"); $idx = @(); $id = 1000
-          foreach ($f in $files) {
-              $rel = $f.FullName.Substring($root.Length + 1).Replace([string][char]92, "/")
-              $rc += ('{0} RCDATA "assets/{1}"' -f $id, $rel)
-              $idx += ('{0} {1}' -f $id, $rel)
-              $id++
-          }
-          $rc | Set-Content -Path "assets.rc" -Encoding ascii
-          if (-not $idx) { $idx = @("0 -") }
-          $idx | Set-Content -Path "assets.idx" -Encoding ascii
-          Write-Host "[LOG] $($files.Count) assets incrustados."
-
-      - name: 🔨 Compilar Motor con ImGui y DirectX 11 (Sin Consola)
-        shell: cmd
-        run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
-          if not defined VS_PATH (
-            echo Error: No se encontro Visual Studio con las herramientas de C++.
-            exit /b 1
-          )
-          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-
-          rc.exe /nologo resources.rc || exit /b 1
-
-          if not exist build mkdir build
-          dir /b /s app\*.cpp > sources.txt
-          echo main.cpp >> sources.txt
-
-          cl.exe /nologo /MP /std:c++17 /EHsc /O2 /Zi /Fd:build\vc.pdb /I . /FI app/utils/core/imguiAssert.hpp /I app/utils/sqlite /I app/utils/imgui /Fo:build\ @sources.txt app/utils/sqlite/sqlite3.c resources.res /Fe:PokemonEdge.exe /link /DEBUG /OPT:REF /OPT:ICF winhttp.lib shell32.lib user32.lib d3d11.lib dxgi.lib d3dcompiler.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
-
-      - name: 🗂️ Preparar ZIP Final
-        shell: pwsh
-        run: |
-          $out = "release_build"
-          New-Item -ItemType Directory -Force -Path "$out/app/data" | Out-Null
-
-          Copy-Item "PokemonEdge.exe" "$out/"
-          Copy-Item "app/data/version.json" "$out/app/data/"
-          # assets/, icon.ico y la base de datos van incrustados en el .exe: no hace falta enviarlos aparte.
-
-          Compress-Archive -Path "$out/*" -DestinationPath "PokemonEdge.zip" -Force
-
-      - name: 🚀 Publicar en GitHub
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          name: ${{ env.REL_NAME }}
-          body: ${{ env.DESC }}
-          prerelease: ${{ env.PRE == 'true' }}
-          make_latest: ${{ env.LATEST == 'true' }}
-          files: |
-            PokemonEdge.zip
-            PokemonEdge.pdb
-            version.json
-          overwrite: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    needs: [ thirdparty, database ]
+    uses: ./.github/workflows/ci-build.yml
+    secrets: inherit
+    permissions:
+      contents: write

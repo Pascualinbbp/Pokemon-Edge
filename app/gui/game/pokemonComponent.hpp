@@ -67,7 +67,9 @@ namespace PokemonComponent {
         inline int rankFilter = -1;              // potencial mínimo (-1 = todos)
         inline bool shinyFilter = false;
         inline bool editingMoves = false;        // editor de movimientos abierto para el pokémon seleccionado
-        inline bool editingStats = false;        // editor de EVs y naturaleza abierto para el pokémon seleccionado
+        inline bool editingStats = false;        // editor de EVs y naturaleza abierto para el pokémon seleccionado (solo en el PC)
+        inline int tab = 0;                      // ficha del menú rápido: 0 presentación, 1 entrenamiento (EVs y naturaleza), 2 movimientos
+        inline float wrapWidth = DETAIL_WIDTH - 32.0f; // ancho de línea de las habilidades
 
         inline void select(const Place& place) {
             selection = place;
@@ -394,7 +396,7 @@ namespace PokemonComponent {
             if (describe && ability) {
                 ImGui::SetCursorScreenPos(ImVec2(at.x + w + 8.0f, at.y + 2.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
-                ImGui::PushTextWrapPos(at.x + DETAIL_WIDTH - 32.0f - ImGui::GetWindowPos().x);
+                ImGui::PushTextWrapPos(at.x + wrapWidth - ImGui::GetWindowPos().x);
                 ImGui::TextUnformatted(ability->description.c_str());
                 ImGui::PopTextWrapPos();
                 ImGui::PopStyleColor();
@@ -415,7 +417,7 @@ namespace PokemonComponent {
                 }
                 ImGui::SetCursorScreenPos(ImVec2(at.x + w + 8.0f, at.y + 2.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
-                ImGui::PushTextWrapPos(at.x + DETAIL_WIDTH - 32.0f - ImGui::GetWindowPos().x);
+                ImGui::PushTextWrapPos(at.x + wrapWidth - ImGui::GetWindowPos().x);
                 ImGui::TextUnformatted((skill->description + (works.empty() ? "" : " Trabaja: " + works + ".")).c_str());
                 ImGui::PopTextWrapPos();
                 ImGui::PopStyleColor();
@@ -424,9 +426,9 @@ namespace PokemonComponent {
         }
 
         inline void drawDetail(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress,
-                               const ImVec2& pos, const ImVec2& size) {
+                               const ImVec2& pos, const ImVec2& size, bool embedded = false) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            GuiCards::panel(dl, pos, ImVec2(pos.x + size.x, pos.y + size.y));
+            if (!embedded) GuiCards::panel(dl, pos, ImVec2(pos.x + size.x, pos.y + size.y)); // embedded: dentro de la pestaña de la ficha (sin marco, botones ni textos de abajo)
 
             const OwnedPokemon* found = ownedAt(storage, selection);
             const PokemonSpecies* species = found ? data.speciesById(found->speciesId) : nullptr;
@@ -480,10 +482,12 @@ namespace PokemonComponent {
                 }
             }
 
-            ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 132.0f, pos.y + headerHeight - 30.0f));
-            if (GuiCards::button("##moves", "MOVIMIENTOS", ImVec2(116.0f, 24.0f), true, IM_COL32(200, 70, 50, 255))) { editingMoves = true; MoveEditor::reset(); }
-            ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 132.0f - 176.0f, pos.y + headerHeight - 30.0f));
-            if (GuiCards::button("##train", "EVs Y NATURALEZA", ImVec2(164.0f, 24.0f), true, IM_COL32(60, 130, 200, 255))) editingStats = true;
+            if (!embedded) {
+                ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 132.0f, pos.y + headerHeight - 30.0f));
+                if (GuiCards::button("##moves", "MOVIMIENTOS", ImVec2(116.0f, 24.0f), true, IM_COL32(200, 70, 50, 255))) { editingMoves = true; MoveEditor::reset(); }
+                ImGui::SetCursorScreenPos(ImVec2(pos.x + size.x - 132.0f - 176.0f, pos.y + headerHeight - 30.0f));
+                if (GuiCards::button("##train", "EVs Y NATURALEZA", ImVec2(164.0f, 24.0f), true, IM_COL32(60, 130, 200, 255))) editingStats = true;
+            }
             if (const Nature* nature = data.nature(owned.nature)) {
                 std::snprintf(text, sizeof(text), "Naturaleza: %s", nature->name.c_str());
                 GuiCards::text(dl, ImVec2(pos.x + 16.0f, pos.y + headerHeight - 26.0f), IM_COL32(255, 255, 255, 220), text, 0.85f);
@@ -492,7 +496,7 @@ namespace PokemonComponent {
             const float left = pos.x + 16.0f, width = size.x - 32.0f;
             float y = pos.y + headerHeight + 10.0f;
             const bool compact = size.y < 640.0f;
-            if (!compact) {
+            if (!compact && !embedded) {
                 ImGui::SetCursorScreenPos(ImVec2(left, y));
                 ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
                 ImGui::PushTextWrapPos(left + width - ImGui::GetWindowPos().x);
@@ -503,7 +507,7 @@ namespace PokemonComponent {
             }
 
             // Abajo: habilidades y habilidad del mundo (alturas fijas); el resto es para el gráfico.
-            const float bottomHeight = compact ? 96.0f : 150.0f;
+            const float bottomHeight = embedded ? 0.0f : compact ? 96.0f : 150.0f;
             const float statsAvail = pos.y + size.y - bottomHeight - y - 8.0f;
             if (owned.analyzed) drawStats(data, storage, inventory, owned, *species, ImVec2(left, y), statsAvail);
             else {
@@ -513,6 +517,7 @@ namespace PokemonComponent {
                 ImGui::PopTextWrapPos();
             }
 
+            if (embedded) { ImGui::Dummy(ImVec2(0.0f, 0.0f)); return; }
             ImGui::SetCursorScreenPos(ImVec2(left, pos.y + size.y - bottomHeight));
             worldSkillLine(dl, data, *species, !compact);
             abilityLine(dl, data.ability(species->abilityId), "Activa", IM_COL32(190, 80, 60, 255), !compact);
@@ -526,12 +531,78 @@ namespace PokemonComponent {
             // Los textos de arriba mueven el cursor con SetCursorScreenPos; sin un elemento al final ImGui aborta al cerrar la ventana.
             ImGui::Dummy(ImVec2(0.0f, 0.0f));
         }
+
+        // Columna de datos de la pestaña de presentación: descripción, habilidad del mundo, habilidades (las que no tiene no se muestran), naturaleza y EVs.
+        inline void drawInfoColumn(const GameData& data, PokemonStorage& storage, const OwnedPokemon& owned, const PokemonSpecies& species, const ImVec2& pos, float width, float height) {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const float saved = wrapWidth;
+            wrapWidth = width;
+            ImGui::SetCursorScreenPos(pos);
+            ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
+            ImGui::PushTextWrapPos(pos.x + width - ImGui::GetWindowPos().x);
+            ImGui::TextUnformatted(species.description.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::SetCursorScreenPos(ImVec2(pos.x, ImGui::GetCursorScreenPos().y + 14.0f));
+            worldSkillLine(dl, data, species, true);
+            if (const Ability* active = data.ability(species.abilityId)) abilityLine(dl, active, "Activa", IM_COL32(190, 80, 60, 255), true);
+            if (species.passiveId >= 0) if (const Ability* passive = data.ability(species.passiveId)) abilityLine(dl, passive, "Pasiva", IM_COL32(130, 80, 190, 255), true);
+            wrapWidth = saved;
+
+            float y = ImGui::GetCursorScreenPos().y + 10.0f;
+            if (const Nature* nature = data.nature(owned.nature)) {
+                char text[96];
+                if (nature->neutral()) std::snprintf(text, sizeof(text), "Naturaleza: %s (neutra)", nature->name.c_str());
+                else std::snprintf(text, sizeof(text), "Naturaleza: %s  (+%s  -%s)", nature->name.c_str(), BaseStats::name(nature->increased), BaseStats::name(nature->decreased));
+                GuiCards::text(dl, ImVec2(pos.x, y), IM_COL32(255, 255, 255, 240), text, 1.0f);
+                y += 30.0f;
+            }
+            GuiCards::text(dl, ImVec2(pos.x, y), GuiStyle::MUTED, "EVs repartidos", 0.85f);
+            y += 24.0f;
+            const float cell = (std::min)(130.0f, width / 3.0f);
+            for (int i = 0; i < 6; ++i) {
+                const int stat = StatEditor::detail::ORDER[i];
+                char text[48];
+                std::snprintf(text, sizeof(text), "%s %d", BaseStats::name(stat), owned.evs[static_cast<size_t>(stat)]);
+                GuiCards::text(dl, ImVec2(pos.x + static_cast<float>(i % 3) * cell, y + static_cast<float>(i / 3) * 24.0f), owned.evs[static_cast<size_t>(stat)] > 0 ? IM_COL32(255, 190, 90, 255) : IM_COL32(200, 200, 215, 200), text, 0.9f);
+            }
+            if (y + 60.0f > pos.y + height) return;
+        }
+
+        // Ficha del menú rápido, con pestañas: presentación, entrenamiento (EVs y naturaleza) y movimientos. Todo cabe en la propia ficha, sin menús aparte.
+        inline void drawCard(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, const ImVec2& pos, const ImVec2& size) {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            GuiCards::panel(dl, pos, ImVec2(pos.x + size.x, pos.y + size.y));
+            const OwnedPokemon* found = ownedAt(storage, selection);
+            const PokemonSpecies* species = found ? data.speciesById(found->speciesId) : nullptr;
+            if (!species) {
+                GuiCards::centeredText(dl, ImVec2(pos.x + size.x * 0.5f, pos.y + size.y * 0.5f), GuiStyle::MUTED, "Selecciona un pokémon", 0.95f);
+                return;
+            }
+            const OwnedPokemon owned = *found;
+            static constexpr const char* NAMES[3] = { "FICHA", "ENTRENAMIENTO", "MOVIMIENTOS" };
+            const float tabH = 40.0f, tabW = 190.0f;
+            for (int i = 0; i < 3; ++i) {
+                ImGui::SetCursorScreenPos(ImVec2(pos.x + 12.0f + static_cast<float>(i) * (tabW + 8.0f), pos.y + 8.0f));
+                ImGui::PushID(500 + i);
+                if (GuiCards::button("##tab", NAMES[i], ImVec2(tabW, tabH - 6.0f), true, tab == i ? IM_COL32(200, 70, 50, 255) : NEUTRAL)) { tab = i; MoveEditor::reset(); }
+                ImGui::PopID();
+            }
+            const ImVec2 area(pos.x, pos.y + tabH + 10.0f);
+            const float areaH = size.y - tabH - 10.0f;
+            if (tab == 0) {
+                drawDetail(data, storage, inventory, progress, area, ImVec2(DETAIL_WIDTH, areaH), true);
+                drawInfoColumn(data, storage, owned, *species, ImVec2(area.x + DETAIL_WIDTH + 24.0f, area.y + 8.0f), size.x - DETAIL_WIDTH - 48.0f, areaH);
+            } else if (tab == 1) StatEditor::content(dl, data, storage, selection.inTeam, selection.index, owned, species, area, size.x, areaH, true);
+            else MoveEditor::content(dl, data, storage, selection.inTeam, selection.index, owned, species, area, size.x, areaH, true);
+            ImGui::Dummy(ImVec2(0.0f, 0.0f));
+        }
     }
 
     // ESC o el botón de volver cierran la pantalla (vuelven a 'back'); con un pokémon en la mano, primero lo suelta.
     inline void render(GameState& state, GameState back, const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, InputDevice device, bool manage = false) {
         detail::manage = manage;
-        if (!manage) { detail::held.active = false; detail::selecting = false; }
+        if (!manage) detail::selecting = false; // (el arrastre del equipo sigue entre fotogramas)
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, 170));
 
         // La selección debe seguir apuntando a algo que existe.
@@ -551,18 +622,15 @@ namespace PokemonComponent {
         detail::drawTeam(data, storage, ImVec2(detail::MARGIN, top), height);
 
         const float boxX = detail::MARGIN + teamWidth + 36.0f;
-        const float boxWidth = screen.x - boxX - detail::DETAIL_WIDTH - detail::MARGIN - 28.0f;
         if (manage) {
+            const float boxWidth = screen.x - boxX - detail::DETAIL_WIDTH - detail::MARGIN - 28.0f;
             detail::drawBox(data, storage, ImVec2(boxX, top), ImVec2(boxWidth, height));
             detail::drawBar(data, storage, ImVec2(boxX, barY), boxWidth);
-        } else { // menú rápido: solo el equipo (los pokémon del PC se ven y se mueven desde la máquina del inicio)
-            GuiCards::panel(dl, ImVec2(boxX, top), ImVec2(boxX + boxWidth, top + height));
-            GuiCards::centeredText(dl, ImVec2(boxX + boxWidth * 0.5f, top + height * 0.42f), IM_COL32(255, 255, 255, 235), "Arrastra un pokémon sobre otro para cambiar el orden del equipo", 1.0f);
-            GuiCards::centeredText(dl, ImVec2(boxX + boxWidth * 0.5f, top + height * 0.42f + 30.0f), GuiStyle::MUTED, "Si cambia de sitio el que te acompaña, sale el que ocupa su posición", 0.85f);
-            GuiCards::centeredText(dl, ImVec2(boxX + boxWidth * 0.5f, top + height * 0.42f + 56.0f), GuiStyle::MUTED, "Los pokémon del PC se ven y se cambian desde la máquina del inicio", 0.85f);
+            detail::drawDetail(data, storage, inventory, progress, ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));
+        } else { // menú rápido: solo el equipo y, a su lado, la ficha con pestañas (los pokémon del PC se ven y se mueven desde la máquina del inicio)
+            const float cardWidth = (std::min)(screen.x - boxX - detail::MARGIN, 1250.0f);
+            detail::drawCard(data, storage, inventory, progress, ImVec2(boxX, top), ImVec2(cardWidth, height + detail::BAR_HEIGHT));
         }
-
-        detail::drawDetail(data, storage, inventory, progress, ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));
 
         const ImVec2 hint(detail::MARGIN + 300.0f, detail::MARGIN - 4.0f);
         if (!manage) GuiCards::text(dl, ImVec2(hint.x, hint.y + 4.0f), GuiStyle::MUTED, "Arrastra un pokémon sobre otro para reordenar el equipo", 0.9f);

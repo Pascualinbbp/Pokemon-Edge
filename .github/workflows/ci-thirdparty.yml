@@ -1,0 +1,56 @@
+name: Código de terceros
+
+# Compila SQLite e ImGui una sola vez y lo guarda en caché: solo se recompila si cambian sus ficheros descargados o las opciones de compilación.
+on:
+  workflow_call:
+
+jobs:
+  thirdparty:
+    runs-on: windows-latest
+    steps:
+      - name: 📥 Checkout Código
+        uses: actions/checkout@v4
+
+      - name: ⬇️ Bajar dependencias
+        uses: actions/download-artifact@v4
+        with:
+          name: dependencias
+          path: .
+
+      - name: 🔑 Clave de la caché
+        id: key
+        shell: pwsh
+        run: |
+          $hash = (Get-ChildItem app/utils/imgui, app/utils/sqlite -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Hash }) -join ""
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($hash + (Get-Content app/utils/core/imguiAssert.hpp -Raw) + (Get-Content .github/workflows/ci-thirdparty.yml -Raw))
+          $key = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)).Replace("-", "")
+          "key=$key" | Add-Content -Path $env:GITHUB_OUTPUT
+
+      - name: ♻️ Restaurar caché
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: thirdparty.lib
+          key: thirdparty-${{ steps.key.outputs.key }}
+
+      - name: 🔨 Compilar SQLite e ImGui
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
+          if not defined VS_PATH (
+            echo Error: No se encontro Visual Studio con las herramientas de C++.
+            exit /b 1
+          )
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          if not exist build\tp mkdir build\tp
+          dir /b /s app\utils\imgui\*.cpp > tp_sources.txt
+          cl.exe /nologo /MP /c /std:c++17 /EHsc /O2 /I . /FI app/utils/core/imguiAssert.hpp /I app/utils/sqlite /I app/utils/imgui /Fo:build\tp\ @tp_sources.txt app/utils/sqlite/sqlite3.c || exit /b 1
+          lib.exe /nologo /OUT:thirdparty.lib build\tp\*.obj || exit /b 1
+
+      - name: ⬆️ Subir la librería
+        uses: actions/upload-artifact@v4
+        with:
+          name: terceros
+          path: thirdparty.lib
+          retention-days: 1

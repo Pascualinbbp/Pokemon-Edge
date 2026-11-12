@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "crashScope.hpp"
 #include <exception>
 #include <string>
 #include <thread>
@@ -80,6 +81,12 @@ class CrashUtil {
         char text[1024];
         std::snprintf(text, sizeof(text), "[ERROR][CRASH] %s%s\n[ERROR][CRASH] Etapa: %s | %s\n", title, extra, s_stage.load() ? s_stage.load() : "?", s_detail);
         write(text);
+        write("[ERROR][CRASH] Funciones activas (de fuera hacia dentro, con la línea por la que iba cada una):\n");
+        for (int d = 0; d < CrashScope::depth && d < CrashScope::MAX; ++d) {
+            char line[200];
+            std::snprintf(line, sizeof(line), "[ERROR][CRASH]   > %s (línea %d)\n", CrashScope::names[d], CrashScope::lines[d]);
+            write(line);
+        }
         const unsigned next = s_noteNext.load(std::memory_order_relaxed);
         write("[ERROR][CRASH] Últimos hechos (del más antiguo al más reciente):\n");
         for (unsigned k = 0; k < NOTES; ++k) {
@@ -224,3 +231,4 @@ class CrashUtil {
     inline static char s_notes[NOTES][160] = {};
     inline static std::atomic<unsigned> s_noteNext{ 0 };
 };
+

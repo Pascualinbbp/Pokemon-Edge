@@ -44,6 +44,9 @@ class MoveDao {
             move->tagNames.push_back(tag->name);
             move->priority += tag->priority;
             if (tag->name == "Contacto") move->contact = true;
+            if (tag->name == "Todos los demás") move->scope = Move::Scope::ALL_OTHERS;
+            else if (tag->name == "Ambos rivales") move->scope = Move::Scope::FOES;
+            else if (tag->name == "Cualquier objetivo") move->scope = Move::Scope::ANY;
         }
         for (const auto& row : SqliteUtil::executeSelect("SELECT move_id, learn_tag_id FROM move_learn_tag;")) {
             if (Move* move = find(data, DaoRow::integer(row, "move_id"))) move->learnTags.push_back(DaoRow::integer(row, "learn_tag_id"));

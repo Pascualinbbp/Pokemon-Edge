@@ -1,0 +1,89 @@
+name: Dependencias
+
+# Descarga las dependencias de dependencies.json (nlohmann/json, stb, SQLite, ImGui) y las deja en un artefacto para el resto de trabajos.
+on:
+  workflow_call:
+
+jobs:
+  dependencies:
+    runs-on: windows-latest
+    steps:
+      - name: 📥 Checkout Código
+        uses: actions/checkout@v4
+
+      - name: 📥 Descargar Dependencias desde dependencies.json
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest es MUCHO más rápido sin barra de progreso
+
+          # Descarga con reintentos: GitHub y otros servidores devuelven a veces errores 5xx pasajeros.
+          function Get-File($uri, $out) {
+              for ($try = 1; $try -le 6; $try++) {
+                  try { Invoke-WebRequest -Uri $uri -OutFile $out -ErrorAction Stop; return }
+                  catch {
+                      Write-Host "[LOG] Intento $try/6 fallido para ${uri}: $($_.Exception.Message.Substring(0, [Math]::Min(120, $_.Exception.Message.Length)))"
+                      if ($try -eq 6) { throw }
+                      Start-Sleep -Seconds (5 * $try)
+                  }
+              }
+          }
+
+          if (-not (Test-Path "dependencies.json")) { throw "dependencies.json no existe en la raíz." }
+          $dep = Get-Content dependencies.json -Raw | ConvertFrom-Json
+
+          function Copy-Mappings($mappings) {
+              if (-not $mappings) { return }
+              foreach ($src in $mappings.PSObject.Properties.Name) {
+                  $dest = $mappings.$src
+                  $dir = Split-Path $dest
+                  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+                  Write-Host "[LOG] Copiando $src -> $dest"
+                  Copy-Item -Path $src -Destination $dest -Force
+              }
+          }
+
+          foreach ($f in $dep.files) {
+              Write-Host "[LOG] Archivo: $($f.url) -> $($f.dest)"
+              $dir = Split-Path $f.dest
+              if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+              Get-File $f.url $f.dest
+          }
+
+          foreach ($z in $dep.zips) {
+              Write-Host "[LOG] ZIP: $($z.url)"
+              Get-File $z.url "temp_dl.zip"
+              Expand-Archive -Path "temp_dl.zip" -DestinationPath $z.extract_path -Force
+              Copy-Mappings $z.mappings
+              Remove-Item "temp_dl.zip" -Force
+              Remove-Item $z.extract_path -Recurse -Force
+          }
+
+          foreach ($g in $dep.gits) {
+              Write-Host "[LOG] Git: $($g.url)"
+              if (Test-Path $g.temp_dir) { Remove-Item $g.temp_dir -Recurse -Force }
+              git clone --quiet --depth 1 $g.url $g.temp_dir
+              if ($LASTEXITCODE -ne 0) { throw "git clone falló: $($g.url)" }
+              Copy-Mappings $g.mappings
+              Remove-Item $g.temp_dir -Recurse -Force
+          }
+          Write-Host "[LOG] Dependencias listas."
+
+      - name: 📦 Reunir lo descargado (todo lo que no está en el repositorio)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path deps_out | Out-Null
+          $files = git ls-files --others --exclude-standard
+          foreach ($f in $files) {
+              if ($f -like "deps_out/*") { continue }
+              $dest = Join-Path "deps_out" $f
+              New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+              Copy-Item $f $dest -Force
+          }
+          Write-Host "[LOG] $((Get-ChildItem deps_out -Recurse -File).Count) ficheros de dependencias."
+
+      - name: ⬆️ Subir dependencias
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependencias
+          path: deps_out
+          retention-days: 1
