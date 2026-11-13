@@ -160,7 +160,7 @@ namespace GuiCards {
         const ImVec2 b(a.x + size.x, a.y + size.y);
         const bool clicked = ImGui::InvisibleButton(id, size) && enabled;
         const bool hovered = ImGui::IsItemHovered() && enabled;
-        dl->AddRectFilled(a, b, enabled ? (hovered ? withAlpha(fill, 255) : withAlpha(fill, 215)) : IM_COL32(70, 70, 80, 200), size.y * 0.5f);
+        dl->AddRectFilled(a, b, enabled ? (hovered ? withAlpha(fill, 255) : withAlpha(fill, 215)) : IM_COL32(70, 70, 80, 200), (std::min)(10.0f, size.y * 0.3f)); // esquinas suaves, nunca un óvalo
         centeredText(dl, ImVec2(a.x + size.x * 0.5f, a.y + size.y * 0.5f), IM_COL32(255, 255, 255, enabled ? 255 : 130), label, 0.95f);
         return clicked;
     }

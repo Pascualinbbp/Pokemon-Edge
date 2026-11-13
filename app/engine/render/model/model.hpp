@@ -1,4 +1,5 @@
 #pragma once
+#include <cstring>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -9,6 +10,7 @@
 #include "../../../utils/core/resourceUtil.hpp"
 #include "../../../utils/graphics/gltfUtil.hpp"
 #include "../../../utils/graphics/imageUtil.hpp"
+#include "../../../utils/graphics/skinUtil.hpp"
 #include "../../../utils/graphics/textureUtil.hpp"
 
 // Una pieza de un modelo: su malla, dónde está en el modelo y, si se mueve, cómo (pivote = origen del nodo, eje y ángulo máximo).
@@ -27,6 +29,49 @@ struct RenderModel {
     std::vector<ModelPart> parts;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> texture;
     DirectX::XMFLOAT3 boundsMin = {}, boundsMax = {};
+
+    // Modelos con huesos (una caña): su esqueleto, las mallas que mueve y las animaciones ya leídas. Sus mallas tienen el vértice dinámico y se
+    // reescriben con pose(); el estado de la última pose es compartido por todos los usos del modelo, por eso solo se debe dibujar uno a la vez.
+    struct SkinPart {
+        int part = 0;                      // índice en 'parts'
+        const GltfUtil::Primitive* source = nullptr;
+        int skin = 0;
+        std::vector<GpuVertex> base;       // vértices en reposo (conservan uv y tinte)
+    };
+    std::shared_ptr<GltfUtil::Document> skeleton;
+    std::vector<SkinPart> skinParts;
+    std::unordered_map<std::string, std::unique_ptr<SkinUtil::Clip>> clips; // nullptr si no existe
+    bool skinned() const { return skeleton && !skinParts.empty(); }
+
+    // Pone el modelo en el instante 'time' de 'clip' (nullptr: reposo). Con 'gatherLine' el hilo y el corcho que el clip mueve se recogen en la
+    // punta de la caña (el juego dibuja los suyos). 'tip' recibe la punta, en coordenadas del modelo.
+    bool pose(ID3D11DeviceContext* context, const SkinUtil::Clip* clip, float time, bool gatherLine, DirectX::XMFLOAT3* tip = nullptr) const {
+        if (!skinned() || !context) return false;
+        std::vector<DirectX::XMFLOAT4X4> worlds, matrices;
+        SkinUtil::worlds(*skeleton, clip, time, worlds);
+        SkinUtil::Split split;
+        DirectX::XMFLOAT3 gather = {};
+        const GltfUtil::Skin& firstSkin = skeleton->skins[skinParts.front().skin];
+        if (clip) split = SkinUtil::splitByPositionTrack(*skeleton, firstSkin, *clip);
+        if (split.valid() && firstSkin.joints[split.tip] >= 0) {
+            const DirectX::XMFLOAT4X4& w = worlds[static_cast<size_t>(firstSkin.joints[split.tip])];
+            gather = { w._41, w._42, w._43 };
+            if (tip) *tip = gather;
+        }
+        std::vector<GltfUtil::Vertex> moved;
+        for (const SkinPart& sp : skinParts) {
+            SkinUtil::skinMatrices(*skeleton, skeleton->skins[sp.skin], worlds, matrices);
+            SkinUtil::apply(*sp.source, matrices, moved, gatherLine && split.valid() ? &split : nullptr, &gather);
+            std::vector<GpuVertex> out = sp.base;
+            for (size_t v = 0; v < out.size() && v < moved.size(); ++v) { out[v].pos = moved[v].position; out[v].normal = moved[v].normal; }
+            D3D11_MAPPED_SUBRESOURCE mapped = {};
+            if (SUCCEEDED(context->Map(parts[sp.part].mesh.vertices.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+                std::memcpy(mapped.pData, out.data(), out.size() * sizeof(GpuVertex));
+                context->Unmap(parts[sp.part].mesh.vertices.Get(), 0);
+            }
+        }
+        return true;
+    }
 
     // Índice de la pieza con ese nombre (-1 si no existe).
     int part(const std::string& name) const {
@@ -69,15 +114,31 @@ class ModelCache {
         return result;
     }
 
+    // Animación 'clip' de un modelo con huesos (assets/models/<name>_<clip>.json); nullptr si no existe.
+    const SkinUtil::Clip* clip(const std::string& name, const std::string& clip) {
+        const auto found = m_models.find(name);
+        if (found == m_models.end() || !found->second) return nullptr;
+        RenderModel& model = *found->second;
+        const auto cached = model.clips.find(clip);
+        if (cached != model.clips.end()) return cached->second.get();
+        std::unique_ptr<SkinUtil::Clip> loaded;
+        if (const ResourceUtil::Blob blob = ResourceUtil::loadAsset(PathsUtil::modelClipPath(name, clip))) {
+            if (std::optional<SkinUtil::Clip> parsed = SkinUtil::parseClip(blob.data, blob.size)) loaded = std::make_unique<SkinUtil::Clip>(std::move(*parsed));
+        }
+        const SkinUtil::Clip* result = loaded.get();
+        model.clips[clip] = std::move(loaded);
+        return result;
+    }
+
     void clear() { m_models.clear(); }
 
     private:
-    static GpuMesh upload(ID3D11Device* device, const std::vector<GpuVertex>& vertices, const std::vector<uint32_t>& indices) {
+    static GpuMesh upload(ID3D11Device* device, const std::vector<GpuVertex>& vertices, const std::vector<uint32_t>& indices, bool dynamic = false) {
         GpuMesh mesh;
         mesh.stride = sizeof(GpuVertex);
         mesh.indexCount = static_cast<UINT>(indices.size());
         mesh.vertices = D3dUtil::createBuffer(device, static_cast<UINT>(vertices.size() * sizeof(GpuVertex)), D3D11_BIND_VERTEX_BUFFER,
-            vertices.data(), D3D11_USAGE_IMMUTABLE, "CreateBuffer (model vertices)");
+            vertices.data(), dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE, "CreateBuffer (model vertices)");
         if (vertices.size() <= 65535) {
             std::vector<uint16_t> narrow(indices.begin(), indices.end());
             mesh.indices = D3dUtil::createBuffer(device, static_cast<UINT>(narrow.size() * sizeof(uint16_t)), D3D11_BIND_INDEX_BUFFER,
@@ -98,6 +159,7 @@ class ModelCache {
         if (!document) return nullptr;
 
         auto model = std::make_unique<RenderModel>();
+        const auto shared = std::make_shared<GltfUtil::Document>(*document);
         std::vector<DirectX::XMFLOAT4X4> rest(document->nodes.size());
         DirectX::XMFLOAT3 lo = { 1.0e9f, 1.0e9f, 1.0e9f }, hi = { -1.0e9f, -1.0e9f, -1.0e9f };
         for (size_t i = 0; i < document->nodes.size(); ++i) {
@@ -117,15 +179,26 @@ class ModelCache {
                     lo = { (std::min)(lo.x, world.x), (std::min)(lo.y, world.y), (std::min)(lo.z, world.z) };
                     hi = { (std::max)(hi.x, world.x), (std::max)(hi.y, world.y), (std::max)(hi.z, world.z) };
                 }
+                const bool skinned = node.skin >= 0 && node.skin < static_cast<int>(shared->skins.size()) && primitive.skin.size() == primitive.vertices.size();
                 ModelPart part;
                 part.name = node.name;
-                part.mesh = upload(device, vertices, primitive.indices);
+                part.mesh = upload(device, vertices, primitive.indices, skinned);
                 part.rest = rest[i];
+                if (skinned) { // los vértices ya están en el espacio del modelo: la piel sustituye al nodo de la malla
+                    DirectX::XMStoreFloat4x4(&part.rest, DirectX::XMMatrixIdentity());
+                    RenderModel::SkinPart sp;
+                    sp.part = static_cast<int>(model->parts.size());
+                    sp.source = &shared->meshes[node.mesh][&primitive - document->meshes[node.mesh].data()];
+                    sp.skin = node.skin;
+                    sp.base = vertices;
+                    model->skinParts.push_back(std::move(sp));
+                }
                 part.joint = node.joint;
                 model->parts.push_back(std::move(part));
             }
         }
         if (model->parts.empty()) return nullptr;
+        if (!model->skinParts.empty()) model->skeleton = shared;
         model->boundsMin = lo;
         model->boundsMax = hi;
 

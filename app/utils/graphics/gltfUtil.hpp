@@ -25,9 +25,16 @@ namespace GltfUtil {
         DirectX::XMFLOAT2 uv;
     };
 
+    // Huesos que mueven un vértice (hasta cuatro) y cuánto pesa cada uno (suman 1). El índice es el de la lista de huesos de la piel.
+    struct SkinWeights {
+        uint16_t joint[4] = {};
+        float weight[4] = {};
+    };
+
     struct Primitive {
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
+        std::vector<SkinWeights> skin; // vacío si la malla no está atada a huesos
     };
 
     // Articulación de una pieza: gira sobre 'axis' (en el espacio local del nodo, pasando por su origen = el pivote) hasta 'maxAngle'.
@@ -37,10 +44,18 @@ namespace GltfUtil {
         bool valid = false;
     };
 
+    // Piel de una malla: sus huesos (índices en Document::nodes) y la inversa de su matriz en reposo (del modelo al hueso).
+    struct Skin {
+        std::vector<int> joints;
+        std::vector<DirectX::XMFLOAT4X4> inverseBind;
+    };
+
     struct Node {
         std::string name;
         int parent = -1;
         int mesh = -1;
+        int skin = -1;   // piel que usa su malla (-1 = ninguna)
+        int source = -1; // índice del nodo en el archivo
         DirectX::XMFLOAT4X4 local; // de este nodo a su padre (convención de DirectXMath: vector fila)
         Joint joint;
     };
@@ -48,6 +63,7 @@ namespace GltfUtil {
     struct Document {
         std::vector<Node> nodes;                       // el padre siempre aparece antes que sus hijos
         std::vector<std::vector<Primitive>> meshes;
+        std::vector<Skin> skins;
         std::vector<unsigned char> image;              // primera imagen incrustada (PNG o JPG), vacía si no hay
         int sceneNodeCount = 0;
     };
@@ -68,6 +84,7 @@ namespace GltfUtil {
             if (type == "VEC2") return 2;
             if (type == "VEC3") return 3;
             if (type == "VEC4") return 4;
+            if (type == "MAT4") return 16;
             return 0;
         }
 
@@ -126,6 +143,21 @@ namespace GltfUtil {
                 for (size_t i = 0; i < count; ++i) out.indices[i] = static_cast<uint32_t>(i);
             }
             out.indices.resize(out.indices.size() / 3 * 3);
+
+            std::vector<float> joints, weights;
+            int jc = 0, wc = 0;
+            if (attributes.contains("JOINTS_0") && attributes.contains("WEIGHTS_0") && readAccessor(doc, buffers, attributes["JOINTS_0"], joints, jc) && jc == 4 &&
+                readAccessor(doc, buffers, attributes["WEIGHTS_0"], weights, wc) && wc == 4 && joints.size() / 4 == count) {
+                const json& wa = doc["accessors"][attributes["WEIGHTS_0"].get<int>()];
+                const float scale = !wa.value("normalized", false) ? 1.0f : wa.value("componentType", 5126) == 5121 ? 1.0f / 255.0f : wa.value("componentType", 5126) == 5123 ? 1.0f / 65535.0f : 1.0f;
+                out.skin.resize(count);
+                for (size_t i = 0; i < count; ++i) {
+                    float total = 0.0f;
+                    for (int k = 0; k < 4; ++k) { out.skin[i].joint[k] = static_cast<uint16_t>(joints[i * 4 + k]); out.skin[i].weight[k] = weights[i * 4 + k] * scale; total += out.skin[i].weight[k]; }
+                    if (total > 1.0e-6f) for (int k = 0; k < 4; ++k) out.skin[i].weight[k] /= total;
+                    else { out.skin[i].weight[0] = 1.0f; }
+                }
+            }
 
             // Cambio de mano: se invierte el orden de cada triángulo.
             for (size_t i = 0; i + 2 < out.indices.size(); i += 3) std::swap(out.indices[i + 1], out.indices[i + 2]);
@@ -188,6 +220,8 @@ namespace GltfUtil {
             node.name = source.value("name", std::string());
             node.parent = parent;
             node.mesh = source.value("mesh", -1);
+            node.skin = source.value("skin", -1);
+            node.source = index;
             node.local = localMatrix(source);
             node.joint = readJoint(source);
             const int self = static_cast<int>(out.nodes.size());
@@ -237,6 +271,31 @@ namespace GltfUtil {
         }
         for (const int root : roots) detail::addNode(doc, root, -1, out);
         out.sceneNodeCount = static_cast<int>(out.nodes.size());
+
+        // Pieles: los huesos se traducen del índice del archivo al del documento y las matrices se reflejan como las de los nodos.
+        if (doc.contains("skins")) {
+            const DirectX::XMMATRIX mirror = DirectX::XMMatrixScaling(-1.0f, 1.0f, 1.0f);
+            for (const detail::json& source : doc["skins"]) {
+                Skin skin;
+                std::vector<float> bind;
+                int bc = 0;
+                const bool hasBind = source.contains("inverseBindMatrices") && detail::readAccessor(doc, buffers, source["inverseBindMatrices"].get<int>(), bind, bc) && bc == 16;
+                for (const detail::json& joint : source.value("joints", detail::json::array())) {
+                    int found = -1;
+                    for (size_t n = 0; n < out.nodes.size(); ++n) if (out.nodes[n].source == joint.get<int>()) { found = static_cast<int>(n); break; }
+                    skin.joints.push_back(found);
+                    DirectX::XMFLOAT4X4 m;
+                    DirectX::XMStoreFloat4x4(&m, DirectX::XMMatrixIdentity());
+                    const size_t k = skin.joints.size() - 1;
+                    if (hasBind && (k + 1) * 16 <= bind.size()) {
+                        std::memcpy(&m, bind.data() + k * 16, sizeof(m)); // columnas de glTF = filas de DirectXMath
+                        DirectX::XMStoreFloat4x4(&m, mirror * DirectX::XMLoadFloat4x4(&m) * mirror);
+                    }
+                    skin.inverseBind.push_back(m);
+                }
+                out.skins.push_back(std::move(skin));
+            }
+        }
 
         if (doc.contains("images") && !doc["images"].empty() && doc["images"][0].contains("bufferView")) {
             const detail::json& view = doc["bufferViews"][doc["images"][0]["bufferView"].get<int>()];

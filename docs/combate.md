@@ -51,3 +51,6 @@ Al empezar un combate por turnos el jugador y el entrenador rival se colocan fre
 
 ## Crashes
 Si el juego falla, `app/logs/app.log` lleva las funciones activas con la línea por la que iba cada una (`CRASH_SCOPE()` / `CRASH_AT()` en `utils/core/crashScope.hpp`), la etapa, los últimos hechos y la dirección. No hacen falta símbolos.
+
+## Medallas y niveles
+Cada gimnasio derrotado da una medalla distinta y sube el nivel máximo de los pokémon (tope 100, repartido entre las 8 medallas). Los entrenadores usan niveles aleatorios entre (nivel máximo − 10) y (nivel máximo + 5), y cada pokémon de uno ±1 sobre ese general.

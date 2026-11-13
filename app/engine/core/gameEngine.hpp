@@ -57,7 +57,7 @@ class GameEngine {
         scene.storage.restore(save.team, save.pc, save.autoReleaseRank, save.activeIndex);
         scene.storage.restoreDex(save.dexSeen, save.dexCaught);
         scene.storage.dexProgress.restore(save.dexProgress);
-        scene.progress.restore(save.playerLevel, save.playerXp, save.badges);
+        scene.progress.restore(save.playerLevel, save.playerXp, save.badgeMask);
         return scene;
     }
 
@@ -79,6 +79,7 @@ class GameEngine {
         save.playerLevel = m_scene.progress.level();
         save.playerXp = m_scene.progress.xp();
         save.badges = m_scene.progress.badges();
+        save.badgeMask = m_scene.progress.badgeMask();
         save.summary = { {}, save.playerLevel, save.badges, m_scene.inventory.money(), m_scene.storage.dexCount(PokemonStorage::DEX_CAUGHT) };
         for (const OwnedPokemon& owned : m_scene.storage.team()) save.summary.team.push_back({ owned.speciesId, owned.level, owned.shiny });
         return save;

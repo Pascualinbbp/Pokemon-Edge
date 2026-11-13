@@ -37,7 +37,7 @@ namespace PlayerComponent {
         GuiCards::text(dl, ImVec2(pos.x + 24.0f, pos.y + 118.0f), IM_COL32(255, 255, 255, 255), "Medallas", 1.1f);
         for (int i = 0; i < PlayerProgress::MAX_BADGES; ++i) {
             const ImVec2 c(pos.x + 44.0f + i * ((width - 88.0f) / (PlayerProgress::MAX_BADGES - 1)), pos.y + 178.0f);
-            const bool have = i < progress.badges();
+            const bool have = progress.hasBadge(i);
             dl->AddCircleFilled(c, 20.0f, have ? IM_COL32(250, 205, 70, 255) : IM_COL32(255, 255, 255, 30), 32);
             dl->AddCircle(c, 20.0f, have ? IM_COL32(255, 240, 170, 255) : IM_COL32(255, 255, 255, 70), 32, 2.0f);
         }

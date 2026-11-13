@@ -17,6 +17,7 @@ struct SaveSummary {
     std::vector<SaveTeamMember> team;
     int playerLevel = 1;
     int badges = 0;
+    unsigned badgeMask = 0; // qué medallas se tienen (bit = id de la medalla)
     int money = 0;
     int dexCaught = 0;
 };

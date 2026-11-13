@@ -59,6 +59,7 @@ class SaveManager {
         j["player"]["level"] = data.playerLevel;
         j["player"]["xp"] = data.playerXp;
         j["player"]["badges"] = data.badges;
+        j["player"]["badgeMask"] = data.badgeMask;
         json team = json::array();
         for (const SaveTeamMember& member : data.summary.team) team.push_back({ { "id", member.speciesId }, { "level", member.level }, { "shiny", member.shiny } });
         j["summary"] = { { "team", team }, { "level", data.summary.playerLevel }, { "badges", data.summary.badges }, { "money", data.summary.money }, { "caught", data.summary.dexCaught } };
@@ -96,6 +97,7 @@ class SaveManager {
         data.playerLevel = JsonUtil::find<int>(j, { "player", "level" }).value_or(1);
         data.playerXp = JsonUtil::find<int>(j, { "player", "xp" }).value_or(0);
         data.badges = JsonUtil::find<int>(j, { "player", "badges" }).value_or(0);
+        data.badgeMask = JsonUtil::find<unsigned>(j, { "player", "badgeMask" }).value_or((1u << data.badges) - 1u); // partidas antiguas: las primeras medallas
         return data;
     }
 

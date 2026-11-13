@@ -12,7 +12,7 @@ class Fishing {
     static constexpr float CAST_MIN = 1.0f;       // alcance del lanzamiento (m): hay que estar junto al agua
     static constexpr float CAST_MAX = 5.5f;
     static constexpr float MIN_DEPTH = 1.0f;      // el corcho solo cae donde el agua tiene al menos esta profundidad
-    static constexpr float CAST_TIME = 0.8f;      // lo que tarda el corcho en caer (la animación de lanzar)
+    static constexpr float CAST_TIME = 1.4f;      // lo que tarda el corcho en caer (la animación de lanzar de la caña, acelerada)
     static constexpr float WAIT_MIN = 3.0f;       // espera hasta la picada (se divide por la velocidad de la caña)
     static constexpr float WAIT_MAX = 8.0f;
     static constexpr float BITE_WINDOW = 1.3f;    // tiempo para recoger cuando pica
@@ -26,6 +26,7 @@ class Fishing {
     bool active() const { return m_phase != Phase::IDLE; }
     bool hooked() const { return m_phase == Phase::HOOKED; }
     const DirectX::XMFLOAT3& bobber() const { return m_bobber; }
+    float phaseTime() const { return m_timer; }   // segundos en la fase actual
     float biteProgress() const { return m_phase == Phase::BITING ? m_timer / BITE_WINDOW : 0.0f; }
 
     // Punto de agua delante del jugador donde cae el corcho; false si no hay agua suficiente a su alcance.

@@ -64,7 +64,8 @@ namespace {
     constexpr float kWaterFogDensity = 0.07f;
     constexpr float kOceanHalf = 1500.0f;
     constexpr float kHip = 0.62f;               // altura de la cadera del personaje
-    constexpr float ROD_LENGTH = 1.8f;          // largo de la caña
+    constexpr float ROD_LENGTH = 1.8f;          // largo de la caña (dibujo sencillo, sin modelo 3D)
+    constexpr float HOOK_ANIM_TIME = 1.5f;      // lo que dura la animación de recoger la caña con el pokémon enganchado
     constexpr float kShadowNormalOffset = 0.05f; // evita el moteado en superficies casi paralelas a la luz
     constexpr float kShadowDepthBias = 0.0001f;
 
@@ -1159,14 +1160,57 @@ void Renderer3D::addPlayer(const Scene& scene) {
 
     if (pose.holding != PlayerAction::NONE) {
         const XMMATRIX hand = XMMatrixRotationX(-pose.toolTilt) * XMMatrixTranslation(0.0f, -ARM, 0.0f) * rightArm; // marco de la mano: -y sigue la dirección del brazo
-        addTool(pose.holding, hand);
+        XMFLOAT3 tip = {};
+        bool tipKnown = false;
+        const Scene::HeldTool held = scene.heldTool(pose.holding);
+        if (held.level < 1 || !addToolModel(scene, pose.holding, held.model, hand, tip, tipKnown)) addTool(pose.holding, hand); // sin su modelo 3D, el dibujo sencillo
         addPotionFx(scene, hand);
         if (pose.holding == PlayerAction::FISH) {
-            XMFLOAT3 tip;
-            XMStoreFloat3(&tip, XMVector3TransformCoord(XMVectorSet(0.0f, -ROD_LENGTH, 0.0f, 1.0f), hand));
+            if (!tipKnown) XMStoreFloat3(&tip, XMVector3TransformCoord(XMVectorSet(0.0f, -ROD_LENGTH, 0.0f, 1.0f), hand));
             addFishingLine(scene, tip);
         }
     }
+}
+
+// Modelo 3D de la herramienta en la mano (assets/models/items/herramientas/<id>_<nivel>.glb). Las hachas y los picos son estáticos; la caña tiene
+// huesos y cada fase de la pesca reproduce su animación (<modelo>_lanzar/picar/recoger.json) ajustada a lo que dura esa fase. Con la línea echada
+// el hilo y el corcho del modelo se recogen en la punta: los dibuja el juego en el agua. 'tip' recibe la punta de la caña en el mundo.
+// Devuelve false si el modelo no existe.
+bool Renderer3D::addToolModel(const Scene& scene, PlayerAction action, const std::string& name, CXMMATRIX hand, XMFLOAT3& tip, bool& tipKnown) {
+    CRASH_SCOPE();
+    const RenderModel* model = m_models.get(m_device, name, false);
+    if (!model) return false;
+    const bool rod = action == PlayerAction::FISH;
+    // Del modelo (mango en el origen, cabeza arriba; la caña apunta a +x y arriba) a la mano (-y es el brazo, +z delante).
+    const XMMATRIX orient = rod ? XMMATRIX(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f), XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f))
+                                : XMMATRIX(XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f), XMVectorSet(-1.0f, 0.0f, 0.0f, 0.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f));
+    const XMMATRIX grip = rod ? XMMatrixTranslation(0.30f, -0.05f, 0.0f) : XMMatrixTranslation(0.0f, -0.12f, 0.0f); // por dónde se agarra
+    const XMMATRIX world = grip * orient * hand;
+
+    XMFLOAT3 local = { model->boundsMax.x, model->boundsMax.y, 0.0f }; // punta aproximada si no hay animación
+    if (model->skinned()) {
+        const Fishing& fishing = scene.fishing;
+        const char* clipName = nullptr;
+        float fraction = 0.0f;
+        switch (fishing.phase()) {
+            case Fishing::Phase::CASTING: clipName = "lanzar";  fraction = fishing.phaseTime() / Fishing::CAST_TIME; break;
+            case Fishing::Phase::WAITING: clipName = "lanzar";  fraction = 1.0f; break;
+            case Fishing::Phase::BITING:  clipName = "picar";   fraction = fishing.phaseTime() / Fishing::BITE_WINDOW; break;
+            case Fishing::Phase::HOOKED:  clipName = "recoger"; fraction = fishing.phaseTime() / HOOK_ANIM_TIME; break;
+            default: break;
+        }
+        const SkinUtil::Clip* clip = clipName ? m_models.clip(name, clipName) : nullptr;
+        XMFLOAT3 found = {};
+        const float time = clip ? (std::clamp)(fraction, 0.0f, 1.0f) * clip->duration : 0.0f;
+        model->pose(m_context, clip, time, fishing.active(), &found);
+        if (clip && fishing.active() && (found.x != 0.0f || found.y != 0.0f || found.z != 0.0f)) local = found;
+    }
+    if (rod) {
+        XMStoreFloat3(&tip, XMVector3TransformCoord(XMLoadFloat3(&local), world));
+        tipKnown = true;
+    }
+    addModel(*model, world, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
+    return true;
 }
 
 // La herramienta en la mano (marco: el origen es la mano y -y apunta hacia donde apunta el brazo).
@@ -2121,6 +2165,7 @@ void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Light
 void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int width, int height) {
     CRASH_SCOPE();
     if (width <= 0 || height <= 0) return;
+    m_context = context; // los modelos con huesos reescriben sus vértices al colocarlos (collect)
 
     if (!m_worldBuilt || m_worldSeed != scene.habitats.seed()) {
         m_terrain = createTerrain(m_device, scene.habitats, scene.world, scene.data());

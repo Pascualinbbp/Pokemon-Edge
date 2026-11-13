@@ -40,8 +40,8 @@ namespace MoveEditor {
             slotA[i] = ImVec2(o.x + PAD, y);
             slotB[i] = ImVec2(o.x + PAD + COL, y + CARD_H);
             ImGui::SetCursorScreenPos(slotA[i]);
-            ImGui::PushID(i);
-            if (ImGui::InvisibleButton("##slot", ImVec2(COL, CARD_H))) detail::slot = i;
+            ImGui::PushID(1000 + i);
+            if (ImGui::InvisibleButton("##moveSlot", ImVec2(COL, CARD_H))) detail::slot = i;
             const bool hovered = ImGui::IsItemHovered();
             if (move && detail::drag.kind == 0 && ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f)) detail::drag = { 1, i, move->id };
             ImGui::PopID();
@@ -68,7 +68,7 @@ namespace MoveEditor {
             const Move* move = data.move(owned.unlocked[i]);
             if (!move) continue;
             const ImVec2 a = ImGui::GetCursorScreenPos();
-            ImGui::PushID(static_cast<int>(i));
+            ImGui::PushID(2000 + static_cast<int>(i));
             ImGui::InvisibleButton("##unlockedMove", ImVec2(rw - 10.0f, 56.0f));
             const bool hovered = ImGui::IsItemHovered();
             if (detail::drag.kind == 0 && ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f)) detail::drag = { 2, -1, move->id };

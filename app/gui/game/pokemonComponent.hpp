@@ -70,6 +70,7 @@ namespace PokemonComponent {
         inline bool editingStats = false;        // editor de EVs y naturaleza abierto para el pokémon seleccionado (solo en el PC)
         inline int tab = 0;                      // ficha del menú rápido: 0 presentación, 1 entrenamiento (EVs y naturaleza), 2 movimientos
         inline float wrapWidth = DETAIL_WIDTH - 32.0f; // ancho de línea de las habilidades
+        inline float heldNotice = 0.0f;                // hasta cuándo se ve el aviso de que no hay objetos equipables
 
         inline void select(const Place& place) {
             selection = place;
@@ -357,7 +358,7 @@ namespace PokemonComponent {
         // Gráfico hexagonal: estadísticas base (azul) y, encima, lo que suman sus IV y EVs (naranja). En cada vértice: nombre, base y
         // estadística real (con nivel, IV, EVs y naturaleza), y el IV actual / tope con el que salió. Las vitaminas y chapas se usan desde la mochila.
         inline void drawStats(const GameData& data, PokemonStorage& storage, Inventory& inventory, const OwnedPokemon& owned,
-                              const PokemonSpecies& species, const ImVec2& area, float avail) {
+                              const PokemonSpecies& species, const ImVec2& area, float avail, float width = DETAIL_WIDTH - 32.0f) {
             constexpr int ORDER[6] = { 0, 1, 3, 5, 4, 2 }; // vértices de arriba en sentido horario (índices de BaseStats)
             constexpr float PI = 3.14159265f;
             constexpr float BLOCK_W = 96.0f, BLOCK_H = 50.0f;
@@ -367,7 +368,7 @@ namespace PokemonComponent {
                 grown[i] = static_cast<float>(species.stats.at(ORDER[i])) / MAX_STAT + static_cast<float>(owned.ivs[ORDER[i]] + owned.evs[ORDER[i]] / 4) / (2.0f * MAX_STAT);
             }
             const float radius = (std::clamp)((avail - 2.0f * BLOCK_H - 16.0f) * 0.5f, 34.0f, 86.0f);
-            const ImVec2 center(area.x + (DETAIL_WIDTH - 32.0f) * 0.5f, area.y + BLOCK_H + 8.0f + radius);
+            const ImVec2 center(area.x + width * 0.5f, area.y + BLOCK_H + 8.0f + radius);
             ImDrawList* dl = ImGui::GetWindowDrawList();
             GuiCards::radar(dl, center, radius, base, GuiStyle::ACCENT, &grown, IM_COL32(255, 160, 40, 255));
 
@@ -532,69 +533,147 @@ namespace PokemonComponent {
             ImGui::Dummy(ImVec2(0.0f, 0.0f));
         }
 
-        // Columna de datos de la pestaña de presentación: descripción, habilidad del mundo, habilidades (las que no tiene no se muestran), naturaleza y EVs.
-        inline void drawInfoColumn(const GameData& data, PokemonStorage& storage, const OwnedPokemon& owned, const PokemonSpecies& species, const ImVec2& pos, float width, float height) {
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            const float saved = wrapWidth;
-            wrapWidth = width;
-            ImGui::SetCursorScreenPos(pos);
-            ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
-            ImGui::PushTextWrapPos(pos.x + width - ImGui::GetWindowPos().x);
-            ImGui::TextUnformatted(species.description.c_str());
-            ImGui::PopTextWrapPos();
-            ImGui::PopStyleColor();
-            ImGui::SetCursorScreenPos(ImVec2(pos.x, ImGui::GetCursorScreenPos().y + 14.0f));
-            worldSkillLine(dl, data, species, true);
-            if (const Ability* active = data.ability(species.abilityId)) abilityLine(dl, active, "Activa", IM_COL32(190, 80, 60, 255), true);
-            if (species.passiveId >= 0) if (const Ability* passive = data.ability(species.passiveId)) abilityLine(dl, passive, "Pasiva", IM_COL32(130, 80, 190, 255), true);
-            wrapWidth = saved;
-
-            float y = ImGui::GetCursorScreenPos().y + 10.0f;
-            if (const Nature* nature = data.nature(owned.nature)) {
-                char text[96];
-                if (nature->neutral()) std::snprintf(text, sizeof(text), "Naturaleza: %s (neutra)", nature->name.c_str());
-                else std::snprintf(text, sizeof(text), "Naturaleza: %s  (+%s  -%s)", nature->name.c_str(), BaseStats::name(nature->increased), BaseStats::name(nature->decreased));
-                GuiCards::text(dl, ImVec2(pos.x, y), IM_COL32(255, 255, 255, 240), text, 1.0f);
-                y += 30.0f;
-            }
-            GuiCards::text(dl, ImVec2(pos.x, y), GuiStyle::MUTED, "EVs repartidos", 0.85f);
-            y += 24.0f;
-            const float cell = (std::min)(130.0f, width / 3.0f);
-            for (int i = 0; i < 6; ++i) {
-                const int stat = StatEditor::detail::ORDER[i];
-                char text[48];
-                std::snprintf(text, sizeof(text), "%s %d", BaseStats::name(stat), owned.evs[static_cast<size_t>(stat)]);
-                GuiCards::text(dl, ImVec2(pos.x + static_cast<float>(i % 3) * cell, y + static_cast<float>(i / 3) * 24.0f), owned.evs[static_cast<size_t>(stat)] > 0 ? IM_COL32(255, 190, 90, 255) : IM_COL32(200, 200, 215, 200), text, 0.9f);
-            }
-            if (y + 60.0f > pos.y + height) return;
+        // Letra del potencial en un círculo del color de su rango (sin escribir "potencial").
+        inline void potentialBadge(ImDrawList* dl, const ImVec2& c, float r, const OwnedPokemon& owned) {
+            const bool known = owned.analyzed;
+            const IvRules::Rank rank = known ? IvRules::rank(owned.ivCaps) : IvRules::Rank::D;
+            dl->AddCircleFilled(c, r, known ? GuiCards::rankColor(rank) : IM_COL32(90, 90, 100, 255), 32);
+            dl->AddCircle(c, r, IM_COL32(255, 255, 255, 200), 32, 2.0f);
+            GuiCards::centeredText(dl, c, IM_COL32(255, 255, 255, 255), known ? IvRules::label(rank) : "?", 1.0f);
         }
 
-        // Ficha del menú rápido, con pestañas: presentación, entrenamiento (EVs y naturaleza) y movimientos. Todo cabe en la propia ficha, sin menús aparte.
+        // Botón "+" del objeto equipable (en el límite entre los datos y las estadísticas): sin objeto muestra un "+", con objeto solo su icono.
+        // Al pulsarlo se elige entre los objetos equipables de la mochila; si no hay ninguno solo avisa.
+        inline void drawHeldSlot(ImDrawList* dl, const GameData& data, PokemonStorage& storage, Inventory& inventory, const OwnedPokemon& owned, const ImVec2& c) {
+            constexpr float R = 24.0f;
+            const HeldItem* held = storage.heldOf(owned);
+            ImGui::SetCursorScreenPos(ImVec2(c.x - R, c.y - R));
+            const bool clicked = ImGui::InvisibleButton("##heldSlot", ImVec2(R * 2.0f, R * 2.0f));
+            const bool hovered = ImGui::IsItemHovered();
+            dl->AddCircleFilled(c, R, hovered ? IM_COL32(60, 64, 90, 255) : IM_COL32(34, 36, 52, 255), 32);
+            dl->AddCircle(c, R, IM_COL32(190, 195, 220, 255), 32, 2.0f);
+            if (held) {
+                ItemIcon::held(dl, c, R - 5.0f, *held);
+                if (hovered) ImGui::SetTooltip("%s\n%s", held->name.c_str(), held->description.c_str());
+            } else GuiCards::centeredText(dl, c, IM_COL32(255, 255, 255, 255), "+", 1.6f);
+            bool any = false;
+            for (const Item& item : data.items) any = any || (ItemUse::isHeld(item) && inventory.count(item.id) > 0);
+            if (clicked) {
+                if (any || held) ImGui::OpenPopup("##heldChooser");
+                else heldNotice = static_cast<float>(ImGui::GetTime()) + 2.5f;
+            }
+            if (static_cast<float>(ImGui::GetTime()) < heldNotice) GuiCards::centeredText(dl, ImVec2(c.x, c.y + R + 14.0f), IM_COL32(255, 120, 110, 255), "No tienes objetos equipables", 0.8f);
+            ImGui::SetNextWindowPos(ImVec2(c.x + R + 8.0f, c.y - R));
+            if (ImGui::BeginPopup("##heldChooser")) {
+                for (const Item& item : data.items) {
+                    if (!ItemUse::isHeld(item) || inventory.count(item.id) <= 0) continue;
+                    const HeldItem* type = data.held(item.id);
+                    char label[96];
+                    std::snprintf(label, sizeof(label), "      %s  x%d", data.itemTitle(item, 1).c_str(), inventory.count(item.id));
+                    const ImVec2 at = ImGui::GetCursorScreenPos();
+                    if (ImGui::Selectable(label, held && type && held->id == type->id)) { message = ItemUse::equip(data, storage, inventory, item, selection); ImGui::CloseCurrentPopup(); }
+                    if (type) ItemIcon::held(ImGui::GetWindowDrawList(), ImVec2(at.x + 12.0f, at.y + 9.0f), 8.0f, *type);
+                }
+                if (held && ImGui::Selectable("Quitar el objeto")) { message = ItemUse::unequip(data, storage, inventory, selection); ImGui::CloseCurrentPopup(); }
+                ImGui::EndPopup();
+            }
+        }
+
+        // Ficha del menú rápido. Pestañas fuera del recuadro, cada una con el suyo (la elegida se ve resaltada).
+        // FICHA: sprite, nombre, tipos, nivel y PS; potencial (esquina izquierda) y pokéball de captura (esquina derecha); descripción y habilidades;
+        // estadísticas base a la derecha; EVs y naturalezas debajo. MOVIMIENTOS: reordenar y sustituir arrastrando.
         inline void drawCard(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, const ImVec2& pos, const ImVec2& size) {
+            (void)progress;
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            GuiCards::panel(dl, pos, ImVec2(pos.x + size.x, pos.y + size.y));
+            static constexpr const char* NAMES[2] = { "FICHA", "MOVIMIENTOS" };
+            const float tabH = 44.0f, tabW = 190.0f, tabGap = 10.0f;
+            for (int i = 0; i < 2; ++i) {
+                const ImVec2 a(pos.x + static_cast<float>(i) * (tabW + tabGap), pos.y), b(a.x + tabW, a.y + tabH);
+                ImGui::SetCursorScreenPos(a);
+                ImGui::PushID(500 + i);
+                if (ImGui::InvisibleButton("##tab", ImVec2(tabW, tabH))) { tab = i; MoveEditor::reset(); }
+                const bool hovered = ImGui::IsItemHovered();
+                ImGui::PopID();
+                const bool selected = tab == i;
+                dl->AddRectFilled(a, b, selected ? IM_COL32(200, 70, 50, 255) : hovered ? IM_COL32(52, 55, 78, 255) : IM_COL32(30, 32, 46, 235), 10.0f);
+                dl->AddRect(a, b, selected ? IM_COL32(255, 215, 90, 255) : IM_COL32(110, 115, 140, 255), 10.0f, 0, selected ? 3.0f : 1.5f);
+                GuiCards::centeredText(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), IM_COL32(255, 255, 255, selected ? 255 : 190), NAMES[i], 1.0f);
+            }
+            const ImVec2 card(pos.x, pos.y + tabH + 10.0f);
+            const ImVec2 cardSize(size.x, size.y - tabH - 10.0f);
+            GuiCards::panel(dl, card, ImVec2(card.x + cardSize.x, card.y + cardSize.y));
             const OwnedPokemon* found = ownedAt(storage, selection);
             const PokemonSpecies* species = found ? data.speciesById(found->speciesId) : nullptr;
             if (!species) {
-                GuiCards::centeredText(dl, ImVec2(pos.x + size.x * 0.5f, pos.y + size.y * 0.5f), GuiStyle::MUTED, "Selecciona un pokémon", 0.95f);
+                GuiCards::centeredText(dl, ImVec2(card.x + cardSize.x * 0.5f, card.y + cardSize.y * 0.5f), GuiStyle::MUTED, "Selecciona un pokémon", 0.95f);
+                ImGui::Dummy(ImVec2(0.0f, 0.0f));
                 return;
             }
             const OwnedPokemon owned = *found;
-            static constexpr const char* NAMES[3] = { "FICHA", "ENTRENAMIENTO", "MOVIMIENTOS" };
-            const float tabH = 40.0f, tabW = 190.0f;
-            for (int i = 0; i < 3; ++i) {
-                ImGui::SetCursorScreenPos(ImVec2(pos.x + 12.0f + static_cast<float>(i) * (tabW + 8.0f), pos.y + 8.0f));
-                ImGui::PushID(500 + i);
-                if (GuiCards::button("##tab", NAMES[i], ImVec2(tabW, tabH - 6.0f), true, tab == i ? IM_COL32(200, 70, 50, 255) : NEUTRAL)) { tab = i; MoveEditor::reset(); }
-                ImGui::PopID();
+            if (tab == 1) {
+                MoveEditor::content(dl, data, storage, selection.inTeam, selection.index, owned, species, card, cardSize.x, cardSize.y, true);
+                ImGui::Dummy(ImVec2(0.0f, 0.0f));
+                return;
             }
-            const ImVec2 area(pos.x, pos.y + tabH + 10.0f);
-            const float areaH = size.y - tabH - 10.0f;
-            if (tab == 0) {
-                drawDetail(data, storage, inventory, progress, area, ImVec2(DETAIL_WIDTH, areaH), true);
-                drawInfoColumn(data, storage, owned, *species, ImVec2(area.x + DETAIL_WIDTH + 24.0f, area.y + 8.0f), size.x - DETAIL_WIDTH - 48.0f, areaH);
-            } else if (tab == 1) StatEditor::content(dl, data, storage, selection.inTeam, selection.index, owned, species, area, size.x, areaH, true);
-            else MoveEditor::content(dl, data, storage, selection.inTeam, selection.index, owned, species, area, size.x, areaH, true);
+
+            const float topH = 262.0f, leftW = cardSize.x * 0.5f;
+            const ImU32 LineColor = IM_COL32(255, 255, 255, 45);
+            char text[96];
+            // Sprite y las dos filas de datos.
+            ItemIcon::creature(dl, ImVec2(card.x + 96.0f, card.y + 112.0f), 58.0f, species->id);
+            const float rowX = card.x + 184.0f;
+            const std::string name = title(*species, owned);
+            GuiCards::text(dl, ImVec2(rowX, card.y + 34.0f), IM_COL32(255, 255, 255, 255), name.c_str(), 1.4f);
+            float ix = rowX + GuiCards::textWidth(name.c_str(), 1.4f) + 22.0f;
+            for (const int typeId : species->types) if (const PokemonType* type = data.type(typeId)) { TypeIcons::draw(dl, ImVec2(ix, card.y + 46.0f), 13.0f, *type); ix += 32.0f; }
+            std::snprintf(text, sizeof(text), "Nv. %d", owned.level);
+            GuiCards::text(dl, ImVec2(ix + 10.0f, card.y + 36.0f), IM_COL32(255, 255, 255, 235), text, 1.1f);
+            {
+                const int maxHp = storage.maxHp(owned), hp = storage.hpOf(owned);
+                const ImVec2 bar(rowX, card.y + 92.0f);
+                const float barW = leftW - (rowX - card.x) - 24.0f;
+                dl->AddRectFilled(bar, ImVec2(bar.x + barW, bar.y + 24.0f), IM_COL32(0, 0, 0, 130), 6.0f);
+                const float f = storage.hpFraction(owned);
+                if (f > 0.0f) dl->AddRectFilled(bar, ImVec2(bar.x + barW * f, bar.y + 24.0f), f > 0.5f ? IM_COL32(90, 210, 110, 255) : f > 0.2f ? IM_COL32(235, 200, 60, 255) : IM_COL32(230, 70, 70, 255), 6.0f);
+                std::snprintf(text, sizeof(text), hp > 0 ? "PS %d / %d" : "PS 0 / %d  (debilitado)", hp > 0 ? hp : maxHp, maxHp);
+                GuiCards::text(dl, ImVec2(bar.x + 10.0f, bar.y + 3.0f), IM_COL32(255, 255, 255, 245), text, 0.9f);
+            }
+            // Esquinas: potencial (izquierda) y pokéball con la que se capturó (derecha).
+            potentialBadge(dl, ImVec2(card.x + 32.0f, card.y + 32.0f), 20.0f, owned);
+            if (const PokeballType* ball = data.ball(owned.ballId)) ItemIcon::ball(dl, ImVec2(card.x + cardSize.x - 32.0f, card.y + 32.0f), 16.0f, PokeballStyle::look(ball->id));
+
+            // Descripción y habilidades (centradas), bajo el sprite y los PS.
+            const float textX = card.x + 24.0f, textW = leftW - 48.0f;
+            ImGui::SetCursorScreenPos(ImVec2(textX, card.y + 186.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
+            ImGui::PushTextWrapPos(textX + textW - ImGui::GetWindowPos().x);
+            ImGui::TextUnformatted(species->description.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            {
+                const Ability* active = data.ability(species->abilityId);
+                const Ability* passive = species->passiveId >= 0 ? data.ability(species->passiveId) : nullptr;
+                const float ay = card.y + topH - 24.0f, cx = card.x + leftW * 0.5f;
+                std::string a = active ? (passive ? "Habilidad activa: " : "Habilidad: ") + active->name : std::string();
+                std::string b = passive ? (active ? "Habilidad pasiva: " : "Habilidad: ") + passive->name : std::string();
+                const float wa = a.empty() ? 0.0f : GuiCards::textWidth(a.c_str(), 0.95f), wb = b.empty() ? 0.0f : GuiCards::textWidth(b.c_str(), 0.95f), gap = !a.empty() && !b.empty() ? 36.0f : 0.0f;
+                float x = cx - (wa + wb + gap) * 0.5f;
+                if (!a.empty()) { GuiCards::text(dl, ImVec2(x, ay), IM_COL32(255, 255, 255, 245), a.c_str(), 0.95f); x += wa + gap; }
+                if (!b.empty()) GuiCards::text(dl, ImVec2(x, ay), IM_COL32(255, 255, 255, 245), b.c_str(), 0.95f);
+            }
+
+            // Estadísticas base (gráfico) a la derecha.
+            const float statsX = card.x + leftW + 40.0f, statsW = cardSize.x - leftW - 80.0f;
+            if (owned.analyzed) drawStats(data, storage, inventory, owned, *species, ImVec2(statsX, card.y + 8.0f), topH - 16.0f, statsW);
+            else GuiCards::centeredText(dl, ImVec2(statsX + statsW * 0.5f, card.y + topH * 0.5f), GuiStyle::MUTED, "Estadísticas ocultas: analízalo en la máquina de investigación", 0.9f);
+
+            // Separaciones y objeto equipable en el límite entre datos y estadísticas.
+            dl->AddLine(ImVec2(card.x + 16.0f, card.y + topH), ImVec2(card.x + cardSize.x - 16.0f, card.y + topH), LineColor, 2.0f);
+            dl->AddLine(ImVec2(card.x + leftW, card.y + 16.0f), ImVec2(card.x + leftW, card.y + topH - 16.0f), LineColor, 2.0f);
+            drawHeldSlot(dl, data, storage, inventory, owned, ImVec2(card.x + leftW, card.y + topH * 0.5f));
+
+            // EVs (izquierda) y naturalezas (derecha), ajustados al espacio que queda.
+            StatEditor::content(dl, data, storage, selection.inTeam, selection.index, owned, species, ImVec2(card.x, card.y + topH + 6.0f), cardSize.x, cardSize.y - topH - 8.0f, true);
             ImGui::Dummy(ImVec2(0.0f, 0.0f));
         }
     }

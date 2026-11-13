@@ -68,7 +68,8 @@ class Battle {
             m_active[3] = nextReserve(1);
         }
         say(m_foeName + " quiere combatir");
-        for (const int slot : { 2, 3, 0, 1 }) if (m_active[slot] >= 0) enter(slot);
+        for (const int slot : { 2, 3, 0, 1 }) if (m_active[slot] >= 0) enter(slot, false); // primero salen todos los pokémon...
+        for (const int slot : { 2, 3, 0, 1 }) if (m_active[slot] >= 0) triggerEntry(slot);  // ...y entonces actúan las habilidades de entrada (Intimidación...)
     }
 
     Phase phase() const { return m_phase; }
@@ -274,7 +275,7 @@ class Battle {
     }
 
     // --- Entrada en combate y cambios ---
-    void enter(int slot) {
+    void enter(int slot, bool abilities = true) {
         Fighter& f = cur(slot);
         if (sideOf(slot) == 0) f.participated = true;
         m_onField[slot] = true;
@@ -282,12 +283,18 @@ class Battle {
         say(sideOf(slot) == 0 ? "¡Adelante, " + f.name + "!" : m_foeName + " envía a " + f.name + ".");
         anim(slot, 2);
         markFaced();
+        if (abilities) triggerEntry(slot);
+    }
+    // Habilidades que actúan al entrar en combate: las que afectan al rival lo hacen con todos los rivales que haya en el campo (en dobles, los dos).
+    void triggerEntry(int slot) {
+        if (!inField(slot)) return;
+        Fighter& f = cur(slot);
         for (const Ability* a : BattleRules::abilitiesOf(*m_data, f)) {
             if (a->trigger != Ability::Trigger::ON_ENTER || !a->spec.active()) continue;
             say(f.name + " activa " + a->name);
             tag(slot, 3, a->name);
-            const int target = opponentOf(slot);
-            applyEffect(a->spec, slot, target >= 0 ? target : slot, 0, nullptr);
+            if (a->spec.self) { applyEffect(a->spec, slot, slot, 0, nullptr); continue; }
+            for (int other = 0; other < SLOTS; ++other) if (sideOf(other) != sideOf(slot) && inField(other)) applyEffect(a->spec, slot, other, 0, nullptr);
         }
     }
 
@@ -422,7 +429,7 @@ class Battle {
         if (targetsFoe && !inField(target)) target = opponentOf(slot); // su objetivo ya cayó este turno
         if (target < 0) return;
         Fighter& foe = cur(target);
-        const bool hostile = targetsFoe && sideOf(target) != sideOf(slot);
+        const bool hostile = targetsFoe && target != slot; // cualquier otro pokémon del campo, aliado incluido (Terremoto): la protección lo frena
         if (hostile && foe.protecting) { say(who(foe, target) + " se protegió."); return; }
         if (hostile && !chance(BattleRules::hitChance(*m_data, me, foe, move))) { say("¡" + who(me, slot) + " falló!"); return; }
 

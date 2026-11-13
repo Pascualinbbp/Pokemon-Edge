@@ -151,8 +151,11 @@ struct Scene {
         plots = Crops::generate(gameData, world, nodes);
         trainers.push_back(Trainer("Entrenador Rojo", Trainer::Style::REAL_TIME, -1.0f, 10.0f, { 0.85f, 0.2f, 0.2f }));
         trainers.push_back(Trainer("Entrenador Azul", Trainer::Style::TURN_BASED, -5.0f, 10.0f, { 0.2f, 0.35f, 0.85f }));
-        trainers.back().gym = true; // líder de prueba: al derrotarlo da una medalla de gimnasio
+        trainers.back().gym = true; // líder: al derrotarlo da su medalla de gimnasio
+        trainers.back().badge = 0;
         trainers.push_back(Trainer("Entrenador Verde", Trainer::Style::DOUBLES, 2.0f, 10.0f, { 0.25f, 0.7f, 0.3f }));
+        trainers.back().gym = true;
+        trainers.back().badge = 1;
         trainers.push_back(Trainer("Tendero", Trainer::Style::SHOP, 5.0f, 10.0f, { 0.2f, 0.62f, 0.38f }));
         m_home = player.body.position;
         for (const Skill& skill : gameData.skills) if (PlayerActions::parse(skill.animation) == PlayerAction::FISH) m_fishSkill = skill.id;
@@ -832,6 +835,23 @@ struct Scene {
     }
 
     // --- Pesca ---
+    // Modelo de la herramienta que el jugador tiene en la mano para esa acción: "<asset del objeto>_<nivel>" (assets/models/items/herramientas/44_2.glb).
+    // Nivel 0 si no la tiene o la acción no usa una herramienta.
+    struct HeldTool { std::string model; int level = 0; };
+    HeldTool heldTool(PlayerAction action) const {
+        for (const Skill& skill : m_data->skills) {
+            if (PlayerActions::parse(skill.animation) != action) continue;
+            for (const Tool& tool : m_data->tools) {
+                if (tool.skillId != skill.id) continue;
+                const Item* item = m_data->toolItem(tool.id);
+                const int level = (std::min)(inventory.skillLevel(skill.id), tool.maxLevel());
+                if (!item || item->asset.empty() || level < 1) return {};
+                return { item->asset + "_" + std::to_string(level), level };
+            }
+        }
+        return {};
+    }
+
     int rodLevel() const { return m_fishSkill >= 0 ? inventory.skillLevel(m_fishSkill) : 0; }
     bool hookReady() const { return wild.hookActive() && wild.hooked().hittable() && !wild.hooked().leaving(); }
 
@@ -2153,6 +2173,10 @@ struct Scene {
         storage.ensureMoves(rival);
         return rival;
     }
+    // Nivel de los entrenadores: cada combate se tira un nivel general entre 10 por debajo y 5 por encima del nivel máximo de nuestros pokémon (el tope
+    // que dan las medallas) y cada pokémon del entrenador sale a un nivel más o uno menos que ese (como mucho 2 de diferencia entre ellos).
+    void rollTrainerLevel() { m_trainerBase = (std::clamp)(RandomUtil::integer(progress.levelCap() - 10, progress.levelCap() + 5), 2, PlayerProgress::MAX_LEVEL); }
+    int rivalLevel() const { return (std::clamp)(RandomUtil::integer(m_trainerBase - 1, m_trainerBase + 1), 2, PlayerProgress::MAX_LEVEL); }
     int leadLevel() const { const OwnedPokemon* lead = storage.active(); return lead ? lead->level : 5; }
 
     static BattleRules::OwnedLike likeOf(const OwnedPokemon& o, int source) { return { o.speciesId, o.level, o.shiny, o.hp, o.heldItemId, o.moves, o.pp, o.ivs, o.evs, o.nature, source }; }
@@ -2164,6 +2188,7 @@ struct Scene {
         if (battle || m_duelTrainer >= 0 || trainer.busy) return;
         if (storage.team().empty() || storage.nextUsable() < 0) { showNotice(Notice::REWARD, "Tus pokémon no están en condiciones de combatir"); return; }
         trainer.busy = true;
+        rollTrainerLevel();
         if (trainer.style == Trainer::Style::REAL_TIME) {
             m_duelTrainer = index;
             m_duelLeft = DUEL_POKEMON;
@@ -2174,7 +2199,7 @@ struct Scene {
         std::vector<BattleRules::Fighter> mine, foes;
         for (int i = 0; i < static_cast<int>(storage.team().size()); ++i) mine.push_back(BattleRules::makeFighter(*m_data, likeOf(storage.team()[i], i)));
         const bool doubles = trainer.style == Trainer::Style::DOUBLES;
-        for (int i = 0; i < DUEL_POKEMON; ++i) foes.push_back(BattleRules::makeFighter(*m_data, likeOf(rivalPokemon(leadLevel()), -1)));
+        for (int i = 0; i < DUEL_POKEMON; ++i) foes.push_back(BattleRules::makeFighter(*m_data, likeOf(rivalPokemon(rivalLevel()), -1)));
         int first = -1; // siempre sale el primero del equipo (que no esté debilitado), sea cual sea el que nos siga en el mundo
         for (int i = 0; i < static_cast<int>(storage.team().size()) && first < 0; ++i) if (!storage.fainted(storage.team()[static_cast<size_t>(i)])) first = i;
         battle = std::make_shared<Battle>(*m_data, std::move(mine), first, std::move(foes), trainer.name, doubles);
@@ -2182,8 +2207,8 @@ struct Scene {
         Logger::logInfo("BATTLE", "Empieza el combate por turnos contra " + trainer.name + " | dobles=" + std::to_string(doubles) + " | equipo propio=" + std::to_string(storage.team().size()) + " | rivales=" + std::to_string(DUEL_POKEMON) + " | nivel del líder=" + std::to_string(leadLevel()));
         m_battleOrigin = player.body.position;     // a donde vuelve el jugador al terminar
         m_trainerHome = trainer.body.position;     // y el entrenador
-        m_battleOrbit = BATTLE_START_ORBIT;        // la cámara empieza detrás de nuestro pokémon, algo girada: el nuestro a la izquierda y el rival a la derecha
-        m_battleTilt = 0.35f;
+        m_battleOrbit = BATTLE_START_ORBIT;        // la cámara empieza abajo del todo, detrás de nuestro pokémon y a su derecha
+        m_battleTilt = 0.05f; // la más baja
         m_battleSlide = 0.0f;                      // durante la carga ambos se desplazan a los bordes de la zona de combate
         m_battleYaw = std::atan2(arenaDirection().x, arenaDirection().z);
         battleFx = {};
@@ -2194,7 +2219,7 @@ struct Scene {
     // Saca el siguiente pokémon del entrenador de tiempo real junto a él.
     void sendDuelPokemon() {
         const Trainer& trainer = trainers[m_duelTrainer];
-        const OwnedPokemon rival = rivalPokemon(leadLevel());
+        const OwnedPokemon rival = rivalPokemon(rivalLevel());
         const int index = m_data->speciesIndex(rival.speciesId);
         const DirectX::XMFLOAT3 toPlayer = { player.body.position.x - trainer.body.position.x, 0.0f, player.body.position.z - trainer.body.position.z };
         const float length = (std::max)(0.01f, std::sqrt(toPlayer.x * toPlayer.x + toPlayer.z * toPlayer.z));
@@ -2202,7 +2227,7 @@ struct Scene {
         wild.spawnFoe(x, (std::max)(trainer.body.position.y, world.surfaceHeight(x, z)), z, std::atan2(toPlayer.x, toPlayer.z), index, rival.speciesId, rival.level);
         m_engaged = nullptr;
         // El entrenador lanza su pokéball (la misma animación que el acompañante: vuela, se abre, el rayo saca al pokémon y vuelve).
-        m_trainerBall.start(BallTransfer::Mode::RELEASE, std::atan2(toPlayer.x, toPlayer.z), { trainer.body.position.x, trainer.body.position.y + 1.3f, trainer.body.position.z }, RIVAL_BALL);
+        m_trainerBall.start(BallTransfer::Mode::RELEASE, std::atan2(toPlayer.x, toPlayer.z), { trainer.body.position.x, trainer.body.position.y + 1.3f, trainer.body.position.z }, rivalBall(rival.speciesId, index));
     }
 
     // Duelo en tiempo real: cuando cae su pokémon saca otro; sin más, gana el jugador. Si el jugador cae, se termina.
@@ -2272,9 +2297,7 @@ struct Scene {
             text += (text.empty() ? "" : "  ") + std::string("Tú +") + std::to_string(playerGain) + " PX";
             if (progress.addXp(playerGain) > 0) text += " (Nv. " + std::to_string(progress.level()) + ")";
         }
-        if (m_battleTrainer >= 0 && battle->outcome() == Battle::Outcome::WON && trainers[m_battleTrainer].gym && !trainers[m_battleTrainer].badgeGiven) {
-            trainers[m_battleTrainer].badgeGiven = true; // medalla de prueba: una sola vez por sesión
-            progress.addBadge();
+        if (m_battleTrainer >= 0 && battle->outcome() == Battle::Outcome::WON && trainers[m_battleTrainer].gym && progress.addBadge(trainers[m_battleTrainer].badge)) { // cada líder da una medalla distinta, una sola vez
             Logger::logInfo("BATTLE", "Medalla de gimnasio de " + trainers[m_battleTrainer].name + " | medallas=" + std::to_string(progress.badges()) + " | nivel máximo=" + std::to_string(progress.levelCap()));
             text += (text.empty() ? "" : "  ") + std::string("¡Medalla de gimnasio! Nivel máximo ") + std::to_string(progress.levelCap());
         }
@@ -2334,7 +2357,7 @@ struct Scene {
     // en el opuesto, uno frente al otro; los pokémon pelean en medio. ---
     static constexpr float ARENA_RADIUS = 10.0f;      // radio de la zona (m)
     static constexpr float DOUBLES_SPREAD = 2.0f;     // en dobles, cada pokémon de un lado se separa así del eje central
-    static constexpr float BATTLE_START_ORBIT = 0.95f; // giro inicial de la cámara (rad) desde la vista lateral hacia la espalda de nuestro pokémon
+    static constexpr float BATTLE_START_ORBIT = -0.45f; // giro inicial de la cámara (rad): detrás de nuestro pokémon, desplazada hacia su derecha
     static constexpr float ARENA_EDGE_GAP = 0.9f;     // el jugador y el entrenador rival están así de lejos del borde, por fuera del círculo y en lados opuestos
     static constexpr float ARENA_POKEMON = 4.0f;      // cada pokémon, así de lejos del centro
     DirectX::XMFLOAT3 arenaCenter() const {
@@ -2357,7 +2380,7 @@ struct Scene {
         const DirectX::XMFLOAT3 c = arenaCenter(), d = arenaDirection();
         const int side = Battle::sideOf(slot);
         const float k = side == 1 ? ARENA_POKEMON : -ARENA_POKEMON;
-        const float lateral = battle && battle->doubles() ? (Battle::posOf(slot) == 0 ? -DOUBLES_SPREAD : DOUBLES_SPREAD) : 0.0f;
+        const float lateral = battle && battle->doubles() ? (Battle::posOf(slot) == 0 ? DOUBLES_SPREAD : -DOUBLES_SPREAD) : 0.0f;
         return { c.x + d.x * k - d.z * lateral, c.y, c.z + d.z * k + d.x * lateral };
     }
     // Tiempo y desplazamiento de la embestida del que ataca y el temblor del que recibe (en metros hacia delante y a un lado).
@@ -2377,7 +2400,7 @@ struct Scene {
     }
     DirectX::XMMATRIX battleView() const {
         const DirectX::XMFLOAT3 c = arenaCenter(), d = arenaDirection();
-        const float yaw = std::atan2(-d.z, d.x) + m_battleOrbit; // mirando perpendicular a la línea nuestro→rival (nuestro pokémon a la izquierda)
+        const float yaw = std::atan2(d.x, d.z) + m_battleOrbit; // 0 = mirando desde detrás de nuestro lado hacia el rival
         const float dx = std::sin(yaw), dz = std::cos(yaw);
         const float dist = ARENA_RADIUS - 0.5f, height = 1.6f + 6.5f * m_battleTilt; // siempre desde el borde del círculo; la inclinación solo la sube o baja
         const DirectX::XMFLOAT3 eye = { c.x - dx * dist, c.y + height, c.z - dz * dist };
@@ -2387,8 +2410,8 @@ struct Scene {
     // En dobles: ¿el pokémon del hueco 0 de cada lado se ve a la izquierda de la pantalla? (depende de cómo se haya girado la cámara)
     bool battleFirstOnLeft() const {
         const DirectX::XMFLOAT3 d = arenaDirection();
-        const float yaw = std::atan2(-d.z, d.x) + m_battleOrbit;
-        return (-d.z * std::cos(yaw) - d.x * std::sin(yaw)) >= -0.01f;
+        const float yaw = std::atan2(d.x, d.z) + m_battleOrbit;
+        return (-d.z * std::cos(yaw) - d.x * std::sin(yaw)) <= 0.01f; // el hueco 0 está a la izquierda (visto desde nuestro lado) y la cámara puede girarse
     }
     float battleYaw() const { return m_battleYaw; }
     int battleTrainer() const { return m_battleTrainer; }
@@ -2417,13 +2440,24 @@ struct Scene {
         if (!battle || (m.animKind != 1 && m.animKind != 2) || m.animSide < 0) return;
         const int slot = m.animSide, side = Battle::sideOf(slot);
         const DirectX::XMFLOAT3 hand = battleHand(side);
-        int ball = RIVAL_BALL; // los del jugador, con la pokéball de cada uno; los del rival, la Honor Ball
+        int ball = battle->occupied(slot) ? rivalBall(battle->fighter(slot).speciesId, slot) : 1; // los del jugador, con la pokéball de cada uno; los del rival, la que encaja con su pokémon
         if (side == 0 && battle->occupied(slot)) if (const OwnedPokemon* owned = storage.mutableAt(true, battle->fighter(slot).source)) ball = owned->ballId;
         const bool release = m.animKind == 2;
         m_battleBalls[slot].start(release ? BallTransfer::Mode::RELEASE : BallTransfer::Mode::ABSORB, m_battleYaw + (side == 0 ? 0.0f : 3.14159265f), hand, ball);
         Sound::emit(release ? Sound::Sfx::BALL_RELEASE : Sound::Sfx::BALL_RECALL, hand);
     }
-    static constexpr int RIVAL_BALL = 6; // pokéball de los pokémon de los entrenadores (id de pokeball.hpp)
+    // Pokéball de un pokémon de entrenador: la que tendría sentido llevar según lo difícil que es de capturar (ratio de la especie). Un pokémon sin variocolor
+    // nunca lleva Shiny Ball; los fáciles van en Poké Ball, los difíciles en Ultra o Honor Ball. Es estable para una especie y un hueco (ids de pokeball.hpp).
+    int rivalBall(int speciesId, int salt, bool shiny = false) const {
+        if (shiny) return 5;
+        const PokemonSpecies* species = m_data->speciesById(speciesId);
+        const int rate = species ? species->catchRate : 45;
+        const unsigned pick = static_cast<unsigned>(speciesId * 31 + salt * 17) % 4u; // variedad sin azar entre fotogramas
+        if (rate >= 150) return pick == 0 ? 2 : 1;       // fáciles: casi siempre Poké Ball
+        if (rate >= 75) return pick < 2 ? 2 : 1;         // normales: Super o Poké Ball
+        if (rate >= 25) return pick == 0 ? 2 : 3;        // difíciles: Ultra (o Super)
+        return pick == 0 ? 3 : 6;                        // legendarios y similares: Honor Ball (o Ultra)
+    }
     const BallTransfer* trainerBall() const { return m_trainerBall.active() ? &m_trainerBall : nullptr; }
     const BallTransfer* battleBall(int slot) const { return m_battleBalls[slot].active() ? &m_battleBalls[slot] : nullptr; }
 
@@ -2440,6 +2474,7 @@ struct Scene {
     float m_battleOrbit = 0.0f, m_battleTilt = 0.35f; // giro y altura de la cámara del combate
     static constexpr float DUEL_LEASH = 9.0f; // metros máximos entre un pokémon del duelo en tiempo real y su entrenador
     BallTransfer m_trainerBall; // pokéball del entrenador al sacar a su pokémon en un duelo en tiempo real
+    int m_trainerBase = 10; // nivel general de los pokémon del entrenador al que se reta (rollTrainerLevel)
     int m_duelTrainer = -1;
     int m_duelLeft = 0;
     float m_duelPause = 0.0f;

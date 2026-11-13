@@ -107,11 +107,9 @@ struct PlayerPose {
                 pose.holding = PlayerAction::NONE;
                 break;
             }
-            case PlayerAction::FISH: { // lanzamiento de caña: atrás y adelante, luego la sostiene
-                const float cast = u < 0.4f ? -ease(u / 0.4f) : -1.0f + ease((u - 0.4f) / 0.6f) * 1.0f;
-                pose.rightArm = 1.2f + 0.9f * cast;
-                pose.leftArm = 0.9f + 0.5f * cast;
-                pose.toolTilt = 0.5f * cast;
+            case PlayerAction::FISH: { // sostiene la caña adelantada: el lanzamiento lo anima la propia caña (su modelo)
+                pose.rightArm = 1.2f;
+                pose.leftArm = 0.9f;
                 pose.lean = -0.05f;
                 pose.bothHands = true;
                 break;

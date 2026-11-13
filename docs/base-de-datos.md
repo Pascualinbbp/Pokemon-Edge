@@ -64,3 +64,6 @@ Parcelas de cultivo: cualquier parcela admite cualquier cultivo; junto a una par
 
 `nature`: `id`, `name`, `increased_stat`, `decreased_stat` (índices de estadística: 0 PS, 1 ataque, 2 ataque especial, 3 defensa, 4 defensa especial, 5 velocidad; vacíos = naturaleza neutra). 25 naturalezas; la sube y la baja un 10 %.
 Las chapas son objetos de la categoría Entrenamiento: la plateada sale en el cofre épico y la dorada en el legendario (grupos de la tabla `reward`).
+
+## Herramientas
+Los modelos de las herramientas llevan el nivel en el nombre (`items/herramientas/<id del objeto>_<nivel>`); las animaciones de la caña, `<modelo>_<animación>.json` junto a su `.glb`. La tabla `nature` no repite efectos: una naturaleza por cada pareja (sube, baja).

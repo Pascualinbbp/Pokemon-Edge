@@ -64,8 +64,16 @@ namespace ItemIcon {
         block(dl, c, r, StyleRegistry::lookup(StyleRegistry::typeColors(), item.typeId, { 0.60f, 0.60f, 0.63f }), alpha);
     }
 
-    // Herramienta: mango y cabeza (hacha o pico).
-    inline void tool(ImDrawList* dl, const ImVec2& c, float r, int toolId, float alpha = 1.0f) {
+    // Herramienta: su sprite del nivel (assets/sprites/items/herramientas/<id>_<nivel>.png) o, si falta, mango y cabeza (hacha o pico).
+    inline void tool(ImDrawList* dl, const ImVec2& c, float r, const Item& item, int level, float alpha = 1.0f) {
+        const int toolId = item.refId;
+        for (const std::string& name : { item.asset + "_" + std::to_string((std::max)(level, 1)), item.asset }) {
+            if (name.empty() || name == "_1") continue;
+            if (const ImTextureID sprite = HudIcons::sprite(name)) {
+                dl->AddImage(sprite, ImVec2(c.x - r * 1.1f, c.y - r * 1.1f), ImVec2(c.x + r * 1.1f, c.y + r * 1.1f), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, static_cast<int>(255.0f * alpha)));
+                return;
+            }
+        }
         const ImU32 wood = IM_COL32(140, 92, 46, static_cast<int>(255.0f * alpha));
         const ImU32 metal = IM_COL32(190, 195, 205, static_cast<int>(255.0f * alpha));
         const float t = (std::max)(2.0f, r * 0.14f);
@@ -179,13 +187,14 @@ namespace ItemIcon {
         }
     }
 
-    inline void item(ImDrawList* dl, const ImVec2& c, float r, const Item& item, const GameData& data, float alpha = 1.0f) {
+    // 'count': unidades que se tienen; en las herramientas es su nivel (elige el sprite).
+    inline void item(ImDrawList* dl, const ImVec2& c, float r, const Item& item, const GameData& data, float alpha = 1.0f, int count = 1) {
         switch (item.category) {
             case ItemCategory::HELD:     if (const HeldItem* type = data.held(item.refId)) held(dl, c, r, *type, alpha); break;
             case ItemCategory::POKEBALL: if (const PokeballType* type = data.ball(item.refId)) ball(dl, c, r, PokeballStyle::look(type->id), alpha); break;
             case ItemCategory::MATERIAL: material(dl, c, r, item, alpha); break;
             case ItemCategory::STONE:    stone(dl, c, r, item, alpha); break;
-            case ItemCategory::TOOL:     tool(dl, c, r, item.refId, alpha); break;
+            case ItemCategory::TOOL:     tool(dl, c, r, item, count, alpha); break;
             case ItemCategory::TRAINING: if (const TrainingItem* type = data.training(item.refId)) training(dl, c, r, *type, alpha); break;
             default: break;
         }

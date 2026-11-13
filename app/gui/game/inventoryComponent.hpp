@@ -127,7 +127,7 @@ namespace InventoryComponent {
                 ImGui::PushID(item.id);
                 const bool picked = GuiCards::tile("##item", ImVec2(TILE_WIDTH, TILE_HEIGHT), item.id == selectedItem,
                     ItemIcon::categoryTone(item.category),
-                    [&](ImDrawList* dl, const ImVec2& c, float r) { ItemIcon::item(dl, c, r, item, data); },
+                    [&](ImDrawList* dl, const ImVec2& c, float r) { ItemIcon::item(dl, c, r, item, data, 1.0f, list[i].count); },
                     data.itemTitle(item, list[i].count).c_str(), badge, list[i].count <= 0);
                 ImGui::PopID();
                 if (picked) selectedItem = item.id;
@@ -287,7 +287,7 @@ namespace InventoryComponent {
                               GuiCards::ROUNDING, ImDrawFlags_RoundCornersTop);
             const ImVec2 center(pos.x + size.x * 0.5f, pos.y + 78.0f);
             dl->AddCircleFilled(center, 62.0f, IM_COL32(0, 0, 0, 70), 48);
-            ItemIcon::item(dl, center, 46.0f, *item, data);
+            ItemIcon::item(dl, center, 46.0f, *item, data, 1.0f, inventory.count(item->id));
             const int count = inventory.count(item->id);
             GuiCards::centeredText(dl, ImVec2(center.x, pos.y + 152.0f), IM_COL32(255, 255, 255, 255), data.itemTitle(*item, count).c_str(), 1.25f);
             char owned[64];

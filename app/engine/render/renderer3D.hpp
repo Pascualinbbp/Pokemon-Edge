@@ -116,6 +116,7 @@ class Renderer3D {
     void addCapture(const CaptureSequence& sequence);
     void addGlowBetween(const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to, float width, const DirectX::XMFLOAT4& tint);
     void addPlayer(const Scene& scene);
+    bool addToolModel(const Scene& scene, PlayerAction action, const std::string& name, DirectX::CXMMATRIX hand, DirectX::XMFLOAT3& tip, bool& tipKnown);
     void addTool(PlayerAction tool, DirectX::CXMMATRIX hand);
     void addFishingLine(const Scene& scene, const DirectX::XMFLOAT3& rodTip);
     void addSky(const Scene& scene, float time);
@@ -179,6 +180,7 @@ class Renderer3D {
     Mesh m_ocean;                 // el mar hasta el horizonte, fuera del archipiélago
     Mesh m_cone;                  // la base rocosa de la isla del cielo
     ID3D11Device* m_device = nullptr;
+    ID3D11DeviceContext* m_context = nullptr; // el de render(): lo usan los modelos con huesos al colocarse
     bool m_worldBuilt = false;
     unsigned m_worldSeed = 0;
     DirectX::XMFLOAT3 m_eye = {}; // posición de la cámara en el último frame (recorte del terreno)

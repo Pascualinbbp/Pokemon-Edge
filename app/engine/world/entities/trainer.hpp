@@ -23,8 +23,8 @@ class Trainer {
     Style style = Style::REAL_TIME;
     DirectX::XMFLOAT3 outfit = { 0.8f, 0.2f, 0.2f }; // color de la ropa
     Physics::Body body;
-    bool gym = false;        // líder de gimnasio: al derrotarlo da una medalla
-    bool badgeGiven = false; // ya la ha dado (en esta sesión)
+    bool gym = false;        // líder de gimnasio: al derrotarlo da su medalla (cada líder una distinta)
+    int badge = -1;          // id de su medalla (0..PlayerProgress::MAX_BADGES-1)
     bool busy = false; // en pleno duelo: no acepta otro
 
     float reach() const { return INTERACT_RANGE + WIDTH * 0.5f; }
