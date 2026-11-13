@@ -837,6 +837,7 @@ struct Scene {
     // --- Pesca ---
     // Modelo de la herramienta que el jugador tiene en la mano para esa acción: "<asset del objeto>_<nivel>" (assets/models/items/herramientas/44_2.glb).
     // Nivel 0 si no la tiene o la acción no usa una herramienta.
+    public:
     struct HeldTool { std::string model; int level = 0; };
     HeldTool heldTool(PlayerAction action) const {
         for (const Skill& skill : m_data->skills) {
@@ -851,6 +852,7 @@ struct Scene {
         }
         return {};
     }
+    private:
 
     int rodLevel() const { return m_fishSkill >= 0 ? inventory.skillLevel(m_fishSkill) : 0; }
     bool hookReady() const { return wild.hookActive() && wild.hooked().hittable() && !wild.hooked().leaving(); }

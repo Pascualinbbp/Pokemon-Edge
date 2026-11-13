@@ -17,7 +17,6 @@ struct SaveSummary {
     std::vector<SaveTeamMember> team;
     int playerLevel = 1;
     int badges = 0;
-    unsigned badgeMask = 0; // qué medallas se tienen (bit = id de la medalla)
     int money = 0;
     int dexCaught = 0;
 };
@@ -35,6 +34,7 @@ struct SaveData {
     int playerLevel = 1;              // nivel, experiencia y medallas del jugador
     int playerXp = 0;
     int badges = 0;
+    unsigned badgeMask = 0;           // qué medallas se tienen (bit = id de la medalla)
     int activeIndex = 0;              // pokémon del equipo que acompaña al jugador
     std::string explored;             // zonas exploradas del mundo (Exploration::store); vacío = nada explorado
     std::vector<std::string> dexSeen;   // Pokédex: especies vistas y capturadas (por nombre)
