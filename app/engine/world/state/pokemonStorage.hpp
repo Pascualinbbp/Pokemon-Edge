@@ -28,6 +28,7 @@ struct OwnedPokemon {
     int nature = 0;                 // naturaleza (id de nature; 0 = ninguna: neutra). El jugador puede cambiarla cuando quiera
     int xp = 0;                     // experiencia hacia el siguiente nivel (no se guarda)
     int hp = -1;                    // PS actuales (-1 = al máximo); 0 = debilitado
+    int abilityId = -1;             // habilidad activa de este ejemplar (id de ability; -1 = aún sin tirar: se elige al azar entre las de su especie al guardarlo)
     int heldItemId = -1;            // objeto equipable que lleva (id de item; -1 = ninguno)
     MoveRules::Slots moves = { -1, -1, -1, -1 }; // movimientos que conoce (id de move; -1 = hueco)
     MoveRules::Slots pp = { -1, -1, -1, -1 };    // PP actuales de cada uno (-1 = al máximo; no se guardan)
@@ -166,6 +167,7 @@ class PokemonStorage {
         sentToPc = teamFull();
         OwnedPokemon stored = owned;
         stored.uid = m_nextUid++;
+        if (const PokemonSpecies* species = m_data->speciesById(stored.speciesId)) stored.abilityId = m_data->abilityFor(*species, stored.abilityId);
         ensureMoves(stored);
         markDex(owned.speciesId, DEX_CAUGHT);
         dexProgress.captured(owned.speciesId, owned.shiny, owned.level);
@@ -264,6 +266,7 @@ class PokemonStorage {
         const Evolution* evolution = species ? species->levelEvolution(owned->level, RandomUtil::range(0.0f, 1.0f)) : nullptr;
         if (evolution && m_data->speciesById(evolution->toId)) {
             owned->speciesId = evolution->toId;
+            if (const PokemonSpecies* next = m_data->speciesById(owned->speciesId)) owned->abilityId = m_data->abilityFor(*next, owned->abilityId); // conserva la suya si la nueva especie también la tiene
             markDex(owned->speciesId, DEX_CAUGHT);
             return LevelResult::EVOLVED;
         }
@@ -581,7 +584,7 @@ class PokemonStorage {
                              (ball ? ball->name : std::string()) + SEPARATOR + (owned.analyzed ? "1" : "0") + SEPARATOR +
                              join(owned.ivs) + SEPARATOR + join(owned.ivCaps) + SEPARATOR + std::to_string(owned.hp) + SEPARATOR +
                              (held ? held->name : std::string()) + SEPARATOR + moveNames(owned.moves) + SEPARATOR + moveNames(owned.unlocked) + SEPARATOR +
-                             join(owned.evs) + SEPARATOR + (nature ? nature->name : std::string()));
+                             join(owned.evs) + SEPARATOR + (nature ? nature->name : std::string()) + SEPARATOR + (m_data->ability(owned.abilityId) ? m_data->ability(owned.abilityId)->name : std::string()));
         }
         return result;
     }
@@ -611,6 +614,8 @@ class PokemonStorage {
         for (int i = 0; i < BaseStats::COUNT; ++i) owned.ivs[i] = (std::min)(owned.ivs[i], owned.ivCaps[i]);
         owned.evs = StatRules::clamped(splitRaw(field(11))); // partidas antiguas: sin EVs repartidos
         for (const Nature& nature : m_data->natures) if (!field(12).empty() && nature.name == field(12)) owned.nature = nature.id;
+        for (const Ability& ability : m_data->abilities) if (!field(13).empty() && ability.name == field(13)) owned.abilityId = ability.id;
+        owned.abilityId = m_data->abilityFor(species, owned.abilityId); // partidas antiguas o habilidad que ya no es de su especie: una de las suyas al azar
         if (owned.nature == 0) owned.nature = m_data->randomNatureId(); // partidas antiguas: una al azar (luego se puede cambiar)
         owned.hp = field(7).empty() ? -1 : std::atoi(field(7).c_str());
         for (const HeldItem& held : m_data->heldItems) if (!field(8).empty() && held.name == field(8)) owned.heldItemId = held.id;

@@ -47,7 +47,8 @@ struct PokemonSpecies {
     std::string description;
     int skillId = -1;       // habilidad del mundo (talar, picar, regar...)
     int skillLevel = 1;     // y su nivel
-    int abilityId = -1;     // habilidad activa
+    int abilityId = -1;     // habilidad activa por defecto (la primera de su lista)
+    std::vector<int> abilityPool; // habilidades activas que puede tener un ejemplar (tabla pokemon_ability); cada uno sale con una de ellas
     int passiveId = -1;     // habilidad pasiva (-1 = no tiene)
     std::vector<int> types; // uno o dos id de la tabla type
     BaseStats stats;

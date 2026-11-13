@@ -32,12 +32,24 @@ class PokemonSpeciesDao {
             species.push_back(std::move(entry));
         }
         if (species.empty()) Logger::logError("POKEMON_DAO", "La tabla pokemon no existe o está vacía (falta aplicar testing/sql/pokemon.sql).");
+        loadAbilityPools(species);
         loadEvolutions(species);
         loadSpawnProfiles(species);
         return species;
     }
 
     private:
+    // Habilidades activas posibles de cada especie (tabla pokemon_ability).
+    static void loadAbilityPools(std::vector<PokemonSpecies>& species) {
+        for (const auto& row : SqliteUtil::executeSelect("SELECT pokemon_id, ability_id FROM pokemon_ability ORDER BY pokemon_id, ability_id;")) {
+            for (PokemonSpecies& entry : species) {
+                if (entry.id != DaoRow::integer(row, "pokemon_id")) continue;
+                entry.abilityPool.push_back(DaoRow::integer(row, "ability_id"));
+                break;
+            }
+        }
+    }
+
     static void loadEvolutions(std::vector<PokemonSpecies>& species) {
         for (const auto& row : SqliteUtil::executeSelect("SELECT from_id, to_id, method, level, item_id FROM evolution ORDER BY id;")) {
             for (PokemonSpecies& entry : species) {

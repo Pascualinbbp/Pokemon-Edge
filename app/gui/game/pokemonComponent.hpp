@@ -521,7 +521,7 @@ namespace PokemonComponent {
             if (embedded) { ImGui::Dummy(ImVec2(0.0f, 0.0f)); return; }
             ImGui::SetCursorScreenPos(ImVec2(left, pos.y + size.y - bottomHeight));
             worldSkillLine(dl, data, *species, !compact);
-            abilityLine(dl, data.ability(species->abilityId), "Activa", IM_COL32(190, 80, 60, 255), !compact);
+            abilityLine(dl, data.ability(owned.abilityId >= 0 ? owned.abilityId : species->abilityId), "Activa", IM_COL32(190, 80, 60, 255), !compact);
             if (species->passiveId >= 0) abilityLine(dl, data.ability(species->passiveId), "Pasiva", IM_COL32(130, 80, 190, 255), !compact);
             else abilityLine(dl, nullptr, "Pasiva", IM_COL32(90, 90, 100, 255), !compact);
             if (!message.empty()) {
@@ -616,50 +616,55 @@ namespace PokemonComponent {
                 return;
             }
 
-            const float topH = 262.0f, leftW = cardSize.x * 0.5f;
+            // Todo se mide sobre el tamaño de la tarjeta: nada se sale de ella.
+            const float topH = (std::clamp)(cardSize.y * 0.44f, 196.0f, 250.0f), leftW = cardSize.x * 0.5f;
             const ImU32 LineColor = IM_COL32(255, 255, 255, 45);
             char text[96];
-            // Sprite y las dos filas de datos.
-            ItemIcon::creature(dl, ImVec2(card.x + 96.0f, card.y + 112.0f), 58.0f, species->id);
-            const float rowX = card.x + 184.0f;
+            // Sprite (pequeño) y las dos filas de datos: nombre + tipos + nivel (el nivel a la derecha, alineado con el final de la barra de vida) y PS.
+            const float spriteR = (std::min)(34.0f, topH * 0.17f);
+            ItemIcon::creature(dl, ImVec2(card.x + 76.0f, card.y + 28.0f + spriteR + 14.0f), spriteR, species->id);
+            const float rowX = card.x + 142.0f, rowR = card.x + leftW - 24.0f;
             const std::string name = title(*species, owned);
-            GuiCards::text(dl, ImVec2(rowX, card.y + 34.0f), IM_COL32(255, 255, 255, 255), name.c_str(), 1.4f);
-            float ix = rowX + GuiCards::textWidth(name.c_str(), 1.4f) + 22.0f;
-            for (const int typeId : species->types) if (const PokemonType* type = data.type(typeId)) { TypeIcons::draw(dl, ImVec2(ix, card.y + 46.0f), 13.0f, *type); ix += 32.0f; }
+            const float nameScale = (std::min)(1.3f, (rowR - rowX - 150.0f) / (std::max)(1.0f, GuiCards::textWidth(name.c_str(), 1.0f)));
+            GuiCards::text(dl, ImVec2(rowX, card.y + 22.0f), IM_COL32(255, 255, 255, 255), name.c_str(), (std::max)(0.8f, nameScale));
+            float ix = rowX + GuiCards::textWidth(name.c_str(), (std::max)(0.8f, nameScale)) + 18.0f;
+            for (const int typeId : species->types) if (const PokemonType* type = data.type(typeId)) { TypeIcons::draw(dl, ImVec2(ix + 12.0f, card.y + 34.0f), 12.0f, *type); ix += 30.0f; }
             std::snprintf(text, sizeof(text), "Nv. %d", owned.level);
-            GuiCards::text(dl, ImVec2(ix + 10.0f, card.y + 36.0f), IM_COL32(255, 255, 255, 235), text, 1.1f);
+            GuiCards::text(dl, ImVec2(rowR - GuiCards::textWidth(text, 1.1f), card.y + 24.0f), IM_COL32(255, 255, 255, 235), text, 1.1f);
             {
                 const int maxHp = storage.maxHp(owned), hp = storage.hpOf(owned);
-                const ImVec2 bar(rowX, card.y + 92.0f);
-                const float barW = leftW - (rowX - card.x) - 24.0f;
-                dl->AddRectFilled(bar, ImVec2(bar.x + barW, bar.y + 24.0f), IM_COL32(0, 0, 0, 130), 6.0f);
+                const ImVec2 bar(rowX, card.y + 58.0f);
+                const float barW = rowR - rowX;
+                dl->AddRectFilled(bar, ImVec2(bar.x + barW, bar.y + 22.0f), IM_COL32(0, 0, 0, 130), 6.0f);
                 const float f = storage.hpFraction(owned);
-                if (f > 0.0f) dl->AddRectFilled(bar, ImVec2(bar.x + barW * f, bar.y + 24.0f), f > 0.5f ? IM_COL32(90, 210, 110, 255) : f > 0.2f ? IM_COL32(235, 200, 60, 255) : IM_COL32(230, 70, 70, 255), 6.0f);
+                if (f > 0.0f) dl->AddRectFilled(bar, ImVec2(bar.x + barW * f, bar.y + 22.0f), f > 0.5f ? IM_COL32(90, 210, 110, 255) : f > 0.2f ? IM_COL32(235, 200, 60, 255) : IM_COL32(230, 70, 70, 255), 6.0f);
                 std::snprintf(text, sizeof(text), hp > 0 ? "PS %d / %d" : "PS 0 / %d  (debilitado)", hp > 0 ? hp : maxHp, maxHp);
-                GuiCards::text(dl, ImVec2(bar.x + 10.0f, bar.y + 3.0f), IM_COL32(255, 255, 255, 245), text, 0.9f);
+                GuiCards::text(dl, ImVec2(bar.x + 10.0f, bar.y + 3.0f), IM_COL32(255, 255, 255, 245), text, 0.85f);
             }
             // Esquinas: potencial (izquierda) y pokéball con la que se capturó (derecha).
-            potentialBadge(dl, ImVec2(card.x + 32.0f, card.y + 32.0f), 20.0f, owned);
-            if (const PokeballType* ball = data.ball(owned.ballId)) ItemIcon::ball(dl, ImVec2(card.x + cardSize.x - 32.0f, card.y + 32.0f), 16.0f, PokeballStyle::look(ball->id));
+            potentialBadge(dl, ImVec2(card.x + 26.0f, card.y + 26.0f), 17.0f, owned);
+            if (const PokeballType* ball = data.ball(owned.ballId)) ItemIcon::ball(dl, ImVec2(card.x + cardSize.x - 26.0f, card.y + 26.0f), 14.0f, PokeballStyle::look(ball->id));
 
-            // Descripción y habilidades (centradas), bajo el sprite y los PS.
-            const float textX = card.x + 24.0f, textW = leftW - 48.0f;
-            ImGui::SetCursorScreenPos(ImVec2(textX, card.y + 186.0f));
+            // Descripción (bajo el sprite y los PS) y habilidades (centradas, al pie del bloque).
+            const float textX = card.x + 20.0f, textW = leftW - 40.0f;
+            const float descY = card.y + 28.0f + spriteR * 2.0f + 22.0f;
+            ImGui::SetCursorScreenPos(ImVec2(textX, descY));
             ImGui::PushStyleColor(ImGuiCol_Text, GuiStyle::MUTED);
             ImGui::PushTextWrapPos(textX + textW - ImGui::GetWindowPos().x);
             ImGui::TextUnformatted(species->description.c_str());
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
             {
-                const Ability* active = data.ability(species->abilityId);
+                const Ability* active = data.ability(owned.abilityId >= 0 ? owned.abilityId : species->abilityId);
                 const Ability* passive = species->passiveId >= 0 ? data.ability(species->passiveId) : nullptr;
-                const float ay = card.y + topH - 24.0f, cx = card.x + leftW * 0.5f;
+                const float ay = card.y + topH - 30.0f, cx = card.x + leftW * 0.5f;
                 std::string a = active ? (passive ? "Habilidad activa: " : "Habilidad: ") + active->name : std::string();
                 std::string b = passive ? (active ? "Habilidad pasiva: " : "Habilidad: ") + passive->name : std::string();
-                const float wa = a.empty() ? 0.0f : GuiCards::textWidth(a.c_str(), 0.95f), wb = b.empty() ? 0.0f : GuiCards::textWidth(b.c_str(), 0.95f), gap = !a.empty() && !b.empty() ? 36.0f : 0.0f;
-                float x = cx - (wa + wb + gap) * 0.5f;
-                if (!a.empty()) { GuiCards::text(dl, ImVec2(x, ay), IM_COL32(255, 255, 255, 245), a.c_str(), 0.95f); x += wa + gap; }
-                if (!b.empty()) GuiCards::text(dl, ImVec2(x, ay), IM_COL32(255, 255, 255, 245), b.c_str(), 0.95f);
+                const float wa = a.empty() ? 0.0f : GuiCards::textWidth(a.c_str(), 0.95f), wb = b.empty() ? 0.0f : GuiCards::textWidth(b.c_str(), 0.95f), gap = !a.empty() && !b.empty() ? 30.0f : 0.0f;
+                const float fit = (std::min)(1.0f, (leftW - 24.0f) / (std::max)(1.0f, wa + wb + gap));
+                float x = cx - (wa + wb + gap) * fit * 0.5f;
+                if (!a.empty()) { GuiCards::text(dl, ImVec2(x, ay), IM_COL32(255, 255, 255, 245), a.c_str(), 0.95f * fit); x += (wa + gap) * fit; }
+                if (!b.empty()) GuiCards::text(dl, ImVec2(x, ay), IM_COL32(255, 255, 255, 245), b.c_str(), 0.95f * fit);
             }
 
             // Estadísticas base (gráfico) a la derecha.
@@ -673,7 +678,7 @@ namespace PokemonComponent {
             drawHeldSlot(dl, data, storage, inventory, owned, ImVec2(card.x + leftW, card.y + topH * 0.5f));
 
             // EVs (izquierda) y naturalezas (derecha), ajustados al espacio que queda.
-            StatEditor::content(dl, data, storage, selection.inTeam, selection.index, owned, species, ImVec2(card.x, card.y + topH + 6.0f), cardSize.x, cardSize.y - topH - 8.0f, true);
+            StatEditor::content(dl, data, storage, inventory, selection.inTeam, selection.index, owned, species, ImVec2(card.x, card.y + topH + 6.0f), cardSize.x, cardSize.y - topH - 8.0f, true);
             ImGui::Dummy(ImVec2(0.0f, 0.0f));
         }
     }
@@ -722,7 +727,7 @@ namespace PokemonComponent {
         detail::finishDrag(storage);
 
         if (detail::editingStats) {
-            if (!StatEditor::render(data, storage, detail::selection.inTeam, detail::selection.index)) detail::editingStats = false;
+            if (!StatEditor::render(data, storage, inventory, detail::selection.inTeam, detail::selection.index)) detail::editingStats = false;
             return; // el editor se queda con ESC y los clics este fotograma
         }
         if (detail::editingMoves) {

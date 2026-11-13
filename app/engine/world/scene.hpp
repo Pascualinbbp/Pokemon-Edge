@@ -2181,7 +2181,7 @@ struct Scene {
     int rivalLevel() const { return (std::clamp)(RandomUtil::integer(m_trainerBase - 1, m_trainerBase + 1), 2, PlayerProgress::MAX_LEVEL); }
     int leadLevel() const { const OwnedPokemon* lead = storage.active(); return lead ? lead->level : 5; }
 
-    static BattleRules::OwnedLike likeOf(const OwnedPokemon& o, int source) { return { o.speciesId, o.level, o.shiny, o.hp, o.heldItemId, o.moves, o.pp, o.ivs, o.evs, o.nature, source }; }
+    static BattleRules::OwnedLike likeOf(const OwnedPokemon& o, int source) { return { o.speciesId, o.level, o.shiny, o.hp, o.heldItemId, o.moves, o.pp, o.ivs, o.evs, o.nature, source, o.abilityId }; }
 
     // Empieza el duelo con un entrenador: en tiempo real (su pokémon sale al mundo y peleamos como contra los salvajes) o por turnos (pantalla propia).
     void startDuel(int index) {

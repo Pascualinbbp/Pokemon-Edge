@@ -19,6 +19,9 @@ struct Ability {
     int priority = 0;  // orden entre habilidades que se activan a la vez (mayor, antes)
     EffectSpec spec;   // efecto de combate
 
+    // Las habilidades pasivas son solo de diseño (levitar, respirar bajo el agua): un plus que una especie puede tener o no y que nunca actúa como activa.
+    // Todo lo demás son activas, que tiene todo pokémon.
+    bool passiveKind() const { return effect == Effect::FLOAT || effect == Effect::WATER_BREATHING; }
     bool floats() const { return effect == Effect::FLOAT; }
     bool breathesWater() const { return effect == Effect::WATER_BREATHING; }
 

@@ -207,7 +207,7 @@ namespace BattleComponent {
         s.time += dt;
         CrashUtil::detail("combate: avance (t=%.2f)", s.time);
         engine.battleAdvance(dt);
-        CrashUtil::detail("combate: dibujo (mensaje=%.0f, listo=%.0f)", battle->hasMessage() ? 1 : 0, battle->ready() ? 1 : 0);
+        CrashUtil::detail("combate: dibujo (mensaje=%.0f, listo=%.0f)", battle->hasMessage() ? 1.0 : 0.0, battle->ready() ? 1.0 : 0.0);
 
         // Carga inicial: negro con el título y quién nos reta; el combate no avanza hasta que se desvanece.
         if (s.time < LOADING_TIME) {
@@ -241,7 +241,7 @@ namespace BattleComponent {
                     for (int i = 0; i < static_cast<int>(EffectSpec::Stat::COUNT); ++i) s.shown.stages[side][i] = m.stages[side][i];
                 }
                 s.fxSide = m.fxSide; s.fxKind = m.fxKind; s.fxAmount = m.fxAmount; s.fxText = m.fxText; s.fxTime = 0.0f;
-                CrashUtil::detail("combate: animación %.0f en hueco %.0f", m.animKind, m.animSide);
+                CrashUtil::detail("combate: animación %.0f en hueco %.0f", static_cast<double>(m.animKind), static_cast<double>(m.animSide));
                 engine.battlePlayFx(m);
             }
             s.messageTime += dt;
@@ -338,9 +338,11 @@ namespace BattleComponent {
             if (mineSlots.empty() && !forced) { ImGui::Dummy(ImVec2(0.0f, 0.0f)); return; }
             if (s.step >= static_cast<int>(mineSlots.size())) { s.step = 0; s.picked.clear(); }
             const int slot = forced ? battle->pendingSlot() : mineSlots[static_cast<size_t>(s.step)]; // hueco al que se le da la orden
-            if (slot < 0 || slot >= Battle::SLOTS) { CrashUtil::note("combate: hueco inválido %.0f (fase %.0f)", slot, static_cast<int>(battle->phase())); return; }
+            if (slot < 0 || slot >= Battle::SLOTS) { CrashUtil::note("combate: hueco inválido %.0f (fase %.0f)", static_cast<double>(slot), static_cast<double>(battle->phase())); return; }
             // Orden elegida para ese hueco: cuando están todas (una en individuales, dos en dobles) se juega el turno.
+            bool committed = false; // tras dar una orden el combate puede haber cambiado (rivales caídos, huecos vacíos): se deja de dibujar este fotograma
             const auto commit = [&](const Battle::Action& action) {
+                committed = true;
                 s.picked.push_back(action);
                 ++s.step;
                 s.menu = Menu::MAIN;
@@ -357,16 +359,6 @@ namespace BattleComponent {
             const int firstFoe = foes.empty() ? -1 : foes.front();
             if (forced) s.menu = Menu::TEAM;
             if (s.menu != Menu::MOVES) s.infoMove = -1;
-            CRASH_AT();
-            // Pregunta sobre los controles (sin cuadro).
-            {
-                std::string ask;
-                if (forced) ask = "Tu pokémon se ha debilitado. Elige al siguiente.";
-                else if (s.menu == Menu::TARGET) ask = "¿A quién ataca " + battle->fighter(slot).name + "?";
-                else ask = "¿Qué hará " + battle->fighter(slot).name + "?";
-                GuiCards::text(dl, ImVec2(menuLeft + 1.5f, menuTop - 30.0f + 1.5f), IM_COL32(0, 0, 0, 220), ask.c_str(), 1.1f);
-                GuiCards::text(dl, ImVec2(menuLeft, menuTop - 30.0f), IM_COL32(255, 255, 255, 255), ask.c_str(), 1.1f);
-            }
             CRASH_AT();
             const float backY = menuBottom - 30.0f;
             if (s.menu == Menu::MAIN) {
@@ -395,7 +387,7 @@ namespace BattleComponent {
                     }
                 }
                 bool infoClicked = false;
-                for (int i = 0; i < MoveRules::MAX_KNOWN && !struggle; ++i) {
+                for (int i = 0; i < MoveRules::MAX_KNOWN && !struggle && !committed; ++i) {
                     const float x = menuLeft, y = top + static_cast<float>(i) * (h + gap);
                     const Move* move = data.move(me.moves[i]);
                     ImGui::SetCursorScreenPos(ImVec2(x, y));
@@ -409,7 +401,7 @@ namespace BattleComponent {
                     dl->AddRectFilled(a, b, !move ? IM_COL32(40, 40, 50, 160) : !usable ? IM_COL32(50, 50, 60, 230) : hover ? IM_COL32(52, 55, 78, 255) : IM_COL32(34, 36, 52, 245), 12.0f);
                     if (!move) { GuiCards::centeredText(dl, ImVec2(x + w * 0.5f, y + h * 0.5f), GuiStyle::MUTED, "—", 1.0f); continue; }
                     // Borde: el normal de la tarjeta; cambia de color según lo eficaz que sea contra el rival (en dobles, contra el objetivo: se ve al elegirlo).
-                    const Effect effect = foes.size() == 1 ? effectiveness(data, *move, battle->fighter(firstFoe)) : Effect{ "", 0 };
+                    const Effect effect = foes.size() == 1 && firstFoe >= 0 && battle->occupied(firstFoe) ? effectiveness(data, *move, battle->fighter(firstFoe)) : Effect{ "", 0 };
                     if (*effect.label) dl->AddRect(a, b, effect.color, 12.0f, 0, 4.0f);
                     else dl->AddRect(a, b, hover && usable ? GuiCards::SELECT : IM_COL32(120, 125, 150, 255), 12.0f, 0, hover && usable ? 2.5f : 1.5f);
                     const ImU32 ink = usable ? IM_COL32(255, 255, 255, 255) : IM_COL32(255, 255, 255, 120);
@@ -446,7 +438,7 @@ namespace BattleComponent {
                         const float pw = 440.0f, ph = 96.0f, px = menuLeft - 16.0f - pw, py = menuBottom - ph;
                         GuiCards::panel(dl, ImVec2(px, py), ImVec2(px + pw, py + ph));
                         GuiCards::text(dl, ImVec2(px + 14.0f, py + 8.0f), IM_COL32(255, 255, 255, 255), move->name.c_str(), 1.0f);
-                        const Effect effect = firstFoe >= 0 && foes.size() == 1 ? effectiveness(data, *move, battle->fighter(firstFoe)) : Effect{ "", 0 };
+                        const Effect effect = firstFoe >= 0 && battle->occupied(firstFoe) && foes.size() == 1 ? effectiveness(data, *move, battle->fighter(firstFoe)) : Effect{ "", 0 };
                         if (*effect.label) GuiCards::chip(dl, ImVec2(px + pw - 14.0f - GuiCards::textWidth(effect.label, 0.7f) - 16.0f, py + 8.0f), effect.label, effect.color, 0.7f);
                         ImGui::SetCursorScreenPos(ImVec2(px + 14.0f, py + 34.0f));
                         ImGui::PushTextWrapPos(px + pw - 14.0f - ImGui::GetWindowPos().x);
@@ -466,7 +458,7 @@ namespace BattleComponent {
                 const float h = 96.0f, halfW = (menuW - 12.0f) * 0.5f;
                 const float rowFoe = menuBottom - 36.0f - 2.0f * h - 26.0f, rowOwn = menuBottom - 36.0f - h;
                 for (float x = menuLeft; x < menuRight; x += 16.0f) dl->AddLine(ImVec2(x, rowFoe + h + 13.0f), ImVec2((std::min)(x + 8.0f, menuRight), rowFoe + h + 13.0f), IM_COL32(255, 255, 255, 150), 2.0f);
-                for (size_t k = 0; k < choices.size(); ++k) {
+                for (size_t k = 0; k < choices.size() && !committed; ++k) {
                     const int who = choices[k];
                     const Battle::Fighter& other = battle->fighter(who);
                     const bool hostile = Battle::sideOf(who) != Battle::sideOf(slot);
@@ -489,7 +481,7 @@ namespace BattleComponent {
                 const float gap = 6.0f, w = menuW, rowH = 46.0f;
                 const int n = static_cast<int>(battle->team(0).size());
                 const float top = menuBottom - 36.0f - static_cast<float>(n) * (rowH + gap) + gap;
-                for (int i = 0; i < n; ++i) {
+                for (int i = 0; i < n && !committed; ++i) {
                     const Battle::Fighter& f = battle->team(0)[static_cast<size_t>(i)];
                     const float x = menuLeft, y = top + static_cast<float>(i) * (rowH + gap);
                     ImGui::SetCursorScreenPos(ImVec2(x, y));
@@ -519,6 +511,7 @@ namespace BattleComponent {
                     if (GuiCards::button("##back", "< ATRÁS", ImVec2(110.0f, 28.0f), true, IM_COL32(70, 70, 92, 255))) s.menu = Menu::MAIN;
                 }
             }
+            if (committed) { ImGui::Dummy(ImVec2(0.0f, 0.0f)); return; }
         } else if (over && s.overTime > 0.35f && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) { // un clic en cualquier parte y se sale
             engine.battleFinish();
             state = GameState::PLAYING;

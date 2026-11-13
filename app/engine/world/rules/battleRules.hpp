@@ -57,7 +57,7 @@ namespace BattleRules {
     };
 
     struct OwnedLike { // lo que hace falta de un pokémon guardado (así el combate no depende del almacén)
-        int speciesId; int level; bool shiny; int hp; int heldId; MoveRules::Slots moves; MoveRules::Slots pp; std::array<int, BaseStats::COUNT> ivs; std::array<int, BaseStats::COUNT> evs; int natureId; int source;
+        int speciesId; int level; bool shiny; int hp; int heldId; MoveRules::Slots moves; MoveRules::Slots pp; std::array<int, BaseStats::COUNT> ivs; std::array<int, BaseStats::COUNT> evs; int natureId; int source; int abilityId = -1;
     };
 
     // PS actuales de un pokémon guardado (hp < 0 = al máximo).
@@ -79,7 +79,7 @@ namespace BattleRules {
         f.defense = StatRules::of(species->stats, 3, owned.level, owned.ivs[3], owned.evs[3], nature);
         f.spDefense = StatRules::of(species->stats, 4, owned.level, owned.ivs[4], owned.evs[4], nature);
         f.speed = StatRules::of(species->stats, 5, owned.level, owned.ivs[5], owned.evs[5], nature);
-        f.abilityId = species->abilityId;
+        f.abilityId = data.abilityFor(*species, owned.abilityId);
         f.passiveId = species->passiveId;
         f.heldId = owned.heldId;
         f.moves = owned.moves;

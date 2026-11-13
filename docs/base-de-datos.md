@@ -67,3 +67,8 @@ Las chapas son objetos de la categoría Entrenamiento: la plateada sale en el co
 
 ## Herramientas
 Los modelos de las herramientas llevan el nivel en el nombre (`items/herramientas/<id del objeto>_<nivel>`); las animaciones de la caña, `<modelo>_<animación>.json` junto a su `.glb`. La tabla `nature` no repite efectos: una naturaleza por cada pareja (sube, baja).
+
+## Habilidades activas y pasivas (v59)
+- Todo pokémon tiene una habilidad activa (`pokemon.ability_id`, obligatoria); la pasiva (`pokemon.passive_id`) es opcional y nunca puede ser activa.
+- `pokemon_ability (pokemon_id, ability_id)`: activas posibles de la especie; cada ejemplar sale con una y la conserva (la misma especie puede tener distintas).
+- Ternura (id 11, efecto 132): al entrar baja un nivel el ataque especial de los rivales.

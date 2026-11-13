@@ -78,7 +78,7 @@ class Battle {
     const std::vector<Fighter>& team(int side) const { return m_team[side]; }
     int active(int slot) const { return m_active[slot]; }                  // posición en el equipo del que ocupa ese hueco (-1 = vacío)
     bool occupied(int slot) const { return m_active[slot] >= 0; }
-    const Fighter& fighter(int slot) const { return m_team[sideOf(slot)][static_cast<size_t>(m_active[slot])]; } // solo si occupied(slot)
+    const Fighter& fighter(int slot) const { return m_team[sideOf(slot)][static_cast<size_t>(m_active[slot] >= 0 ? m_active[slot] : 0)]; } // pensado para occupied(slot); sin pokémon en el hueco devuelve el primero del equipo en vez de salirse del vector
     bool inField(int slot) const { return occupied(slot) && !fighter(slot).fainted(); }
     const std::string& foeName() const { return m_foeName; }
     const std::vector<int>& defeatedLevels() const { return m_defeated; } // niveles de los pokémon rivales derrotados (el jugador gana experiencia por ellos)

@@ -35,6 +35,11 @@ namespace GuiCards {
         text(dl, ImVec2(center.x - textWidth(value, scale) * 0.5f, center.y - ImGui::GetFontSize() * scale * 0.5f), color, value, scale);
     }
 
+    // Texto alineado a la izquierda y centrado en vertical sobre y = center.y.
+    inline void centeredTextLeft(ImDrawList* dl, const ImVec2& left, ImU32 color, const char* value, float scale = 1.0f) {
+        text(dl, ImVec2(left.x, left.y - ImGui::GetFontSize() * scale * 0.5f), color, value, scale);
+    }
+
     // Color de cada rango de potencial (D..S+).
     inline ImU32 rankColor(IvRules::Rank rank) {
         switch (rank) {

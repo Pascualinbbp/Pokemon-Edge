@@ -156,3 +156,6 @@ Solo el equipo; se reordena arrastrando un pokémon sobre otro. La ficha lleva t
 
 ## Herramientas en la mano
 Hacha (`44`), pico (`45`) y caña (`47`) tienen un modelo por nivel: `assets/models/items/herramientas/<id>_<nivel>.glb` y su sprite `assets/sprites/items/herramientas/<id>_<nivel>.png` (el inventario elige el sprite según el nivel; sin él, un dibujo sencillo). La caña tiene huesos: `<id>_<nivel>_lanzar.json`, `_picar.json` y `_recoger.json` (formato `janus.animacion`, giros absolutos por hueso en espacio glTF). Se reproducen por CPU (`utils/graphics/skinUtil.hpp`) ajustados a la fase de la pesca: lanzar durante el lanzamiento (`Fishing::CAST_TIME`, 1,4 s) y se queda en su última pose esperando; picar durante la picada; recoger con el pokémon enganchado. Con la línea echada el hilo y el corcho del modelo se recogen en la punta de la caña y el juego dibuja los suyos en el agua.
+
+## Vitaminas y chapas en el menú Pokémon
+En la ficha, bajo los EVs, aparecen los botones de Vitamina, Chapa plata y Chapa dorada de la mochila: se elige uno y se pulsa el botón de la estadística (+IV / TOPE); la dorada actúa al pulsarla. La zanahoria y la patata se siembran tal cual (sin semillas).

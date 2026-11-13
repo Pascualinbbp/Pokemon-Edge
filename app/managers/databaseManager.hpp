@@ -39,6 +39,7 @@ class DatabaseManager {
         data.nodes = ResourceNodeDao().findAll();
         data.species = PokemonSpeciesDao().findAll();
         data.abilities = AbilityDao().findAll();
+        data.normalizeAbilities();
         MoveDao().load(data);
         data.rarities = RarityDao().findAll();
         data.generations = GenerationDao().findAll();

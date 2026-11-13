@@ -73,6 +73,28 @@ struct GameData {
     const Rarity* rarity(int id) const { return find(rarities, id); }
     const Generation* generation(int id) const { return find(generations, id); }
     const Nature* nature(int id) const { return id <= 0 ? nullptr : find(natures, id); } // 0 = sin naturaleza (neutra)
+    // Deja las habilidades de cada especie como deben ser: la activa es obligatoria (y nunca una pasiva), la pasiva es opcional (y solo de las pasivas).
+    // Una activa con efecto de pasiva pasa al hueco de pasiva; una pasiva con efecto de activa, al de activa; la lista de activas posibles solo lleva activas.
+    void normalizeAbilities() {
+        for (PokemonSpecies& s : species) {
+            const Ability* active = ability(s.abilityId);
+            const Ability* passive = ability(s.passiveId);
+            if (active && active->passiveKind()) { if (!passive) s.passiveId = active->id; s.abilityId = -1; }
+            if (passive && !passive->passiveKind()) { if (s.abilityId < 0 && !s.abilityPool.empty()) s.abilityId = passive->id; s.passiveId = -1; }
+            std::vector<int> pool;
+            for (const int id : s.abilityPool) { const Ability* a = ability(id); if (a && !a->passiveKind() && std::find(pool.begin(), pool.end(), id) == pool.end()) pool.push_back(id); }
+            if (pool.empty() && s.abilityId >= 0) pool.push_back(s.abilityId);
+            s.abilityPool = pool;
+            if (!pool.empty() && (s.abilityId < 0 || std::find(pool.begin(), pool.end(), s.abilityId) == pool.end())) s.abilityId = pool.front();
+        }
+    }
+    // Habilidad activa de un ejemplar: la que tiene si es de las de su especie; si no, una al azar de las posibles.
+    int abilityFor(const PokemonSpecies& s, int chosen) const {
+        if (chosen >= 0 && std::find(s.abilityPool.begin(), s.abilityPool.end(), chosen) != s.abilityPool.end()) return chosen;
+        if (s.abilityPool.empty()) return s.abilityId;
+        return s.abilityPool[static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(s.abilityPool.size()) - 1))];
+    }
+
     // Id de una naturaleza al azar (0 si no hay ninguna cargada).
     int randomNatureId() const { return natures.empty() ? 0 : natures[static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(natures.size()) - 1))].id; }
     const Rarity* rarityOf(const PokemonSpecies& species) const { return rarity(species.rarityId); }
