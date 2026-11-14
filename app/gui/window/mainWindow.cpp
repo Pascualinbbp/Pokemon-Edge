@@ -23,7 +23,6 @@
 #include "../game/seedComponent.hpp"
 #include "../game/shopComponent.hpp"
 #include "../game/battleComponent.hpp"
-#include "../game/learnComponent.hpp"
 #include "../game/playerComponent.hpp"
 #include "../game/starterComponent.hpp"
 #include "../menus/updateComponent.hpp"
@@ -302,12 +301,6 @@ void MainWindow::run() {
                 ShopComponent::reset();
                 redrawFrames = 2;
                 justPaused = true;
-            } else if (engine.takeLearnRequest()) {
-                g_state = GameState::LEARN;
-                g_backState = GameState::PLAYING;
-                LearnComponent::reset();
-                redrawFrames = 2;
-                justPaused = true;
             } else if (engine.takeResearchRequest()) {
                 g_state = GameState::RESEARCH;
                 g_backState = GameState::PLAYING;
@@ -348,7 +341,7 @@ void MainWindow::run() {
         {
             static const char* const STAGES[] = { "interfaz: TITLE_SCREEN", "interfaz: MAIN_MENU", "interfaz: LOAD_MENU", "interfaz: REPLACE_MENU", "interfaz: LOADING", "interfaz: PLAYING", "interfaz: PAUSED", "interfaz: CONTROLS",
                 "interfaz: MAP", "interfaz: INVENTORY", "interfaz: POKEDEX", "interfaz: TYPES", "interfaz: POKEMON", "interfaz: STARTER", "interfaz: PLAYER", "interfaz: RESEARCH", "interfaz: BATTLE",
-                "interfaz: SHOP", "interfaz: LEARN", "interfaz: SEEDS", "interfaz: PC", "interfaz: UPDATING" };
+                "interfaz: SHOP", "interfaz: SEEDS", "interfaz: PC", "interfaz: UPDATING" };
             CrashUtil::stage(STAGES[static_cast<int>(g_state)]); // la etapa dice en qué pantalla estaba el juego al cerrarse
         }
         switch (g_state) {
@@ -427,9 +420,6 @@ void MainWindow::run() {
                 break;
             case GameState::SHOP:
                 ShopComponent::render(g_state, g_backState, engine);
-                break;
-            case GameState::LEARN:
-                LearnComponent::render(g_state, g_backState, engine);
                 break;
             case GameState::PC:
                 PokemonComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress(), InputHandler::activeDevice(), true);

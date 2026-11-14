@@ -12,6 +12,7 @@
 #include "../style/icons/itemIcon.hpp"
 #include "../style/icons/typeIcons.hpp"
 #include "../../engine/core/gameEngine.hpp"
+#include "../../engine/world/rules/pokemonRules.hpp"
 
 // Combate por turnos: pantalla de carga, la escena 3D de fondo (cámara detrás de nuestro pokémon) y encima las barras de vida, los mensajes del
 // turno y el menú (Luchar / Pokémon). Todo con el ratón: clic en un movimiento o en un pokémon. El combate en sí vive en Battle.
@@ -46,6 +47,9 @@ namespace BattleComponent {
             std::string text;
             Show shown;
             float bar[Battle::SLOTS] = { -1.0f, -1.0f, -1.0f, -1.0f }; // PS que muestra cada barra (animados)
+            int xpSeen[Battle::SLOTS] = { 0, 0, 0, 0 };                 // experiencia ganada que ya se enseñó en cada hueco
+            float xpTimer[Battle::SLOTS] = { 0.0f, 0.0f, 0.0f, 0.0f };  // tiempo que queda de mostrar la barra de experiencia (solo cuando se gana)
+            float xpBar[Battle::SLOTS] = { 0.0f, 0.0f, 0.0f, 0.0f };    // fracción que muestra esa barra (animada)
             float messageLimit = MESSAGE_TIME;                          // lo que dura el mensaje en curso (más si lleva animación de pokéball)
             int step = 0;                                               // (dobles) a qué hueco del jugador se le está dando la orden
             std::vector<Battle::Action> picked;                         // órdenes ya elegidas este turno
@@ -251,6 +255,21 @@ namespace BattleComponent {
             s.shown = live(*battle);
         }
 
+        // Barra de experiencia: aparece bajo la tarjeta solo cuando el pokémon gana experiencia (y una vez acabados los mensajes) y se oculta después.
+        for (int slot = 0; slot < Battle::SLOTS; ++slot) {
+            s.xpTimer[slot] = (std::max)(0.0f, s.xpTimer[slot] - dt);
+            if (Battle::sideOf(slot) != 0 || !battle->occupied(slot) || s.messageActive || battle->hasMessage()) continue;
+            const Battle::Fighter& f = battle->fighter(slot);
+            const float need = static_cast<float>((std::max)(1, PokemonRules::xpToNext(f.level)));
+            if (f.xpGain > s.xpSeen[slot]) {
+                if (s.xpTimer[slot] <= 0.0f) s.xpBar[slot] = (std::min)(1.0f, static_cast<float>(f.xp + s.xpSeen[slot]) / need);
+                s.xpSeen[slot] = f.xpGain;
+                s.xpTimer[slot] = 3.5f;
+            }
+            const float goal = (std::min)(1.0f, static_cast<float>(f.xp + s.xpSeen[slot]) / need);
+            s.xpBar[slot] = s.xpBar[slot] < goal ? (std::min)(goal, s.xpBar[slot] + 0.35f * dt) : goal;
+        }
+
         // Barras de PS: se desplazan hacia el valor mostrado.
         for (int side = 0; side < Battle::SLOTS; ++side) {
             const float target = static_cast<float>(s.shown.hp[side]);
@@ -300,10 +319,15 @@ namespace BattleComponent {
         const bool cardsOnly = (s.messageActive && s.cardFocus) || (!s.messageActive && !choosing && !over && showAnimating);
         for (int slot = 0; slot < Battle::SLOTS; ++slot) {
             if (!s.shown.onField[slot]) continue;
-            const bool visible = choosing ? true : cardsOnly ? (s.messageActive ? s.focus[slot] : animating[slot]) : false;
+            const bool gainingXp = Battle::sideOf(slot) == 0 && s.xpTimer[slot] > 0.0f;
+            const bool visible = choosing || gainingXp ? true : cardsOnly ? (s.messageActive ? s.focus[slot] : animating[slot]) : false;
             if (!visible) continue;
             const ImVec2 pos = cardPos(slot);
             drawBox(dl, data, pos, cardSize, s.shown, slot, s.bar[slot]);
+            if (gainingXp) { // experiencia hacia el siguiente nivel, bajo la tarjeta
+                GuiCards::bar(dl, ImVec2(pos.x + 14.0f, pos.y + cardSize.y + 6.0f), cardSize.x - 28.0f, s.xpBar[slot], IM_COL32(90, 170, 255, 255), 8.0f);
+                GuiCards::text(dl, ImVec2(pos.x + 14.0f, pos.y + cardSize.y + 14.0f), IM_COL32(190, 220, 255, 255), "EXP", 0.6f);
+            }
             if (s.fxSide == slot && s.messageActive) drawFx(dl, s, ImVec2(pos.x, pos.y - 4.0f), cardSize);
         }
 

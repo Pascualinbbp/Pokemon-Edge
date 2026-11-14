@@ -33,7 +33,6 @@ struct OwnedPokemon {
     MoveRules::Slots moves = { -1, -1, -1, -1 }; // movimientos que conoce (id de move; -1 = hueco)
     MoveRules::Slots pp = { -1, -1, -1, -1 };    // PP actuales de cada uno (-1 = al máximo; no se guardan)
     std::vector<int> unlocked;      // movimientos que ya intentó aprender (aunque no los lleve puestos): no vuelven a salir
-    std::vector<int> pendingLearn;  // movimientos que quiere aprender y esperan la decisión del jugador (no se guarda)
 };
 
 // Resultado de un análisis de la máquina de investigación.
@@ -261,7 +260,7 @@ class PokemonStorage {
         ++owned->level;
         if (owned->hp >= 0 && hpBefore > 0) owned->hp = hpBefore + (std::max)(0, maxHp(*owned) - maxBefore); // el aumento de PS máximos también sube los actuales
         dexProgress.leveled(owned->speciesId, owned->level);
-        if (MoveRules::attemptsAt(owned->level)) { const int learned = attemptLearn(*owned); if (learned >= 0 && owned->pendingLearn.empty()) m_learnedNow.push_back({ owned->speciesId, learned }); }
+        if (MoveRules::attemptsAt(owned->level)) { const int learned = attemptLearn(*owned); if (learned >= 0) m_learnedNow.push_back({ owned->speciesId, learned }); }
         const PokemonSpecies* species = m_data->speciesById(owned->speciesId);
         const Evolution* evolution = species ? species->levelEvolution(owned->level, RandomUtil::range(0.0f, 1.0f)) : nullptr;
         if (evolution && m_data->speciesById(evolution->toId)) {
@@ -335,7 +334,6 @@ class PokemonStorage {
         owned.unlocked.push_back(id);
         const int slot = MoveRules::freeSlot(owned.moves);
         if (slot >= 0) { owned.moves[slot] = id; owned.pp[slot] = -1; }
-        else owned.pendingLearn.push_back(id);
         return id;
     }
     // Movimientos iniciales de uno recién creado: el primero siempre, y uno más por cada LEARN_EVERY niveles que ya tiene. Los cuatro primeros los lleva
@@ -344,7 +342,6 @@ class PokemonStorage {
         if (MoveRules::known(owned.moves) > 0 || !owned.unlocked.empty()) return;
         for (int i = 0, n = 1 + owned.level / MoveRules::LEARN_EVERY; i < n; ++i) {
             if (attemptLearn(owned, i == 0) < 0) break; // el primero siempre hace daño
-            owned.pendingLearn.clear(); // los que no caben no preguntan: solo se desbloquean
         }
     }
     int maxPp(const OwnedPokemon& owned, int slot) const { const Move* move = m_data->move(owned.moves[slot]); return move ? move->pp : 0; }
@@ -372,21 +369,6 @@ class PokemonStorage {
         if (!owned || slot < 0 || slot >= MoveRules::MAX_KNOWN || MoveRules::known(owned->moves) <= 1) return false;
         owned->moves[slot] = -1;
         return true;
-    }
-    // El primer pokémon (equipo, luego PC) con un movimiento esperando decisión. Devuelve su lugar y el movimiento (-1 si no hay).
-    struct LearnRequest { bool inTeam = true; int index = -1; int moveId = -1; };
-    LearnRequest pendingLearnRequest() const {
-        for (int i = 0; i < static_cast<int>(m_team.size()); ++i) if (!m_team[i].pendingLearn.empty()) return { true, i, m_team[i].pendingLearn.front() };
-        for (int i = 0; i < static_cast<int>(m_pc.size()); ++i) if (!m_pc[i].pendingLearn.empty()) return { false, i, m_pc[i].pendingLearn.front() };
-        return {};
-    }
-    // Resuelve el aprendizaje pendiente: slot >= 0 olvida ese movimiento y aprende el nuevo; -1 lo rechaza (queda desbloqueado, se podrá equipar luego).
-    void resolveLearn(bool inTeam, int index, int slot) {
-        OwnedPokemon* owned = at(inTeam, index);
-        if (!owned || owned->pendingLearn.empty()) return;
-        const int id = owned->pendingLearn.front();
-        owned->pendingLearn.erase(owned->pendingLearn.begin());
-        if (slot >= 0 && slot < MoveRules::MAX_KNOWN) { owned->moves[slot] = id; owned->pp[slot] = -1; }
     }
     OwnedPokemon* mutableAt(bool inTeam, int index) { return at(inTeam, index); }
 
@@ -624,7 +606,6 @@ class PokemonStorage {
         for (const std::string& name : splitNames(field(10))) if (const Move* move = m_data->moveByName(name)) owned.unlocked.push_back(move->id);
         for (const int id : owned.moves) if (id >= 0 && !MoveRules::contains(owned.unlocked, id)) owned.unlocked.push_back(id);
         ensureMoves(owned);
-        owned.pendingLearn.clear();
         list.push_back(owned);
     }
 

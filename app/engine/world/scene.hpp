@@ -121,7 +121,6 @@ struct Scene {
     std::shared_ptr<Battle> battle; // combate por turnos en curso (nullptr = ninguno)
     bool battleRequested = false;   // se acaba de empezar un combate por turnos: la interfaz abre su pantalla
     bool shopRequested = false;     // se acaba de hablar con el tendero: la interfaz abre la tienda
-    bool learnRequested = false;    // hay un pokémon con un movimiento esperando decisión: la interfaz abre su pantalla
     // Animación del combate por turnos: quién ataca (0 jugador, 1 rival), si el golpe llega y el tiempo desde que empezó el mensaje.
     struct BattleFx { int attacker = -1; int target = -1; bool hit = false; float time = 0.0f; };
     BattleFx battleFx;
@@ -236,10 +235,16 @@ struct Scene {
         player.aiming = m_aiming || camera.aimBlend() > 0.05f; // el personaje deja de apuntar cuando la cámara ya casi ha vuelto
         InputState moveInput = input;
         if (fishing.hooked()) moveInput.crouch = moveInput.crouchHeld = false; // los botones de decidir (Liberar) no agachan
-        {   // el compañero con branquias da aire al jugador bajo el agua
-            const OwnedPokemon* lead = storage.active();
-            const PokemonSpecies* gills = lead ? m_data->speciesById(lead->speciesId) : nullptr;
-            player.breathesUnderwater = gills && companion.active() && !companion.changing() && m_data->breathesUnderwater(*gills);
+        {   // las habilidades pasivas del jugador valen con el pokémon en el equipo (no hace falta que lo acompañe): Branquias da aire bajo el agua, Bioluminiscencia da luz
+            bool gills = false, glow = false;
+            for (const OwnedPokemon& member : storage.team()) {
+                const PokemonSpecies* species = m_data->speciesById(member.speciesId);
+                if (!species) continue;
+                gills = gills || m_data->hasEffect(*species, member.abilityId, Ability::Effect::WATER_BREATHING);
+                glow = glow || m_data->hasEffect(*species, member.abilityId, Ability::Effect::BIOLUMINESCENCE);
+            }
+            player.breathesUnderwater = gills;
+            m_glows = glow;
         }
         player.onCloud = habitats.cloudFloor(player.body.position.x, player.body.position.z, player.body.feet(), true);
         player.update(dt, moveInput, camera.yaw(), camera.lookAngle(), world);
@@ -833,6 +838,10 @@ struct Scene {
         target.setSwims(true);
         return true;
     }
+
+    public:
+    bool playerGlows() const { return m_glows; }
+    private:
 
     // --- Pesca ---
     // Modelo de la herramienta que el jugador tiene en la mano para esa acción: "<asset del objeto>_<nivel>" (assets/models/items/herramientas/44_2.glb).
@@ -1437,10 +1446,10 @@ struct Scene {
     }
 
     // En modo captura, el salvaje más cercano que el acompañante ha dejado debilitado (con la vida en o bajo CAPTURE_STOP_HP) y que se
-    // puede capturar ya: aparece la ayuda de interacción "Capturar" sobre él.
+    // puede capturar ya: aparece la ayuda de interacción "Capturar" sobre él (nunca en los pokémon de un entrenador).
     const CaptureTarget* weakenedTarget() const {
         if (storage.mode != CompanionRules::Mode::CAPTURE || !storage.active() || fishing.active() || m_aiming) return nullptr;
-        return nearestWild(CompanionRules::WEAK_REACH, [](const CaptureTarget& target) { return target.hpFraction() <= CompanionRules::CAPTURE_STOP_HP; });
+        return nearestWild(CompanionRules::WEAK_REACH, [&](const CaptureTarget& target) { return &target != wild.foe() && target.hpFraction() <= CompanionRules::CAPTURE_STOP_HP; }); // el pokémon de un entrenador no se captura
     }
 
     void interact() {
@@ -2181,7 +2190,7 @@ struct Scene {
     int rivalLevel() const { return (std::clamp)(RandomUtil::integer(m_trainerBase - 1, m_trainerBase + 1), 2, PlayerProgress::MAX_LEVEL); }
     int leadLevel() const { const OwnedPokemon* lead = storage.active(); return lead ? lead->level : 5; }
 
-    static BattleRules::OwnedLike likeOf(const OwnedPokemon& o, int source) { return { o.speciesId, o.level, o.shiny, o.hp, o.heldItemId, o.moves, o.pp, o.ivs, o.evs, o.nature, source, o.abilityId }; }
+    static BattleRules::OwnedLike likeOf(const OwnedPokemon& o, int source) { return { o.speciesId, o.level, o.shiny, o.hp, o.heldItemId, o.moves, o.pp, o.ivs, o.evs, o.nature, source, o.abilityId, o.xp }; }
 
     // Empieza el duelo con un entrenador: en tiempo real (su pokémon sale al mundo y peleamos como contra los salvajes) o por turnos (pantalla propia).
     void startDuel(int index) {
@@ -2314,16 +2323,15 @@ struct Scene {
         battle.reset();
     }
 
-    // Movimientos nuevos: los aprendidos solos se avisan; los que no caben abren la pantalla de decisión (nunca durante un combate).
+    // Movimientos nuevos: cada uno que un pokémon desbloquea se avisa ("puede aprender"); el jugador lo pone desde la edición de movimientos (nunca durante un combate).
     void updateLearning() {
         if (battle) return;
         for (const auto& entry : storage.m_learnedNow) {
             const PokemonSpecies* species = m_data->speciesById(entry.first);
             const Move* move = m_data->move(entry.second);
-            if (species && move) showNotice(Notice::REWARD, species->name + " aprendió " + move->name);
+            if (species && move) showNotice(Notice::REWARD, species->name + " puede aprender " + move->name);
         }
         storage.m_learnedNow.clear();
-        if (!learnRequested && !battleRequested && storage.pendingLearnRequest().index >= 0) learnRequested = true;
     }
 
     // --- Tienda: vende todo lo relacionado con los pokémon (apartado "Pokémon" de la mochila) que tenga precio de compra. Un precio de compra 0 lo
@@ -2510,6 +2518,7 @@ struct Scene {
     std::vector<Forager> m_foragers;
     std::vector<char> m_sandHabitats;
     const CaptureTarget* m_weak = nullptr; // salvaje debilitado por el acompañante que se puede capturar ahora (Interaction::WEAKENED)
+    bool m_glows = false;  // algún pokémon del equipo tiene Bioluminiscencia: el jugador brilla en la oscuridad
     bool m_aiming = false; // modo lanzamiento (clic derecho) o L2 mantenido
     bool m_wasAiming = false; // el fotograma anterior estaba en modo captura (para elegir la primera pokéball al entrar)
     float m_lockHidden = 0.0f; // segundos que lleva tapado el pokémon fijado

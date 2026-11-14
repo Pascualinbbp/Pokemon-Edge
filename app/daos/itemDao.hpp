@@ -20,7 +20,9 @@ class ItemDao {
                                    material.buyPrice, material.sellPrice, 0, -1 });
         }
         for (const Tool& tool : data.tools) {
-            data.items.push_back({ TOOL_ITEM_BASE + tool.id, ItemCategory::TOOL, tool.categoryId, tool.id, -1, tool.name, tool.description, "", 0, 0, 0, -1 });
+            std::string folder = "herramientas"; // carpeta de su categoría; el modelo y el sprite se llaman como el id de la herramienta (items/herramientas/<id>_<nivel>)
+            for (const ItemCategoryInfo& category : data.categories) if (category.id == tool.categoryId) folder = StringUtil::slug(category.name);
+            data.items.push_back({ TOOL_ITEM_BASE + tool.id, ItemCategory::TOOL, tool.categoryId, tool.id, -1, tool.name, tool.description, "items/" + folder + "/" + std::to_string(tool.id), 0, 0, 0, -1 });
         }
         for (ItemCategoryInfo& category : data.categories) {
             for (const Item& item : data.items) if (item.categoryId == category.id) { category.iconItemId = item.id; break; }

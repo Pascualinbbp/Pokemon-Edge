@@ -101,11 +101,13 @@ class Battle {
         return move >= 0 && move < MoveRules::MAX_KNOWN && f.moves[static_cast<size_t>(move)] >= 0 && f.pp[static_cast<size_t>(move)] > 0;
     }
     bool mustStruggle(int slot) const { return inField(slot) && !fighter(slot).usable(); }
-    // ¿Hay que elegir a quién ataca ese movimiento? (solo en dobles, si ataca al rival y quedan dos rivales en pie)
+    // ¿Hay que elegir a quién va el movimiento? Siempre si puede ir a cualquiera (rival, aliado o uno mismo; también en individuales y con un solo rival);
+    // si no, solo en dobles cuando ataca al rival y quedan dos rivales en pie.
     bool needsTarget(int slot, int move) const {
-        if (!m_doubles || !inField(slot)) return false;
+        if (!inField(slot)) return false;
         const Move* m = mustStruggle(slot) ? nullptr : moveOf(fighter(slot), move);
         if (m && m->scope == Move::Scope::ANY) return true; // aliado, uno mismo o rival
+        if (!m_doubles) return false;
         if (foeSlots().size() < 2) return false;
         if (mustStruggle(slot)) return true;
         if (!m) return false;

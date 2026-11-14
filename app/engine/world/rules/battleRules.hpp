@@ -16,7 +16,7 @@ namespace BattleRules {
 
     inline constexpr int MAX_STAGE = 6;
     inline constexpr float CRIT_MULTIPLIER = 1.5f;
-    inline constexpr float STAB = 1.5f;
+    inline constexpr float STAB = 1.2f; // bonificación por atacar con un tipo propio (menor que en los juegos: casi todos los movimientos la tienen)
     inline constexpr float BASE_CRIT[] = { 1.0f / 16.0f, 1.0f / 8.0f, 1.0f / 4.0f, 1.0f / 3.0f, 1.0f / 2.0f }; // probabilidad según los niveles de crítico (0 = base)
     inline constexpr float PARALYSIS_SKIP = 0.25f;  // probabilidad de no poder moverse paralizado
     inline constexpr float PARALYSIS_SPEED = 0.5f;
@@ -46,6 +46,7 @@ namespace BattleRules {
         bool flinched = false;
         bool participated = false;
         unsigned faced = 0;   // (rival) bits de los pokémon del jugador que estuvieron en combate frente a él
+        int xp = 0;           // (jugador) experiencia que llevaba hacia el siguiente nivel al empezar
         int xpGain = 0;       // (jugador) experiencia que ha ganado en este combate
         int source = -1; // posición en el equipo de origen
 
@@ -57,7 +58,7 @@ namespace BattleRules {
     };
 
     struct OwnedLike { // lo que hace falta de un pokémon guardado (así el combate no depende del almacén)
-        int speciesId; int level; bool shiny; int hp; int heldId; MoveRules::Slots moves; MoveRules::Slots pp; std::array<int, BaseStats::COUNT> ivs; std::array<int, BaseStats::COUNT> evs; int natureId; int source; int abilityId = -1;
+        int speciesId; int level; bool shiny; int hp; int heldId; MoveRules::Slots moves; MoveRules::Slots pp; std::array<int, BaseStats::COUNT> ivs; std::array<int, BaseStats::COUNT> evs; int natureId; int source; int abilityId = -1; int xp = 0;
     };
 
     // PS actuales de un pokémon guardado (hp < 0 = al máximo).
@@ -68,6 +69,7 @@ namespace BattleRules {
         f.level = owned.level;
         f.shiny = owned.shiny;
         f.source = owned.source;
+        f.xp = owned.xp;
         if (!species) return f;
         f.name = species->name;
         f.types = species->types;
@@ -156,6 +158,10 @@ namespace BattleRules {
         value *= DAMAGE_MIN_ROLL + (1.0f - DAMAGE_MIN_ROLL) * std::clamp(roll, 0.0f, 1.0f);
         for (const Ability* a : abilitiesOf(data, attacker)) {
             if (a->effect == Ability::Effect::TYPE_BOOST && a->typeId == move.typeId && attacker.hpFraction() < a->hpBelow) value *= a->multiplier;
+        }
+        for (const Ability* a : abilitiesOf(data, attacker)) { // Bioluminiscencia: más daño con los movimientos de luz (etiqueta "Luz")
+            if (a->effect != Ability::Effect::BIOLUMINESCENCE) continue;
+            for (const MoveTag& tag : data.moveTags) if (tag.name == "Luz" && std::find(move.tags.begin(), move.tags.end(), tag.id) != move.tags.end()) value *= a->multiplier;
         }
         if (const HeldItem* held = data.held(attacker.heldId)) if (held->effect == HeldItem::Effect::LIFE_ORB) value *= 1.0f + static_cast<float>(held->amount) / 100.0f;
         result.crit = crit;

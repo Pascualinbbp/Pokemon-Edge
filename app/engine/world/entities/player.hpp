@@ -40,7 +40,7 @@ class Player {
     static constexpr float SURFACE_RISE   = 2.5f;  // sin aire, el cuerpo sube solo a esa velocidad
     static constexpr float DIVE_MIN_DEPTH = 1.3f;  // hace falta al menos esta profundidad para sumergirse
     static constexpr float CLIMB_SPEED    = 3.0f;  // trepar una ladera muy empinada
-    static constexpr float OXYGEN_REFILL  = 6.0f;  // el aire se recupera esta vez más rápido de lo que se gasta
+    static constexpr float OXYGEN_REFILL  = 1.0f;  // el aire se recupera igual de rápido de lo que se gasta (de forma progresiva)
 
     Physics::Body body;
 

@@ -160,7 +160,7 @@ namespace InventoryComponent {
             if (GuiCards::button("##upgrade", "MEJORAR", ImVec2(180.0f, 38.0f), inventory.canUpgrade(tool))) inventory.upgrade(tool);
         }
 
-        // Precios (pokémonedas) y venta de las unidades que se tienen. Las herramientas no se venden.
+        // Precios (pokémonedas) de compra y venta; vender se hace en la tienda. Las herramientas no se venden.
         inline std::string useMessage; // resultado del último uso (se borra al cambiar de objeto)
         inline int useMessageItem = -1;
         inline int vitaminTarget = -1; // pokémon del equipo elegido para la vitamina (luego se elige la estadística)
@@ -269,11 +269,7 @@ namespace InventoryComponent {
             char text[96];
             std::snprintf(text, sizeof(text), "Compra: %d     Venta: %d  (pokémonedas)", item.buyPrice, item.sellPrice);
             ImGui::TextUnformatted(text);
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            const bool canSell = item.sellPrice > 0 && count > 0;
-            if (GuiCards::button("##sell1", "VENDER 1", ImVec2(150.0f, 34.0f), canSell, IM_COL32(190, 120, 30, 255))) inventory.sell(item.id, 1);
-            ImGui::SameLine();
-            if (GuiCards::button("##sellAll", "VENDER TODO", ImVec2(170.0f, 34.0f), canSell, IM_COL32(190, 120, 30, 255))) inventory.sell(item.id, count);
+            (void)inventory; (void)count; // la venta se hace en la tienda
         }
 
         inline void drawDetail(const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, const Item* item, const std::string& category, const ImVec2& pos, const ImVec2& size) {

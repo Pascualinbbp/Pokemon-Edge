@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <string>
 #include "imgui.h"
-#include "learnComponent.hpp"
+#include "moveCard.hpp"
 #include "../style/guiCards.hpp"
 #include "../style/guiStyle.hpp"
 #include "../window/guiInput.hpp"
@@ -47,7 +47,7 @@ namespace MoveEditor {
             ImGui::PopID();
             const bool target = detail::drag.kind != 0 && hovered && !(detail::drag.kind == 1 && detail::drag.slot == i);
             const bool lifted = detail::drag.kind == 1 && detail::drag.slot == i;
-            if (move) LearnComponent::detail::moveCard(dl, data, *move, slotA[i], ImVec2(COL, CARD_H), (hovered && detail::drag.kind == 0) || selected || target, storage.ppOf(owned, i));
+            if (move) MoveCard::card(dl, data, *move, slotA[i], ImVec2(COL, CARD_H), (hovered && detail::drag.kind == 0) || selected || target, storage.ppOf(owned, i));
             else {
                 dl->AddRectFilled(slotA[i], slotB[i], IM_COL32(40, 40, 52, 220), 12.0f);
                 GuiCards::centeredText(dl, ImVec2(o.x + PAD + COL * 0.5f, y + CARD_H * 0.5f), GuiStyle::MUTED, "Hueco vacío", 1.0f);
@@ -78,7 +78,7 @@ namespace MoveEditor {
             cl->AddRectFilled(a, ImVec2(a.x + rw - 10.0f, a.y + 56.0f), GuiCards::withAlpha(GuiCards::typeColor(move->typeId), hovered ? 255 : equipped ? 120 : 190), 10.0f);
             GuiCards::text(cl, ImVec2(a.x + 10.0f, a.y + 6.0f), IM_COL32(255, 255, 255, 255), move->name.c_str(), 0.95f);
             char info[96];
-            std::snprintf(info, sizeof(info), "%s · Pot. %s · PP %d%s", LearnComponent::detail::typeName(data, move->typeId).c_str(), move->power > 0 ? std::to_string(move->power).c_str() : "—", move->pp, equipped ? "   (equipado)" : "");
+            std::snprintf(info, sizeof(info), "%s · Pot. %s · PP %d%s", MoveCard::typeName(data, move->typeId).c_str(), move->power > 0 ? std::to_string(move->power).c_str() : "—", move->pp, equipped ? "   (equipado)" : "");
             GuiCards::text(cl, ImVec2(a.x + 10.0f, a.y + 30.0f), IM_COL32(255, 255, 255, 220), info, 0.75f);
             if (hovered && detail::drag.kind == 0) ImGui::SetTooltip("%s", move->description.c_str());
             ImGui::Dummy(ImVec2(0.0f, 6.0f)); // separación (no mover el cursor a pelo: ImGui aborta si el último gesto de un child es un SetCursorScreenPos)

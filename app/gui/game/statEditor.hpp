@@ -8,7 +8,6 @@
 #include "../window/guiInput.hpp"
 #include "../../engine/world/rules/ivRules.hpp"
 #include "../../engine/world/rules/statRules.hpp"
-#include "../../engine/world/state/inventory.hpp"
 #include "../../engine/world/state/pokemonStorage.hpp"
 
 // Entrenamiento de un pokémon desde su ficha: reparte sus EVs (510 en total, 252 como máximo en una estadística) y elige su naturaleza cuando quiera.
@@ -18,24 +17,11 @@ namespace StatEditor {
     namespace detail {
         inline constexpr int ORDER[6] = { 0, 1, 3, 2, 4, 5 }; // PS, ataque, defensa, ataque esp., defensa esp., velocidad
         inline constexpr int STEP = 4;                       // 4 EV = 1 punto de estadística
-        inline int ivItem = -1;                              // objeto de IV elegido (vitamina o chapa plateada); la dorada actúa al pulsarla
-        inline std::string ivMessage;
-
-        // El objeto de IV elegido (vitamina o chapa plateada) si aún quedan en la mochila.
-        inline const Item* chosenIvItem(const GameData& data, const Inventory& inventory) {
-            if (ivItem < 0 || inventory.count(ivItem) <= 0) return nullptr;
-            for (const Item& item : data.items) {
-                if (item.id != ivItem || item.category != ItemCategory::TRAINING) continue;
-                const TrainingItem* t = data.training(item.refId);
-                return t && (t->effect == TrainingItem::Effect::IV || t->effect == TrainingItem::Effect::IV_CAP) ? &item : nullptr;
-            }
-            return nullptr;
-        }
     }
 
     // Contenido del entrenamiento dentro de un rectángulo ('o', ancho W, alto H); todo se ajusta al espacio que hay. 'embedded' = va dentro de una pestaña de la ficha:
     // sin marco, título ni botón de cerrar. Los EVs se reparten arrastrando la barra (a saltos de 4, cada salto marcado); la naturaleza se elige en la cuadrícula.
-    inline void content(ImDrawList* dl, const GameData& data, PokemonStorage& storage, Inventory& inventory, bool inTeam, int index, const OwnedPokemon& owned, const PokemonSpecies* species, const ImVec2& o, float W, float H, bool embedded) {
+    inline void content(ImDrawList* dl, const GameData& data, PokemonStorage& storage, bool inTeam, int index, const OwnedPokemon& owned, const PokemonSpecies* species, const ImVec2& o, float W, float H, bool embedded) {
         constexpr float PAD = 18.0f;
         if (!embedded) GuiCards::panel(dl, o, ImVec2(o.x + W, o.y + H));
         const Nature* nature = data.nature(owned.nature);
@@ -54,7 +40,7 @@ namespace StatEditor {
 
         // --- EVs por estadística (izquierda) ---
         const float colW = (W - 3.0f * PAD) * 0.54f;
-        const float footer = 56.0f; // botones de reiniciar / objetos de IV y su aviso
+        const float footer = 38.0f; // botón de reiniciar
         const float rowGap = 5.0f;
         const float rowH = (std::clamp)((bottom - top - footer - 6.0f * rowGap) / 6.0f, 26.0f, 46.0f);
         const float scale = (std::clamp)(rowH / 44.0f, 0.7f, 1.0f);
@@ -72,7 +58,7 @@ namespace StatEditor {
             GuiCards::centeredTextLeft(dl, ImVec2(o.x + PAD + 108.0f, cy), IM_COL32(200, 200, 215, 255), text, 0.8f * scale);
 
             // Barra de EV al estilo Champions: casillas de 4 EV marcadas; clic o arrastre para fijar el valor.
-            const float barX = o.x + PAD + 262.0f, barW = (std::max)(60.0f, colW - 262.0f - 104.0f), barH = (std::min)(20.0f, rowH - 12.0f);
+            const float barX = o.x + PAD + 262.0f, barW = (std::max)(60.0f, colW - 262.0f - 64.0f), barH = (std::min)(20.0f, rowH - 12.0f);
             const float by = cy - barH * 0.5f;
             const int ev = owned.evs[static_cast<size_t>(stat)];
             const int cells = StatRules::MAX_EV / detail::STEP;
@@ -95,20 +81,6 @@ namespace StatEditor {
                 if (wanted != ev) storage.setEv(inTeam, index, stat, wanted);
             }
             ImGui::PopID();
-            if (const Item* chosen = detail::chosenIvItem(data, inventory)) {
-                const TrainingItem* tr = data.training(chosen->refId);
-                const bool silver = tr->effect == TrainingItem::Effect::IV_CAP;
-                const bool can = silver ? owned.ivCaps[static_cast<size_t>(stat)] < IvRules::MAX_IV : owned.ivs[static_cast<size_t>(stat)] < owned.ivCaps[static_cast<size_t>(stat)];
-                ImGui::SetCursorScreenPos(ImVec2(barX + barW + 8.0f, by));
-                ImGui::PushID(200 + stat);
-                if (GuiCards::button("##ivUse", silver ? "TOPE" : "+IV", ImVec2(52.0f, barH), can, silver ? IM_COL32(170, 180, 200, 255) : IM_COL32(230, 140, 40, 255))) {
-                    if (silver ? storage.raiseIvCap(inTeam, index, stat) : storage.trainIv(inTeam, index, stat, tr->amount)) {
-                        inventory.add(chosen->id, -1);
-                        detail::ivMessage = std::string(BaseStats::name(stat)) + (silver ? ": ya puede llegar a 31" : " entrenado");
-                    }
-                }
-                ImGui::PopID();
-            }
             std::snprintf(text, sizeof(text), "%d", ev);
             GuiCards::centeredText(dl, ImVec2(barX + barW * 0.5f, cy), IM_COL32(255, 255, 255, 255), text, 0.72f * scale);
 
@@ -119,36 +91,6 @@ namespace StatEditor {
         const float resetY = top + 6.0f * (rowH + rowGap) + 4.0f;
         ImGui::SetCursorScreenPos(ImVec2(o.x + PAD, resetY));
         if (GuiCards::button("##resetEv", "REINICIAR EVs", ImVec2(180.0f, 32.0f), StatRules::total(owned.evs) > 0, IM_COL32(150, 70, 70, 255))) storage.resetEvs(inTeam, index);
-        {
-            std::vector<const Item*> ivItems;
-            for (const Item& item : data.items) {
-                if (item.category != ItemCategory::TRAINING || inventory.count(item.id) <= 0) continue;
-                const TrainingItem* t = data.training(item.refId);
-                if (t && (t->effect == TrainingItem::Effect::IV || t->effect == TrainingItem::Effect::IV_CAP || t->effect == TrainingItem::Effect::IV_MAX)) ivItems.push_back(&item);
-            }
-            if (!ivItems.empty()) {
-                const float bw = (std::min)(150.0f, (colW - 190.0f) / static_cast<float>(ivItems.size()) - 6.0f);
-                float bx = o.x + PAD + 190.0f;
-                for (const Item* item : ivItems) {
-                    const TrainingItem* t = data.training(item->refId);
-                    const bool gold = t->effect == TrainingItem::Effect::IV_MAX;
-                    char label[64];
-                    std::snprintf(label, sizeof(label), "%s x%d", gold ? "Chapa dorada" : t->effect == TrainingItem::Effect::IV_CAP ? "Chapa plata" : "Vitamina", inventory.count(item->id));
-                    ImGui::SetCursorScreenPos(ImVec2(bx, resetY));
-                    ImGui::PushID(400 + item->id);
-                    const bool active = detail::ivItem == item->id;
-                    if (GuiCards::button("##ivItem", label, ImVec2(bw, 32.0f), true, active ? IM_COL32(230, 170, 50, 255) : IM_COL32(90, 100, 130, 255))) {
-                        if (gold) {
-                            if (storage.raiseAllIvCaps(inTeam, index)) { inventory.add(item->id, -1); detail::ivMessage = "Todos los IV pueden llegar a 31"; }
-                        } else { detail::ivItem = active ? -1 : item->id; detail::ivMessage.clear(); }
-                    }
-                    ImGui::PopID();
-                    bx += bw + 6.0f;
-                }
-                if (!detail::ivMessage.empty()) GuiCards::text(dl, ImVec2(o.x + PAD, resetY + 36.0f), GuiStyle::MUTED, detail::ivMessage.c_str(), 0.75f);
-                else if (detail::chosenIvItem(data, inventory)) GuiCards::text(dl, ImVec2(o.x + PAD, resetY + 36.0f), GuiStyle::MUTED, "Pulsa el botón de la estadística que quieres mejorar.", 0.75f);
-            }
-        }
 
         // --- Naturaleza (derecha): cuadrícula que se ajusta al hueco ---
         const float nx = o.x + 2.0f * PAD + colW, nw = o.x + W - PAD - nx;
@@ -187,7 +129,7 @@ namespace StatEditor {
         }
     }
 
-    inline bool render(const GameData& data, PokemonStorage& storage, Inventory& inventory, bool inTeam, int index) {
+    inline bool render(const GameData& data, PokemonStorage& storage, bool inTeam, int index) {
         const std::vector<OwnedPokemon>& list = inTeam ? storage.team() : storage.pc();
         if (index < 0 || index >= static_cast<int>(list.size())) return false;
         const OwnedPokemon owned = list[static_cast<size_t>(index)];
@@ -202,7 +144,7 @@ namespace StatEditor {
         dl->AddRectFilled(ImVec2(0.0f, 0.0f), screen, IM_COL32(0, 0, 0, 170));
         const float W = (std::min)(screen.x - 40.0f, 1180.0f), H = (std::min)(screen.y - 40.0f, 700.0f);
         const ImVec2 o((screen.x - W) * 0.5f, (screen.y - H) * 0.5f);
-        content(dl, data, storage, inventory, inTeam, index, owned, species, o, W, H, false);
+        content(dl, data, storage, inTeam, index, owned, species, o, W, H, false);
         bool open = true;
         ImGui::SetCursorScreenPos(ImVec2(o.x + W - 22.0f - 140.0f, o.y + H - 50.0f));
         if (GuiCards::button("##closeStats", "CERRAR", ImVec2(140.0f, 36.0f), true, IM_COL32(70, 70, 92, 255)) || GuiInput::backPressed()) open = false;

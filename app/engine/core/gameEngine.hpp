@@ -146,7 +146,6 @@ class GameEngine {
     bool takeShopRequest() { const bool requested = m_scene.shopRequested; m_scene.shopRequested = false; return requested; }
     std::vector<const Item*> shopStock() const { return m_scene.shopStock(); }
     std::string shopBuy(int itemId, int quantity) { return m_scene.shopBuy(itemId, quantity); }
-    bool takeLearnRequest() { const bool requested = m_scene.learnRequested; m_scene.learnRequested = false; return requested; }
     std::shared_ptr<Battle> battle() const { return m_scene.battle; }
     void battleAdvance(float dt) { m_scene.advanceBattleFx(dt); }
     void battlePlayFx(const Battle::Message& message) { m_scene.playBattleFx(message); }

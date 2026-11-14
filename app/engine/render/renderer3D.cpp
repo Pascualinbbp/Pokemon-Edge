@@ -130,13 +130,17 @@ namespace {
             float dist = length(wpos - CameraPos.xyz);
             float torch = saturate(1.0f - dist / 28.0f);
             float3 gain = torch * torch + 0.03f;
+            float3 aura = float3(0.0f, 0.0f, 0.0f);
             [unroll] for (int i = 0; i < 8; ++i) { // lámparas y cristales: iluminan lo que tienen cerca
                 float l = saturate(1.0f - length(wpos - LampPos[i].xyz) / max(LampPos[i].w, 0.01f));
-                gain += LampColor[i].rgb * l * l;
+                if (LampColor[i].w > 0.5f) aura += LampColor[i].rgb * l * l; // brillo del jugador (Bioluminiscencia): vale aunque no sea una cueva
+                else gain += LampColor[i].rgb * l * l;
             }
             color *= lerp(float3(1.0f, 1.0f, 1.0f), gain, Env.x);
+            color += (color * 0.8f + aura * 0.5f) * aura;
             float fog = 1.0f - exp(-dist * Env.y);
             if (Env.z > 0.5f) fog = max(fog, smoothstep(7.0f, 20.0f, dist)); // bajo el agua solo se ve un área alrededor del jugador
+            fog *= 1.0f - saturate(max(aura.r, max(aura.g, aura.b)) * 1.5f);   // la luz del jugador atraviesa la niebla cercana
             return lerp(color, FogColor.rgb, saturate(fog));
         }
 
@@ -1048,6 +1052,10 @@ void Renderer3D::collect(const Scene& scene) {
     addSky(scene, time);
     addGeysers(scene, time);
     addUnderground(scene);
+    if (scene.playerGlows()) { // Bioluminiscencia: el jugador brilla a su alrededor (de noche, bajo el agua y en las cuevas)
+        m_lamps.insert(m_lamps.begin(), Lamp{ { p.x, p.y + 1.0f, p.z }, 16.0f, { 0.30f, 0.85f, 0.80f }, 0.0f, true });
+        if (m_lamps.size() > static_cast<size_t>(kLamps)) m_lamps.resize(kLamps);
+    }
 
     for (const CaptureTarget* wild : scene.wild.loaded()) {
         const CaptureTarget& target = *wild;
@@ -2157,7 +2165,7 @@ void Renderer3D::updateFrame(ID3D11DeviceContext* context, const DayCycle::Light
     for (int i = 0; i < kLamps; ++i) {
         const bool used = i < static_cast<int>(m_lamps.size());
         fc.lampPos[i] = used ? XMFLOAT4{ m_lamps[i].position.x, m_lamps[i].position.y, m_lamps[i].position.z, m_lamps[i].reach } : XMFLOAT4{ 0.0f, 0.0f, 0.0f, 0.0f };
-        fc.lampColor[i] = used ? XMFLOAT4{ m_lamps[i].color.x, m_lamps[i].color.y, m_lamps[i].color.z, 0.0f } : XMFLOAT4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        fc.lampColor[i] = used ? XMFLOAT4{ m_lamps[i].color.x, m_lamps[i].color.y, m_lamps[i].color.z, m_lamps[i].aura ? 1.0f : 0.0f } : XMFLOAT4{ 0.0f, 0.0f, 0.0f, 0.0f };
     }
     context->UpdateSubresource(m_frameBuffer.Get(), 0, nullptr, &fc, 0, 0);
 }

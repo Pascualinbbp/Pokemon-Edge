@@ -17,6 +17,7 @@
 #include "../window/guiInput.hpp"
 #include "../../engine/core/inputDevice.hpp"
 #include "../../engine/world/rules/ivRules.hpp"
+#include "../../engine/world/rules/pokemonRules.hpp"
 #include "../../engine/world/rules/statRules.hpp"
 #include "statEditor.hpp"
 #include "../../engine/world/state/inventory.hpp"
@@ -356,7 +357,7 @@ namespace PokemonComponent {
 
         // --- Ficha ---
         // Gráfico hexagonal: estadísticas base (azul) y, encima, lo que suman sus IV y EVs (naranja). En cada vértice: nombre, base y
-        // estadística real (con nivel, IV, EVs y naturaleza), y el IV actual / tope con el que salió. Las vitaminas y chapas se usan desde la mochila.
+        // estadística real (con nivel, IV, EVs y naturaleza), y el IV actual / tope con el que salió. La vitamina se usa aquí mismo con el "+" de cada estadística (las chapas, desde la mochila).
         inline void drawStats(const GameData& data, PokemonStorage& storage, Inventory& inventory, const OwnedPokemon& owned,
                               const PokemonSpecies& species, const ImVec2& area, float avail, float width = DETAIL_WIDTH - 32.0f) {
             constexpr int ORDER[6] = { 0, 1, 3, 5, 4, 2 }; // vértices de arriba en sentido horario (índices de BaseStats)
@@ -372,6 +373,13 @@ namespace PokemonComponent {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             GuiCards::radar(dl, center, radius, base, GuiStyle::ACCENT, &grown, IM_COL32(255, 160, 40, 255));
 
+            const Item* vitamin = nullptr; // la vitamina de la mochila (sube un IV hasta su tope)
+            const TrainingItem* vitaminTraining = nullptr;
+            for (const Item& item : data.items) {
+                if (item.category != ItemCategory::TRAINING) continue;
+                const TrainingItem* training = data.training(item.refId);
+                if (training && training->effect == TrainingItem::Effect::IV) { vitamin = &item; vitaminTraining = training; break; }
+            }
             char line[48];
             for (int i = 0; i < 6; ++i) {
                 const float angle = -PI * 0.5f + static_cast<float>(i) * PI / 3.0f;
@@ -387,6 +395,14 @@ namespace PokemonComponent {
                 std::snprintf(line, sizeof(line), "%d  IV %d/%d", storage.statOf(owned, stat), owned.ivs[stat], owned.ivCaps[stat]);
                 GuiCards::text(dl, ImVec2(x, y + lineH), IM_COL32(255, 170, 60, 255), line, 0.85f);
 
+                // Vitamina: "+" junto al IV; gris si no quedan vitaminas o el IV ya está en su tope.
+                if (vitamin) {
+                    const bool can = inventory.count(vitamin->id) > 0 && owned.ivs[stat] < owned.ivCaps[stat];
+                    ImGui::SetCursorScreenPos(ImVec2(x + GuiCards::textWidth(line, 0.85f) + 6.0f, y + lineH - 1.0f));
+                    ImGui::PushID(700 + stat);
+                    if (GuiCards::button("##vitamin", "+", ImVec2(22.0f, 20.0f), can, IM_COL32(230, 140, 40, 255)) && storage.trainIv(selection.inTeam, selection.index, stat, vitaminTraining->amount)) inventory.add(vitamin->id, -1);
+                    ImGui::PopID();
+                }
             }
         }
 
@@ -640,6 +656,14 @@ namespace PokemonComponent {
                 if (f > 0.0f) dl->AddRectFilled(bar, ImVec2(bar.x + barW * f, bar.y + 22.0f), f > 0.5f ? IM_COL32(90, 210, 110, 255) : f > 0.2f ? IM_COL32(235, 200, 60, 255) : IM_COL32(230, 70, 70, 255), 6.0f);
                 std::snprintf(text, sizeof(text), hp > 0 ? "PS %d / %d" : "PS 0 / %d  (debilitado)", hp > 0 ? hp : maxHp, maxHp);
                 GuiCards::text(dl, ImVec2(bar.x + 10.0f, bar.y + 3.0f), IM_COL32(255, 255, 255, 245), text, 0.85f);
+                // Experiencia: lo que lleva hacia el siguiente nivel, bajo la barra de vida.
+                const int need = (std::max)(1, PokemonRules::xpToNext(owned.level));
+                const float xf = (std::clamp)(static_cast<float>(owned.xp) / static_cast<float>(need), 0.0f, 1.0f);
+                const ImVec2 xpBar(bar.x, bar.y + 28.0f);
+                dl->AddRectFilled(xpBar, ImVec2(xpBar.x + barW, xpBar.y + 12.0f), IM_COL32(0, 0, 0, 130), 5.0f);
+                if (xf > 0.0f) dl->AddRectFilled(xpBar, ImVec2(xpBar.x + barW * xf, xpBar.y + 12.0f), IM_COL32(90, 170, 255, 255), 5.0f);
+                std::snprintf(text, sizeof(text), "EXP %d / %d", owned.xp, need);
+                GuiCards::text(dl, ImVec2(xpBar.x + 8.0f, xpBar.y - 0.5f), IM_COL32(255, 255, 255, 235), text, 0.6f);
             }
             // Esquinas: potencial (izquierda) y pokéball con la que se capturó (derecha).
             potentialBadge(dl, ImVec2(card.x + 26.0f, card.y + 26.0f), 17.0f, owned);
@@ -678,7 +702,7 @@ namespace PokemonComponent {
             drawHeldSlot(dl, data, storage, inventory, owned, ImVec2(card.x + leftW, card.y + topH * 0.5f));
 
             // EVs (izquierda) y naturalezas (derecha), ajustados al espacio que queda.
-            StatEditor::content(dl, data, storage, inventory, selection.inTeam, selection.index, owned, species, ImVec2(card.x, card.y + topH + 6.0f), cardSize.x, cardSize.y - topH - 8.0f, true);
+            StatEditor::content(dl, data, storage, selection.inTeam, selection.index, owned, species, ImVec2(card.x, card.y + topH + 6.0f), cardSize.x, cardSize.y - topH - 8.0f, true);
             ImGui::Dummy(ImVec2(0.0f, 0.0f));
         }
     }
@@ -727,7 +751,7 @@ namespace PokemonComponent {
         detail::finishDrag(storage);
 
         if (detail::editingStats) {
-            if (!StatEditor::render(data, storage, inventory, detail::selection.inTeam, detail::selection.index)) detail::editingStats = false;
+            if (!StatEditor::render(data, storage, detail::selection.inTeam, detail::selection.index)) detail::editingStats = false;
             return; // el editor se queda con ESC y los clics este fotograma
         }
         if (detail::editingMoves) {

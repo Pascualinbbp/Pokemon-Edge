@@ -187,6 +187,12 @@ struct GameData {
         return (active && active->breathesWater()) || (passive && passive->breathesWater());
     }
 
+    // ¿Alguna de sus habilidades (la de especie, o la activa de ese ejemplar) tiene ese efecto?
+    bool hasEffect(const PokemonSpecies& species, int ownedAbilityId, Ability::Effect effect) const {
+        for (const int id : { species.abilityId, species.passiveId, ownedAbilityId }) if (const Ability* a = id >= 0 ? ability(id) : nullptr) if (a->effect == effect) return true;
+        return false;
+    }
+
     // La herramienta que representa un objeto (nullptr si no es una herramienta).
     const Tool* toolOf(const Item& item) const { return item.category == ItemCategory::TOOL ? tool(item.refId) : nullptr; }
 

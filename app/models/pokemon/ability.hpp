@@ -2,10 +2,10 @@
 #include <string>
 #include "effectSpec.hpp"
 
-// Habilidad de combate (tabla ability). Efecto: NONE · FLOAT (el pokémon levita) · WATER_BREATHING (respira bajo el agua y da una burbuja de aire al jugador) · TYPE_BOOST (potencia los ataques del tipo 'typeId'
+// Habilidad de combate (tabla ability). Efecto: NONE · FLOAT (el pokémon levita) · WATER_BREATHING (respira bajo el agua y da una burbuja de aire al jugador, con el pokémon en el equipo) · BIOLUMINESCENCE (el jugador brilla en la oscuridad, con el pokémon en el equipo; en combate potencia en 'multiplier' los movimientos de luz) · TYPE_BOOST (potencia los ataques del tipo 'typeId'
 // por 'multiplier' mientras su vida está por debajo de la fracción 'hpBelow').
 struct Ability {
-    enum class Effect { NONE, FLOAT, WATER_BREATHING, TYPE_BOOST };
+    enum class Effect { NONE, FLOAT, WATER_BREATHING, BIOLUMINESCENCE, TYPE_BOOST };
 
     int id = -1;
     std::string name;
@@ -21,10 +21,11 @@ struct Ability {
 
     // Las habilidades pasivas son solo de diseño (levitar, respirar bajo el agua): un plus que una especie puede tener o no y que nunca actúa como activa.
     // Todo lo demás son activas, que tiene todo pokémon.
-    bool passiveKind() const { return effect == Effect::FLOAT || effect == Effect::WATER_BREATHING; }
+    bool passiveKind() const { return effect == Effect::FLOAT || effect == Effect::WATER_BREATHING || effect == Effect::BIOLUMINESCENCE; }
+    bool glows() const { return effect == Effect::BIOLUMINESCENCE; }
     bool floats() const { return effect == Effect::FLOAT; }
     bool breathesWater() const { return effect == Effect::WATER_BREATHING; }
 
     static Trigger parseTrigger(const std::string& t) { return t == "ON_ENTER" ? Trigger::ON_ENTER : t == "ON_CONTACT" ? Trigger::ON_CONTACT : t == "END_TURN" ? Trigger::END_TURN : Trigger::PASSIVE; }
-    static Effect parse(const std::string& text) { return text == "FLOAT" ? Effect::FLOAT : text == "WATER_BREATHING" ? Effect::WATER_BREATHING : text == "TYPE_BOOST" ? Effect::TYPE_BOOST : Effect::NONE; }
+    static Effect parse(const std::string& text) { return text == "FLOAT" ? Effect::FLOAT : text == "WATER_BREATHING" ? Effect::WATER_BREATHING : text == "BIOLUMINESCENCE" ? Effect::BIOLUMINESCENCE : text == "TYPE_BOOST" ? Effect::TYPE_BOOST : Effect::NONE; }
 };

@@ -19,7 +19,6 @@ enum class GameState {
     RESEARCH,      // máquina de investigación (la partida queda congelada)
     BATTLE,        // combate por turnos contra un entrenador (la partida queda congelada)
     SHOP,          // tienda del tendero (la partida queda congelada)
-    LEARN,         // un pokémon quiere aprender un movimiento y ya conoce cuatro
     SEEDS,         // elección de las semillas que se siembran en una parcela (la partida queda congelada)
     PC,            // PC de la máquina del inicio: único sitio donde se cambian pokémon entre equipo y PC (la partida queda congelada)
     UPDATING       // actualización de la aplicación en curso
@@ -28,7 +27,7 @@ enum class GameState {
 // Estados en los que la escena 3D se dibuja de fondo.
 constexpr bool isInGame(GameState state) {
     return state == GameState::PLAYING || state == GameState::PAUSED || state == GameState::CONTROLS || state == GameState::MAP ||
-           state == GameState::INVENTORY || state == GameState::POKEDEX || state == GameState::TYPES || state == GameState::POKEMON || state == GameState::STARTER || state == GameState::RESEARCH || state == GameState::PC || state == GameState::PLAYER || state == GameState::SEEDS || state == GameState::BATTLE || state == GameState::LEARN || state == GameState::SHOP;
+           state == GameState::INVENTORY || state == GameState::POKEDEX || state == GameState::TYPES || state == GameState::POKEMON || state == GameState::STARTER || state == GameState::RESEARCH || state == GameState::PC || state == GameState::PLAYER || state == GameState::SEEDS || state == GameState::BATTLE || state == GameState::SHOP;
 }
 
 // Estados en los que la ventana va en pantalla completa (desde que empieza la carga de la partida).
@@ -62,7 +61,6 @@ inline const char* gameStateName(GameState state) {
         case GameState::RESEARCH: return "RESEARCH";
         case GameState::BATTLE: return "BATTLE";
         case GameState::SHOP: return "SHOP";
-        case GameState::LEARN: return "LEARN";
         case GameState::SEEDS: return "SEEDS";
         case GameState::PC: return "PC";
         case GameState::UPDATING: return "UPDATING";
