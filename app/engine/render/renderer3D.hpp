@@ -117,7 +117,7 @@ class Renderer3D {
     void addGlowBetween(const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to, float width, const DirectX::XMFLOAT4& tint);
     void addPlayer(const Scene& scene);
     bool addToolModel(const Scene& scene, PlayerAction action, const std::string& name, DirectX::CXMMATRIX hand, DirectX::XMFLOAT3& tip, bool& tipKnown);
-    void addTool(PlayerAction tool, DirectX::CXMMATRIX hand);
+    void addWateringCan(DirectX::CXMMATRIX hand);
     void addFishingLine(const Scene& scene, const DirectX::XMFLOAT3& rodTip);
     void addSky(const Scene& scene, float time);
     void addGeysers(const Scene& scene, float time);
@@ -184,6 +184,7 @@ class Renderer3D {
     bool m_worldBuilt = false;
     unsigned m_worldSeed = 0;
     DirectX::XMFLOAT3 m_eye = {}; // posición de la cámara en el último frame (recorte del terreno)
+    float m_glow = 0.0f;   // cuánto brilla el jugador (Bioluminiscencia), 0..1
     float m_darkness = 0.0f;      // oscuridad actual (suave al entrar y salir de cuevas)
 
     Mesh m_cube;   // cubo unitario blanco centrado en el origen: paredes, pokémon y su morro (se tiñe al dibujar)

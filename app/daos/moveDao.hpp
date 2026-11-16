@@ -17,7 +17,7 @@ class MoveDao {
         for (const auto& row : SqliteUtil::executeSelect("SELECT id, name, priority FROM move_tag ORDER BY id;")) data.moveTags.push_back({ DaoRow::integer(row, "id"), DaoRow::text(row, "name"), DaoRow::integer(row, "priority") });
 
         for (const auto& row : SqliteUtil::executeSelect(std::string("SELECT m.id, m.name, m.description, m.type_id, m.class_id, m.pp, COALESCE(m.power, 0) AS power, COALESCE(m.accuracy, 0) AS accuracy, m.learn_weight, ") +
-                                                         "COALESCE(e.kind, '') AS kind, COALESCE(e.param, '') AS param, COALESCE(e.target, 'FOE') AS target, COALESCE(e.amount, 0) AS amount, COALESCE(e.chance, 100) AS chance, COALESCE(e.multiplier, 1) AS multiplier "
+                                                         "COALESCE(e.kind, '') AS kind, COALESCE(e.param, '') AS param, COALESCE(e.target, 'FOE') AS target, COALESCE(e.amount, 0) AS amount, COALESCE(m.effect_chance, 100) AS chance, COALESCE(e.multiplier, 1) AS multiplier, COALESCE(e.condition, '') AS condition, COALESCE(e.type_id, 0) AS spec_type "
                                                          "FROM move m LEFT JOIN effect e ON e.id = m.effect_id ORDER BY m.id;")) {
             Move move;
             move.id = DaoRow::integer(row, "id");
@@ -31,7 +31,7 @@ class MoveDao {
             move.power = DaoRow::integer(row, "power");
             move.accuracy = DaoRow::integer(row, "accuracy");
             move.learnWeight = (std::max)(0.0f, DaoRow::real(row, "learn_weight"));
-            move.effect = EffectSpecDao::parse(row);
+            move.effect = EffectSpecDao::parse(row, DaoRow::real(row, "chance"));
             data.moves.push_back(move);
         }
 

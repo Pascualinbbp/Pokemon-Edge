@@ -109,6 +109,7 @@ class ModelCache {
         const auto found = m_models.find(name);
         if (found != m_models.end()) return found->second.get();
         std::unique_ptr<RenderModel> model = load(device, name, tintable);
+        if (!model) Logger::logError("MODEL", "No se pudo cargar el modelo '" + name + "' (" + PathsUtil::modelAssetPath(name) + "): falta el archivo, no es un glb válido o no tiene mallas.");
         const RenderModel* result = model.get();
         m_models[name] = std::move(model);
         return result;
@@ -156,7 +157,7 @@ class ModelCache {
         const ResourceUtil::Blob blob = ResourceUtil::loadAsset(PathsUtil::modelAssetPath(name));
         if (!blob) return nullptr;
         const std::optional<GltfUtil::Document> document = GltfUtil::parse(blob.data, blob.size);
-        if (!document) return nullptr;
+        if (!document) { Logger::logError("MODEL", "El glb de '" + name + "' no se pudo leer."); return nullptr; }
 
         auto model = std::make_unique<RenderModel>();
         const auto shared = std::make_shared<GltfUtil::Document>(*document);

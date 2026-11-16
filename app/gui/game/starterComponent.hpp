@@ -63,7 +63,8 @@ namespace StarterComponent {
         if (detail::selected >= 0 && std::none_of(offered.begin(), offered.end(), [](const PokemonSpecies* sp) { return sp->id == detail::selected; })) detail::selected = -1;
         if (fallback) GuiCards::centeredText(dl, ImVec2(screen.x * 0.5f, 110.0f), IM_COL32(255, 215, 90, 255), "Ninguno de los iniciales ha esperado: elige uno de reserva", 1.0f);
 
-        constexpr float CARD_W = 250.0f, CARD_H = 300.0f, GAP = 30.0f;
+        constexpr float CARD_H = 300.0f, GAP = 30.0f;
+        const float CARD_W = (std::min)(250.0f, (screen.x - 80.0f - static_cast<float>(count - 1) * GAP) / static_cast<float>(count)); // con más iniciales las tarjetas se estrechan para caber
         const float total = static_cast<float>(count) * CARD_W + static_cast<float>(count - 1) * GAP;
         float x = (screen.x - total) * 0.5f;
         const float y = screen.y * 0.5f - CARD_H * 0.5f - 10.0f;

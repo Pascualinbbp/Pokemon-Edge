@@ -10,7 +10,7 @@ class AbilityDao {
     public:
     std::vector<Ability> findAll() const {
         std::vector<Ability> abilities;
-        for (const auto& row : SqliteUtil::executeSelect(std::string("SELECT a.id, a.name, a.description, a.trigger, a.priority, e.type_id, COALESCE(e.multiplier, 1) AS multiplier, COALESCE(e.hp_below, 1) AS hp_below, ") +
+        for (const auto& row : SqliteUtil::executeSelect(std::string("SELECT a.id, a.name, a.description, a.trigger, a.priority, COALESCE(a.effect_chance, 100) AS chance, e.type_id, COALESCE(e.multiplier, 1) AS multiplier, COALESCE(e.hp_below, 1) AS hp_below, ") +
                                                           EffectSpecDao::COLUMNS + " FROM ability a JOIN effect e ON e.id = a.effect_id ORDER BY a.id;")) {
             Ability ability;
             ability.id = DaoRow::integer(row, "id");
@@ -22,7 +22,7 @@ class AbilityDao {
             ability.hpBelow = DaoRow::real(row, "hp_below");
             ability.trigger = Ability::parseTrigger(DaoRow::text(row, "trigger"));
             ability.priority = DaoRow::integer(row, "priority");
-            ability.spec = EffectSpecDao::parse(row);
+            ability.spec = EffectSpecDao::parse(row, DaoRow::real(row, "chance"));
             abilities.push_back(ability);
         }
         if (abilities.empty()) Logger::logError("ABILITY_DAO", "La tabla ability no existe o está vacía.");

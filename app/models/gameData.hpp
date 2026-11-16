@@ -10,6 +10,7 @@
 #include "pokemon/generation.hpp"
 #include "pokemon/nature.hpp"
 #include "pokemon/rarity.hpp"
+#include "pokemon/statusInfo.hpp"
 #include "pokemon/typeChart.hpp"
 #include "world/chestType.hpp"
 #include "world/reward.hpp"
@@ -39,6 +40,7 @@ struct GameData {
     std::vector<Ability> abilities;
     std::vector<Move> moves;
     std::vector<MoveTag> moveTags;
+    std::vector<StatusInfo> statuses;
     std::vector<PokemonType> types;
     TypeChart typeChart;
     std::vector<Rarity> rarities;
@@ -70,6 +72,12 @@ struct GameData {
     const Move* move(int id) const { return id < 0 ? nullptr : find(moves, id); }
     const Move* moveByName(const std::string& name) const { for (const Move& m : moves) if (m.name == name) return &m; return nullptr; }
     const PokemonType* type(int id) const { return find(types, id); }
+    const StatusInfo* statusInfo(EffectSpec::Status code) const { for (const StatusInfo& s : statuses) if (s.code == code) return &s; return nullptr; }
+    // ¿Puede ese estado afectar a un pokémon de esos tipos? No si el tipo asociado al estado no le hace efecto según la tabla de tipos.
+    bool statusAffects(EffectSpec::Status code, const std::vector<int>& defenderTypes) const {
+        const StatusInfo* info = statusInfo(code);
+        return !info || typeChart.multiplier(info->typeId, defenderTypes) > TypeChart::IMMUNE;
+    }
     const Rarity* rarity(int id) const { return find(rarities, id); }
     const Generation* generation(int id) const { return find(generations, id); }
     const Nature* nature(int id) const { return id <= 0 ? nullptr : find(natures, id); } // 0 = sin naturaleza (neutra)

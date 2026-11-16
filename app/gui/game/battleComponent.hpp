@@ -121,7 +121,7 @@ namespace BattleComponent {
             const float barY = pos.y + 46.0f;
             GuiCards::bar(dl, ImVec2(pos.x + 14.0f, barY), size.x - 28.0f, fraction, hpColor(fraction), 12.0f);
             const char* status = EffectSpec::statusName(s.status[side]);
-            if (*status) GuiCards::chip(dl, ImVec2(pos.x + 14.0f, barY + 18.0f), status, s.status[side] == EffectSpec::Status::BURN ? IM_COL32(220, 90, 40, 255) : s.status[side] == EffectSpec::Status::POISON ? IM_COL32(150, 70, 190, 255) : IM_COL32(210, 170, 40, 255), 0.7f);
+            if (*status) GuiCards::chip(dl, ImVec2(pos.x + 14.0f, barY + 18.0f), status, data.statusInfo(s.status[side]) ? GuiCards::typeColor(data.statusInfo(s.status[side])->typeId) : IM_COL32(210, 170, 40, 255), 0.7f);
             if (Battle::sideOf(side) == 0) {
                 std::snprintf(text, sizeof(text), "%d / %d", static_cast<int>(std::ceil(animatedHp)), s.maxHp[side]);
                 GuiCards::text(dl, ImVec2(pos.x + size.x - 14.0f - GuiCards::textWidth(text, 0.9f), barY + 18.0f), IM_COL32(255, 255, 255, 240), text, 0.9f);
@@ -510,7 +510,7 @@ namespace BattleComponent {
                     const float x = menuLeft, y = top + static_cast<float>(i) * (rowH + gap);
                     ImGui::SetCursorScreenPos(ImVec2(x, y));
                     ImGui::PushID(100 + i);
-                    const bool ok = battle->canSwitchTo(i, reserved);
+                    const bool ok = battle->canSwitchTo(i, reserved) && battle->canSwitchOut(slot);
                     const bool clicked = ImGui::InvisibleButton("##member", ImVec2(w, rowH)) && ok;
                     const bool hover = ImGui::IsItemHovered() && ok;
                     ImGui::PopID();

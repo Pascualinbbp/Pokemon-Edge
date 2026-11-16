@@ -64,7 +64,6 @@ namespace {
     constexpr float kWaterFogDensity = 0.07f;
     constexpr float kOceanHalf = 1500.0f;
     constexpr float kHip = 0.62f;               // altura de la cadera del personaje
-    constexpr float ROD_LENGTH = 1.8f;          // largo de la caña (dibujo sencillo, sin modelo 3D)
     constexpr float HOOK_ANIM_TIME = 1.5f;      // lo que dura la animación de recoger la caña con el pokémon enganchado
     constexpr float kShadowNormalOffset = 0.05f; // evita el moteado en superficies casi paralelas a la luz
     constexpr float kShadowDepthBias = 0.0001f;
@@ -1052,11 +1051,6 @@ void Renderer3D::collect(const Scene& scene) {
     addSky(scene, time);
     addGeysers(scene, time);
     addUnderground(scene);
-    if (scene.playerGlows()) { // Bioluminiscencia: el jugador brilla a su alrededor (de noche, bajo el agua y en las cuevas)
-        m_lamps.insert(m_lamps.begin(), Lamp{ { p.x, p.y + 1.0f, p.z }, 16.0f, { 0.30f, 0.85f, 0.80f }, 0.0f, true });
-        if (m_lamps.size() > static_cast<size_t>(kLamps)) m_lamps.resize(kLamps);
-    }
-
     for (const CaptureTarget* wild : scene.wild.loaded()) {
         const CaptureTarget& target = *wild;
         const float size = target.scale();
@@ -1171,11 +1165,11 @@ void Renderer3D::addPlayer(const Scene& scene) {
         XMFLOAT3 tip = {};
         bool tipKnown = false;
         const Scene::HeldTool held = scene.heldTool(pose.holding);
-        if (held.level < 1 || !addToolModel(scene, pose.holding, held.model, hand, tip, tipKnown)) addTool(pose.holding, hand); // sin su modelo 3D, el dibujo sencillo
+        if (pose.holding == PlayerAction::WATER) addWateringCan(hand); // la regadera aún no tiene modelo 3D
+        else if (held.level >= 1) addToolModel(scene, pose.holding, held.model, hand, tip, tipKnown); // sin su modelo no se dibuja nada: el motivo queda en app.log
         addPotionFx(scene, hand);
         if (pose.holding == PlayerAction::FISH) {
-            if (!tipKnown) XMStoreFloat3(&tip, XMVector3TransformCoord(XMVectorSet(0.0f, -ROD_LENGTH, 0.0f, 1.0f), hand));
-            addFishingLine(scene, tip);
+            if (tipKnown) addFishingLine(scene, tip); // sin el modelo de la caña no hay punta de donde sacar el hilo
         }
     }
 }
@@ -1221,31 +1215,14 @@ bool Renderer3D::addToolModel(const Scene& scene, PlayerAction action, const std
     return true;
 }
 
-// La herramienta en la mano (marco: el origen es la mano y -y apunta hacia donde apunta el brazo).
-void Renderer3D::addTool(PlayerAction tool, CXMMATRIX hand) {
-    static const XMFLOAT4 wood = { 0.55f, 0.38f, 0.20f, 0.0f }, metal = { 0.72f, 0.74f, 0.78f, 0.0f }, blue = { 0.20f, 0.42f, 0.85f, 0.0f };
-    const auto part = [&](const XMFLOAT4& tint, float sx, float sy, float sz, float x, float y, float z) {
-        add(m_cube, XMMatrixScaling(sx, sy, sz) * XMMatrixTranslation(x, y, z) * hand, tint);
+// La regadera en la mano (marco: el origen es la mano y -y apunta hacia donde apunta el brazo). Es la única herramienta sin modelo 3D.
+void Renderer3D::addWateringCan(CXMMATRIX hand) {
+    static const XMFLOAT4 blue = { 0.20f, 0.42f, 0.85f, 0.0f };
+    const auto part = [&](float sx, float sy, float sz, float x, float y, float z) {
+        add(m_cube, XMMatrixScaling(sx, sy, sz) * XMMatrixTranslation(x, y, z) * hand, blue);
     };
-    switch (tool) {
-        case PlayerAction::CHOP:  // hacha: mango y hoja
-            part(wood, 0.06f, 0.85f, 0.06f, 0.0f, -0.15f, 0.0f);
-            part(metal, 0.05f, 0.22f, 0.30f, 0.0f, -0.52f, 0.13f);
-            break;
-        case PlayerAction::MINE:  // pico: mango y cabeza alargada
-            part(wood, 0.06f, 0.85f, 0.06f, 0.0f, -0.15f, 0.0f);
-            part(metal, 0.06f, 0.09f, 0.62f, 0.0f, -0.55f, 0.0f);
-            break;
-        case PlayerAction::WATER: // regadera: cuerpo y pitorro
-            part(blue, 0.26f, 0.22f, 0.22f, 0.0f, -0.12f, 0.08f);
-            part(blue, 0.05f, 0.05f, 0.30f, 0.0f, -0.10f, 0.30f);
-            break;
-        case PlayerAction::FISH:  // caña
-            part(wood, 0.035f, ROD_LENGTH + 0.2f, 0.035f, 0.0f, -ROD_LENGTH * 0.5f + 0.1f, 0.0f);
-            part(metal, 0.08f, 0.08f, 0.08f, 0.0f, -0.05f, 0.05f);
-            break;
-        default: break;
-    }
+    part(0.26f, 0.22f, 0.22f, 0.0f, -0.12f, 0.08f);
+    part(0.05f, 0.05f, 0.30f, 0.0f, -0.10f, 0.30f);
 }
 
 // Hilo de la caña (de la punta al corcho) y el corcho: la mitad de arriba roja y la de abajo blanca; se hunde cuando pica.
@@ -2206,11 +2183,22 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     m_eye = env.eye;
 
     const DayCycle::Lighting light = scene.dayCycle.lighting();
+    {   // Bioluminiscencia: solo brilla donde hay muy poca luz (cuevas, de noche cerrada o en lo hondo del agua) y se enciende y apaga poco a poco
+        const float night = (std::clamp)((0.30f - light.ambientSky.y) / 0.25f, 0.0f, 1.0f);
+        const float deep = env.underwater ? (std::clamp)((scene.world.waterLevel(env.eye.x, env.eye.z, scene.player.body.feet()) - env.eye.y - 3.0f) / 8.0f, 0.0f, 1.0f) : 0.0f;
+        const float gloom = (std::max)({ env.darkness, night, deep });
+        const float goal = scene.playerGlows() ? (std::clamp)((gloom - 0.55f) / 0.35f, 0.0f, 1.0f) : 0.0f;
+        m_glow += (goal - m_glow) * 0.06f;
+    }
     const XMMATRIX view = scene.getViewMatrix();
     const XMMATRIX viewProj = view * XMLoadFloat4x4(&m_proj);
     const XMMATRIX lightMatrix = lightViewProj(light.lightDir, env.focus);
     CrashUtil::stage("dibujo: recoger objetos");
     collect(scene);
+    if (m_glow > 0.01f) { // la luz del jugador entra en las lámparas del shader
+        m_lamps.insert(m_lamps.begin(), Lamp{ { player.x, player.y + 1.0f, player.z }, 16.0f, { 0.30f * m_glow, 0.85f * m_glow, 0.80f * m_glow }, 0.0f, true });
+        if (m_lamps.size() > static_cast<size_t>(kLamps)) m_lamps.resize(kLamps);
+    }
     CrashUtil::stage("dibujo: constantes");
     updateFrame(context, light, view, lightMatrix, env);
 

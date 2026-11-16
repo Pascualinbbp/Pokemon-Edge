@@ -2288,6 +2288,7 @@ struct Scene {
         CRASH_SCOPE();
         if (!battle) return;
         Logger::logInfo("BATTLE", std::string("Termina el combate: ") + (battle->outcome() == Battle::Outcome::WON ? "victoria" : battle->outcome() == Battle::Outcome::LOST ? "derrota" : "sin resultado") + " | rivales derrotados=" + std::to_string(battle->defeatedLevels().size()));
+        battle->restoreForms();
         for (const BattleRules::Fighter& f : battle->playerTeam()) {
             OwnedPokemon* owned = storage.mutableAt(true, f.source);
             if (!owned) continue;

@@ -14,6 +14,7 @@ class Battle {
     using Fighter = BattleRules::Fighter;
     using Stat = EffectSpec::Stat;
     using Status = EffectSpec::Status;
+    using Weather = EffectSpec::Weather;
 
     // Cada lado tiene hasta dos huecos en el campo: hueco = lado * 2 + posición (0, 1 = jugador; 2, 3 = rival). En un combate individual solo se usan el 0 y el 2.
     static constexpr int SLOTS = 4;
@@ -95,11 +96,17 @@ class Battle {
     std::vector<int> foeSlots() const { return aliveSlots(1); }
 
     // ¿Puede ese hueco usar ese movimiento (tiene movimiento y PP)? Sin ninguno usable, el 0 es Forcejeo.
+    // Un oxidado no puede repetir el movimiento del turno anterior (salvo que no le quede otro).
     bool canUse(int slot, int move) const {
         if (!inField(slot)) return false;
         const Fighter& f = fighter(slot);
-        return move >= 0 && move < MoveRules::MAX_KNOWN && f.moves[static_cast<size_t>(move)] >= 0 && f.pp[static_cast<size_t>(move)] > 0;
+        if (!(move >= 0 && move < MoveRules::MAX_KNOWN && f.moves[static_cast<size_t>(move)] >= 0 && f.pp[static_cast<size_t>(move)] > 0)) return false;
+        if (f.status == Status::RUSTED && f.lastMove == move) for (int i = 0; i < MoveRules::MAX_KNOWN; ++i) if (i != move && f.moves[static_cast<size_t>(i)] >= 0 && f.pp[static_cast<size_t>(i)] > 0) return false;
+        return true;
     }
+    // Un enraizado no puede retirarse del campo.
+    bool canSwitchOut(int slot) const { return inField(slot) && fighter(slot).status != Status::ROOTED; }
+    Weather weather() const { return m_weather; }
     bool mustStruggle(int slot) const { return inField(slot) && !fighter(slot).usable(); }
     // ¿Hay que elegir a quién va el movimiento? Siempre si puede ir a cualquiera (rival, aliado o uno mismo; también en individuales y con un solo rival);
     // si no, solo en dobles cuando ataca al rival y quedan dos rivales en pie.
@@ -155,7 +162,7 @@ class Battle {
             const Action& a = actions[i];
             if (a.kind == Action::Kind::MOVE && !mustStruggle(mine[i]) && !canUse(mine[i], a.index)) return false;
             if (a.kind == Action::Kind::SWITCH) {
-                if (!canSwitchTo(a.index, reserved)) return false;
+                if (!canSwitchTo(a.index, reserved) || !canSwitchOut(mine[i])) return false;
                 reserved = a.index;
             }
         }
@@ -187,6 +194,9 @@ class Battle {
     // Copia de vuelta lo que cambió (PS, PP) para cada pokémon del jugador, por su posición de origen.
     const std::vector<Fighter>& playerTeam() const { return m_team[0]; }
 
+    // Los transformados vuelven a ser lo que eran (así sus movimientos y PP se guardan bien).
+    void restoreForms() { for (int side = 0; side < 2; ++side) for (Fighter& f : m_team[side]) untransform(f); }
+
     private:
     struct Order { int slot; int member; Action action; bool claw = false; };
 
@@ -204,6 +214,8 @@ class Battle {
     bool m_counted[SLOTS] = { false, false, false, false };  // rival caído cuya experiencia ya se repartió
     bool m_replaced[SLOTS] = { false, false, false, false };
     bool m_coin = true;
+    Weather m_weather = Weather::NONE;
+    int m_weatherTurns = 0;
 
     // --- Utilidades ---
     int nextReserve(int side) const { // primer pokémon en pie del equipo que no está ya en el campo
@@ -288,16 +300,119 @@ class Battle {
         if (abilities) triggerEntry(slot);
     }
     // Habilidades que actúan al entrar en combate: las que afectan al rival lo hacen con todos los rivales que haya en el campo (en dobles, los dos).
-    void triggerEntry(int slot) {
+    void triggerEntry(int slot, bool copied = false) {
         if (!inField(slot)) return;
         Fighter& f = cur(slot);
+        if (!copied && BattleRules::hasKind(*m_data, f, EffectSpec::Kind::ILLUSION)) f.illusion = true;
         for (const Ability* a : BattleRules::abilitiesOf(*m_data, f)) {
             if (a->trigger != Ability::Trigger::ON_ENTER || !a->spec.active()) continue;
+            if (copied && a->spec.kind == EffectSpec::Kind::TRACE) continue;
             say(f.name + " activa " + a->name);
             tag(slot, 3, a->name);
-            if (a->spec.self) { applyEffect(a->spec, slot, slot, 0, nullptr); continue; }
+            if (special(a->spec, slot)) continue;
+            if (a->spec.self) { applyEffect(a->spec, slot, slot, 0, nullptr, true); continue; }
             for (int other = 0; other < SLOTS; ++other) if (sideOf(other) != sideOf(slot) && inField(other)) applyEffect(a->spec, slot, other, 0, nullptr);
         }
+    }
+
+    // Habilidades de un momento concreto (golpe recibido, derrotar a un rival, bajada de estadística...) del pokémon de ese hueco; 'other' = el pokémon implicado (-1 = el primer rival).
+    void fireTrigger(int slot, Ability::Trigger trigger, int other) {
+        if (!inField(slot)) return;
+        for (const Ability* a : BattleRules::abilitiesOf(*m_data, cur(slot))) {
+            if (a->trigger != trigger || !a->spec.active() || !inField(slot)) continue;
+            if (a->spec.chance < 100.0f && !chance(a->spec.chance / 100.0f)) continue;
+            const int partner = other >= 0 ? other : opponentOf(slot);
+            say(cur(slot).name + " activa " + a->name);
+            tag(slot, 3, a->name);
+            if (special(a->spec, slot)) continue;
+            if (a->spec.self || partner < 0) applyEffect(a->spec, slot, slot, 0, nullptr, true);
+            else applyEffect(a->spec, slot, partner, 0, nullptr, true);
+        }
+    }
+
+    // Efectos de habilidad que no son un efecto de combate normal (clima, copiar, transformarse...). true = ya lo ha gestionado.
+    bool special(const EffectSpec& e, int slot) {
+        switch (e.kind) {
+            case EffectSpec::Kind::WEATHER: setWeather(e.weather); return true;
+            case EffectSpec::Kind::TRACE: {
+                const int foe = opponentOf(slot);
+                Fighter& f = cur(slot);
+                const Ability* copied = foe >= 0 ? m_data->ability(cur(foe).abilityId) : nullptr;
+                if (!copied || copied->id == f.abilityId) return true;
+                f.abilityId = copied->id;
+                say(f.name + " copia " + copied->name + ".");
+                triggerEntry(slot, true);
+                return true;
+            }
+            case EffectSpec::Kind::TRANSFORM: transform(slot); return true;
+            case EffectSpec::Kind::COPY_ALLY: {
+                const int ally = slotOf(sideOf(slot), 1 - posOf(slot));
+                if (!inField(ally)) return true;
+                cur(slot).stages = cur(ally).stages;
+                say(cur(slot).name + " copia las mejoras de " + cur(ally).name + ".");
+                return true;
+            }
+            case EffectSpec::Kind::HEAL_ALLY: {
+                const int ally = slotOf(sideOf(slot), 1 - posOf(slot));
+                if (!inField(ally)) return true;
+                Fighter& a = cur(ally);
+                a.hp = (std::min)(a.maxHp, a.hp + (std::max)(1, a.maxHp * static_cast<int>(e.amount) / 100));
+                say(who(a, ally) + " recupera PS.");
+                return true;
+            }
+            default: return false;
+        }
+    }
+
+    // --- Clima ---
+    // El clima que cuenta: ninguno si alguien en el campo tiene una habilidad que lo anula (Aclimatación).
+    Weather effectiveWeather() const {
+        for (int slot = 0; slot < SLOTS; ++slot) if (inField(slot) && BattleRules::hasKind(*m_data, cur(slot), EffectSpec::Kind::WEATHER_NEGATE)) return Weather::NONE;
+        return m_weather;
+    }
+    void setWeather(Weather weather) {
+        if (weather == Weather::NONE || weather == m_weather) return;
+        m_weather = weather;
+        m_weatherTurns = BattleRules::WEATHER_TURNS;
+        say(std::string("Empieza ") + (weather == Weather::RAIN ? "a llover" : weather == Weather::SUN ? "un sol intenso" : weather == Weather::SAND ? "una tormenta de arena" : "a nevar") + ".");
+    }
+
+    // --- Objetos: un estafado los tiene anulados y se castiga cada vez que intenta usar el equipado ---
+    bool swindledWith(const Fighter& f, HeldItem::Effect effect) const {
+        if (f.status != Status::SWINDLED) return false;
+        const HeldItem* real = m_data->held(f.heldId);
+        return real && real->effect == effect;
+    }
+    void punishItem(int slot) {
+        Fighter& f = cur(slot);
+        f.hp = (std::max)(0, f.hp - (std::max)(1, f.maxHp / BattleRules::RECOIL_STATUS_DIVISOR));
+        say(who(f, slot) + " sufre un retroceso por intentar usar su objeto.");
+    }
+
+    // --- Transformación (Impostor) ---
+    void transform(int slot) {
+        const int foe = opponentOf(slot);
+        Fighter& f = cur(slot);
+        if (foe < 0 || f.transformed) return;
+        const Fighter& o = cur(foe);
+        f.origStats = { f.attack, f.spAttack, f.defense, f.spDefense, f.speed };
+        f.origMoves = f.moves;
+        f.origPp = f.pp;
+        f.types = o.types;
+        f.attack = o.attack; f.spAttack = o.spAttack; f.defense = o.defense; f.spDefense = o.spDefense; f.speed = o.speed;
+        f.stages = o.stages;
+        f.moves = o.moves;
+        for (int i = 0; i < MoveRules::MAX_KNOWN; ++i) { const Move* m = m_data->move(o.moves[static_cast<size_t>(i)]); f.pp[static_cast<size_t>(i)] = m ? (std::min)(m->pp, BattleRules::TRANSFORM_PP) : 0; }
+        f.transformed = true;
+        say(f.name + " se transforma en " + o.name + ".");
+    }
+    void untransform(Fighter& f) {
+        if (!f.transformed) return;
+        f.transformed = false;
+        f.attack = f.origStats[0]; f.spAttack = f.origStats[1]; f.defense = f.origStats[2]; f.spDefense = f.origStats[3]; f.speed = f.origStats[4];
+        f.moves = f.origMoves;
+        f.pp = f.origPp;
+        if (const PokemonSpecies* species = m_data->speciesById(f.speciesId)) f.types = species->types;
     }
 
     void switchTo(int slot, int index) {
@@ -307,6 +422,11 @@ class Battle {
             old.stages = {};
             old.flinched = false;
             old.protecting = false;
+            old.lastMove = -1;
+            old.stance = false;
+            old.hero = old.hero || BattleRules::hasKind(*m_data, old, EffectSpec::Kind::HERO);
+            if (BattleRules::isVolatile(old.status)) { old.status = Status::NONE; old.statusTurns = 0; }
+            untransform(old);
         }
         m_onField[slot] = false;
         m_active[slot] = index;
@@ -325,15 +445,18 @@ class Battle {
         std::vector<Action> options;
         for (int i = 0; i < MoveRules::MAX_KNOWN; ++i) {
             const Move* move = moveOf(me, i);
-            if (!move || me.pp[static_cast<size_t>(i)] <= 0) continue;
-            for (const int t : targets) {
+            if (!move || !canUse(slot, i)) continue;
+            if (me.status == Status::DESTABILIZED && !move->damaging()) continue; // un desestabilizado no puede usar movimientos de estado
+            std::vector<int> candidates = targets;
+            if (move->scope == Move::Scope::ANY && move->effect.self) candidates = { slot }; // un movimiento propio que se puede dirigir: a sí mismo
+            for (const int t : candidates) {
                 const Fighter& you = cur(t);
                 float score = 5.0f;
                 if (move->damaging()) {
-                    const BattleRules::Damage d = BattleRules::damage(*m_data, me, you, *move, false, 0.5f);
-                    score = static_cast<float>(d.amount) * BattleRules::hitChance(*m_data, me, you, *move) + (d.amount >= you.hp ? 1000.0f : 0.0f);
+                    const BattleRules::Damage d = BattleRules::damage(*m_data, me, you, *move, false, 0.5f, effectiveWeather());
+                    score = static_cast<float>(d.amount) * BattleRules::hitChance(*m_data, me, you, *move, effectiveWeather()) + (d.amount >= you.hp ? 1000.0f : 0.0f);
                 } else if (move->effect.kind == EffectSpec::Kind::HEAL_SELF) score = me.hpFraction() < 0.5f ? 80.0f : 0.0f;
-                else if (move->effect.kind == EffectSpec::Kind::STATUS && you.status != Status::NONE) score = 0.0f;
+                else if (move->effect.kind == EffectSpec::Kind::STATUS && (you.status != Status::NONE || !m_data->statusAffects(move->effect.status, you.types))) score = 0.0f;
                 else if (move->effect.kind == EffectSpec::Kind::PROTECT) score = 2.0f;
                 score *= RandomUtil::range(0.8f, 1.2f);
                 Action a; a.index = i; a.target = t;
@@ -342,6 +465,7 @@ class Battle {
             }
         }
         if (!options.empty() && chance(0.1f)) best = options[static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(options.size()) - 1))]; // a veces improvisa
+        if (options.empty()) { best.index = 0; for (int i = 0; i < MoveRules::MAX_KNOWN; ++i) if (moveOf(me, i) && me.pp[static_cast<size_t>(i)] > 0) { best.index = i; break; } }
         return best;
     }
 
@@ -350,20 +474,25 @@ class Battle {
         if (o.action.kind == Action::Kind::SWITCH) return 100;
         const Fighter& f = cur(o.slot);
         const Move* move = f.usable() ? moveOf(f, o.action.index) : nullptr;
-        return move ? move->priority : 0;
+        if (!move) return 0;
+        int priority = move->priority;
+        if (move->kind == MoveClass::Kind::STATUS) if (const Ability* a = BattleRules::abilityOfKind(*m_data, f, EffectSpec::Kind::PRIORITY_STATUS)) priority += static_cast<int>(a->spec.amount);
+        if (f.status == Status::WEIGHED && priority > 0) priority = 0; // lastrado: pierde la prioridad
+        return priority;
     }
     bool before(const Order& a, const Order& b) {
         const int pa = priorityOf(a), pb = priorityOf(b);
         if (pa != pb) return pa > pb;
-        const float sa = BattleRules::speedOf(*m_data, cur(a.slot)), sb = BattleRules::speedOf(*m_data, cur(b.slot));
+        const float sa = BattleRules::speedOf(*m_data, cur(a.slot), effectiveWeather()), sb = BattleRules::speedOf(*m_data, cur(b.slot), effectiveWeather());
         if (a.claw != b.claw) return a.claw; // Garra rápida: pasa primero dentro de su prioridad
         if (sa != sb) return sa > sb;
         return a.slot < b.slot ? m_coin : !m_coin;
     }
-    bool quickClaw(int slot) const {
-        const HeldItem* held = m_data->held(cur(slot).heldId);
-        if (!held || held->effect != HeldItem::Effect::QUICK_CLAW) return false;
-        return chance(static_cast<float>(held->amount) / 100.0f);
+    bool quickClaw(int slot) {
+        const HeldItem* held = BattleRules::heldOf(*m_data, cur(slot));
+        if (held && held->effect == HeldItem::Effect::QUICK_CLAW) return chance(static_cast<float>(held->amount) / 100.0f);
+        if (!held && swindledWith(cur(slot), HeldItem::Effect::QUICK_CLAW)) { if (chance(static_cast<float>(m_data->held(cur(slot).heldId)->amount) / 100.0f)) punishItem(slot); }
+        return false;
     }
 
     // A quién va dirigido de verdad: lo elegido si sigue en pie; si cayó, el otro rival; lo que afecta a uno mismo, él mismo (-1 = no hay a quién).
@@ -379,19 +508,57 @@ class Battle {
     }
 
     // --- Un movimiento ---
+    void faintCheck(int slot) {
+        Fighter& f = cur(slot);
+        if (f.fainted() && m_onField[slot]) { say(who(f, slot) + " se debilitó."); anim(slot, 3); m_onField[slot] = false; }
+    }
+
+    // Un pokémon se hace daño a sí mismo (confusión): golpe sin tipo con su propio ataque.
+    void hitSelf(int slot) {
+        static const Move move = [] { Move m; m.id = -3; m.name = "Confusión"; m.typeId = -1; m.kind = MoveClass::Kind::PHYSICAL; m.power = BattleRules::CONFUSION_POWER; return m; }();
+        Fighter& me = cur(slot);
+        const BattleRules::Damage d = BattleRules::damage(*m_data, me, me, move, false, 0.5f, effectiveWeather());
+        me.hp = (std::max)(0, me.hp - d.amount);
+        say(who(me, slot) + " está confundido: ¡se hirió a sí mismo!", slot, -1, true, slot);
+        faintCheck(slot);
+    }
+
     void act(int slot, int moveSlot, int targetSlot) {
         CRASH_SCOPE();
         Fighter& me = cur(slot);
-        if (me.flinched) { say(who(me, slot) + " se amedrentó y no pudo moverse."); me.flinched = false; return; }
+        if (me.flinched) { say(who(me, slot) + " se amedrentó y no pudo moverse."); me.flinched = false; fireTrigger(slot, Ability::Trigger::ON_FLINCH, -1); return; }
+        if (me.status == Status::FROZEN) {
+            if (chance(BattleRules::FREEZE_THAW)) { me.status = Status::NONE; say(who(me, slot) + " se descongeló."); }
+            else { say(who(me, slot) + " está congelado: ¡no se puede mover!"); return; }
+        }
         if (me.status == Status::PARALYSIS && chance(BattleRules::PARALYSIS_SKIP)) { say(who(me, slot) + " está paralizado: ¡no se puede mover!"); return; }
+        if (me.status == Status::CONFUSED && chance(BattleRules::CONFUSION_SELF_HIT)) { hitSelf(slot); resolveFaints(); return; }
         const bool struggling = !me.usable();
         const Move* chosen = struggling ? &struggle() : moveOf(me, moveSlot);
         if (!chosen) return;
         const Move& move = *chosen;
-        if (!struggling) --me.pp[static_cast<size_t>(moveSlot)];
-        const bool targetsFoe = targetsFoeOf(move) || move.scope == Move::Scope::ANY;
+        if (me.status == Status::DESTABILIZED && !move.damaging()) { say(who(me, slot) + " está desestabilizado: no puede usar movimientos de estado."); return; }
         const std::vector<int> targets = targetsOf(slot, move, targetSlot);
-        say(who(me, slot) + " usó " + move.name + ".", slot, move.typeId, false, targetsFoe ? targets.front() : slot);
+        if (!struggling) {
+            int cost = me.status == Status::RUSTED ? 2 : 1; // oxidado: cada movimiento cuesta el doble de PP
+            for (const int other : targets) if (other != slot && sideOf(other) != sideOf(slot) && inField(other)) if (const Ability* a = BattleRules::abilityOfKind(*m_data, cur(other), EffectSpec::Kind::PP_DRAIN, BattleRules::breaks(*m_data, me))) cost += static_cast<int>(a->spec.amount);
+            me.pp[static_cast<size_t>(moveSlot)] = (std::max)(0, me.pp[static_cast<size_t>(moveSlot)] - cost);
+            me.lastMove = moveSlot;
+        }
+        if (me.status == Status::STUNNED) { // aturdido: cada movimiento le hace daño de retroceso
+            me.hp = (std::max)(0, me.hp - (std::max)(1, me.maxHp / BattleRules::RECOIL_STATUS_DIVISOR));
+            say(who(me, slot) + " sufre por el aturdimiento.");
+            if (me.fainted()) { faintCheck(slot); resolveFaints(); return; }
+        }
+        const int moveType = BattleRules::moveTypeOf(*m_data, me, move);
+        if (BattleRules::hasKind(*m_data, me, EffectSpec::Kind::PROTEAN) && moveType > 0 && !(me.types.size() == 1 && me.types[0] == moveType)) {
+            me.types = { moveType };
+            const PokemonType* type = m_data->type(moveType);
+            say(me.name + " cambia a tipo " + (type ? type->name : std::string("distinto")) + ".");
+        }
+        if (BattleRules::hasKind(*m_data, me, EffectSpec::Kind::STANCE) && me.stance != move.damaging()) { me.stance = move.damaging(); say(me.name + (me.stance ? " adopta la postura de ataque." : " adopta la postura de defensa.")); }
+        const bool targetsFoe = targetsFoeOf(move) || move.scope == Move::Scope::ANY;
+        say(who(me, slot) + " usó " + move.name + ".", slot, moveType, false, targetsFoe ? targets.front() : slot);
 
         if (move.effect.kind == EffectSpec::Kind::PROTECT) {
             const float p = std::pow(1.0f / 3.0f, static_cast<float>(me.protectStreak));
@@ -405,7 +572,8 @@ class Battle {
             if (me.fainted() && wanted != slot) break;
             strike(slot, move, targetsFoe ? wanted : slot, targetsFoe);
         }
-        if (me.fainted() && m_onField[slot]) { say(who(me, slot) + " se debilitó."); anim(slot, 3); m_onField[slot] = false; }
+        if (swindledWith(me, HeldItem::Effect::RAZOR_CLAW) && move.damaging() && !me.fainted()) punishItem(slot);
+        faintCheck(slot);
         resolveFaints();
     }
 
@@ -430,68 +598,124 @@ class Battle {
         if (target < 0) return;
         if (targetsFoe && !inField(target)) target = opponentOf(slot); // su objetivo ya cayó este turno
         if (target < 0) return;
+        const bool broken = BattleRules::breaks(*m_data, me);
+        if (move.kind == MoveClass::Kind::STATUS && targetsFoe && sideOf(target) != sideOf(slot)) { // Espejo mágico: devuelve los movimientos de estado
+            if (const Ability* a = BattleRules::abilityOfKind(*m_data, cur(target), EffectSpec::Kind::REFLECT_STATUS, broken)) {
+                say(cur(target).name + " activa " + a->name);
+                tag(target, 3, a->name);
+                target = slot;
+            }
+        }
         Fighter& foe = cur(target);
         const bool hostile = targetsFoe && target != slot; // cualquier otro pokémon del campo, aliado incluido (Terremoto): la protección lo frena
         if (hostile && foe.protecting) { say(who(foe, target) + " se protegió."); return; }
-        if (hostile && !chance(BattleRules::hitChance(*m_data, me, foe, move))) { say("¡" + who(me, slot) + " falló!"); return; }
+        if (hostile && !chance(BattleRules::hitChance(*m_data, me, foe, move, effectiveWeather()))) { say("¡" + who(me, slot) + " falló!"); return; }
 
         int dealt = 0;
         if (move.damaging()) {
-            const bool crit = chance(BattleRules::critChance(BattleRules::critStages(*m_data, me, move)));
-            const BattleRules::Damage d = BattleRules::damage(*m_data, me, foe, move, crit, RandomUtil::range(0.0f, 1.0f));
+            const int moveType = BattleRules::moveTypeOf(*m_data, me, move);
+            if (hostile) {
+                for (const Ability* a : BattleRules::abilitiesOf(*m_data, foe)) { // Pararrayos...: absorbe los movimientos de su tipo
+                    if (broken || a->spec.kind != EffectSpec::Kind::ABSORB_TYPE || a->spec.typeId != moveType) continue;
+                    say(foe.name + " absorbe el golpe con " + a->name + ".");
+                    tag(target, 3, a->name);
+                    changeStage(target, a->spec.stat, static_cast<int>(a->spec.amount), -1);
+                    return;
+                }
+                if (foe.illusion && !broken) { foe.illusion = false; say("¡La ilusión de " + foe.name + " se rompe y el golpe no le alcanza!"); return; }
+            }
+            const bool crit = BattleRules::isCrit(*m_data, me, foe, move, RandomUtil::range(0.0f, 1.0f));
+            const BattleRules::Damage d = BattleRules::damage(*m_data, me, foe, move, crit, RandomUtil::range(0.0f, 1.0f), effectiveWeather());
             if (d.immune) { say("No afecta a " + who(foe, target) + "..."); return; }
             int amount = (std::max)(1, d.amount);
-            if (const HeldItem* held = m_data->held(foe.heldId)) {
-                if (held->effect == HeldItem::Effect::FOCUS_BAND && amount >= foe.hp && foe.hp > 1 && chance(static_cast<float>(held->amount) / 100.0f)) {
-                    amount = foe.hp - 1;
-                    say(who(foe, target) + " aguantó con la Cinta focus.");
+            if (amount >= foe.hp && foe.hp > 1) {
+                if (const HeldItem* held = BattleRules::heldOf(*m_data, foe)) {
+                    if (held->effect == HeldItem::Effect::FOCUS_BAND && chance(static_cast<float>(held->amount) / 100.0f)) { amount = foe.hp - 1; say(who(foe, target) + " aguantó con la Cinta focus."); }
+                } else if (swindledWith(foe, HeldItem::Effect::FOCUS_BAND) && chance(static_cast<float>(m_data->held(foe.heldId)->amount) / 100.0f)) punishItem(target);
+                if (amount >= foe.hp && foe.hp >= foe.maxHp && !foe.fainted()) {
+                    if (const Ability* a = BattleRules::abilityOfKind(*m_data, foe, EffectSpec::Kind::SURVIVE, broken)) { amount = foe.hp - 1; say(foe.name + " resiste con " + a->name + "."); tag(target, 3, a->name); }
                 }
             }
             amount = (std::min)(amount, foe.hp);
             foe.hp -= amount;
             dealt = amount;
-            say(std::string(d.crit ? "¡Golpe crítico! " : "") + (d.effectiveness >= 4.0f ? "¡Es hipereficaz!" : d.effectiveness > 1.0f ? "¡Es supereficaz!" : d.effectiveness <= 0.25f ? "Es muy poco eficaz..." : d.effectiveness < 1.0f ? "No es muy eficaz..." : "Impacta."), slot, move.typeId, true, target);
-            if (move.contact && !foe.fainted()) {
-                for (const Ability* a : BattleRules::abilitiesOf(*m_data, foe)) {
-                    if (a->trigger != Ability::Trigger::ON_CONTACT || !a->spec.active()) continue;
-                    say(foe.name + " activa " + a->name);
-                    tag(target, 3, a->name);
-                    applyEffect(a->spec, target, slot, 0, nullptr);
-                }
+            say(std::string(d.crit ? "¡Golpe crítico! " : "") + (d.effectiveness >= 4.0f ? "¡Es hipereficaz!" : d.effectiveness > 1.0f ? "¡Es supereficaz!" : d.effectiveness <= 0.25f ? "Es muy poco eficaz..." : d.effectiveness < 1.0f ? "No es muy eficaz..." : "Impacta."), slot, moveType, true, target);
+            if (!foe.fainted()) {
+                if (move.contact) fireTrigger(target, Ability::Trigger::ON_CONTACT, slot);
+                fireTrigger(target, Ability::Trigger::ON_HIT, slot);
+                if (d.crit) fireTrigger(target, Ability::Trigger::ON_CRIT_TAKEN, slot);
             }
-            if (const HeldItem* held = m_data->held(me.heldId)) {
-                if (held->effect == HeldItem::Effect::LIFE_ORB && !me.fainted()) { me.hp = (std::max)(0, me.hp - (std::max)(1, me.maxHp / BattleRules::RECOIL_ORB_DIVISOR)); say(who(me, slot) + " pierde PS por la Vidasfera."); }
+            if (!me.fainted()) {
+                if (const HeldItem* held = BattleRules::heldOf(*m_data, me)) {
+                    if (held->effect == HeldItem::Effect::LIFE_ORB) { me.hp = (std::max)(0, me.hp - (std::max)(1, me.maxHp / BattleRules::RECOIL_ORB_DIVISOR)); say(who(me, slot) + " pierde PS por la Vidasfera."); }
+                } else if (swindledWith(me, HeldItem::Effect::LIFE_ORB)) punishItem(slot);
             }
-            if (foe.fainted()) { say(who(foe, target) + " se debilitó."); anim(target, 3); m_onField[target] = false; }
+            if (foe.fainted()) {
+                say(who(foe, target) + " se debilitó."); anim(target, 3); m_onField[target] = false;
+                if (!me.fainted()) fireTrigger(slot, Ability::Trigger::ON_KO, target);
+            }
         }
-        if (move.effect.active()) applyEffect(move.effect, slot, target, dealt, &move);
+        if (move.effect.active() && me.status != Status::DESTABILIZED) applyEffect(move.effect, slot, target, dealt, &move); // un desestabilizado solo hace el daño del movimiento
     }
 
-    // Aplica un efecto de 'user' (en 'target' si no es propio). 'dealt' = daño hecho (retroceso, absorción).
-    void applyEffect(const EffectSpec& e, int user, int target, int dealt, const Move*) {
+    // Cambia un nivel de estadística de ese hueco; 'source' = quien lo provoca (-1 = nadie / él mismo). Un hechizado recibe lo contrario; Coraza reflejo devuelve las bajadas; Oportunista copia las subidas.
+    void changeStage(int tSlot, Stat stat, int amount, int source, bool reflected = false) {
+        Fighter& t = cur(tSlot);
+        if (t.status == Status::BEWITCHED) amount = -amount;
+        const bool fromFoe = source >= 0 && sideOf(source) != sideOf(tSlot);
+        if (amount < 0 && fromFoe && !reflected) {
+            if (const Ability* a = BattleRules::abilityOfKind(*m_data, t, EffectSpec::Kind::REFLECT_DROPS, BattleRules::breaks(*m_data, cur(source)))) {
+                say(t.name + " activa " + a->name);
+                tag(tSlot, 3, a->name);
+                changeStage(source, stat, amount, tSlot, true);
+                return;
+            }
+        }
+        int& stage = t.stage(stat);
+        const int next = std::clamp(stage + amount, -BattleRules::MAX_STAGE, BattleRules::MAX_STAGE);
+        if (next == stage) { say(std::string(who(t, tSlot)) + ": su " + EffectSpec::statName(stat) + " no puede " + (amount > 0 ? "subir" : "bajar") + " más."); return; }
+        const int diff = (std::abs)(next - stage);
+        stage = next;
+        say(who(t, tSlot) + (amount > 0 ? " sube " : " baja ") + (diff > 1 ? "mucho " : "") + "su " + EffectSpec::statName(stat) + ".");
+        tag(tSlot, amount > 0 ? 1 : 2, EffectSpec::statName(stat), static_cast<int>(stat), amount > 0 ? diff : -diff);
+        if (amount > 0) { // Oportunista
+            for (int other = 0; other < SLOTS; ++other) {
+                if (sideOf(other) == sideOf(tSlot) || !inField(other) || !BattleRules::hasKind(*m_data, cur(other), EffectSpec::Kind::COPY_BOOSTS)) continue;
+                int& mine = cur(other).stage(stat);
+                const int copy = std::clamp(mine + diff, -BattleRules::MAX_STAGE, BattleRules::MAX_STAGE);
+                if (copy == mine) continue;
+                mine = copy;
+                say(cur(other).name + " copia la mejora y sube su " + EffectSpec::statName(stat) + ".");
+                tag(other, 1, EffectSpec::statName(stat), static_cast<int>(stat), diff);
+            }
+        }
+        if (amount < 0 && fromFoe) fireTrigger(tSlot, Ability::Trigger::ON_STAT_DROP, -1);
+    }
+
+    // Intenta poner un estado: no si ya tiene uno o si su tipo es inmune a ese estado (según la tabla de tipos). 'say' = avisar si no se pone.
+    void applyStatus(int tSlot, Status status, bool announce) {
+        Fighter& t = cur(tSlot);
+        if (status == Status::NONE) return;
+        if (t.status != Status::NONE) { if (announce) say("Pero no tuvo efecto en " + who(t, tSlot) + "."); return; }
+        if (!m_data->statusAffects(status, t.types)) { if (announce) say("No afecta a " + who(t, tSlot) + "..."); return; }
+        t.status = status;
+        t.statusTurns = BattleRules::isVolatile(status) ? RandomUtil::integer(BattleRules::VOLATILE_MIN_TURNS, BattleRules::VOLATILE_MAX_TURNS) : 0;
+        say(who(t, tSlot) + " está " + EffectSpec::statusName(status) + ".");
+    }
+
+    // Aplica un efecto de 'user' (en 'target' si no es propio; en un movimiento que se dirige a cualquiera, siempre en el elegido). 'dealt' = daño hecho (retroceso, absorción).
+    // 'sure' = la probabilidad ya se ha tirado.
+    void applyEffect(const EffectSpec& e, int user, int target, int dealt, const Move* move, bool sure = false) {
         if (m_active[user] < 0 || m_active[target] < 0) return;
         Fighter& u = cur(user);
-        const int tSlot = e.self ? user : target;
+        const int tSlot = move && move->scope == Move::Scope::ANY ? target : e.self ? user : target;
         Fighter& t = cur(tSlot);
         if (t.fainted() && e.kind != EffectSpec::Kind::RECOIL) return;
-        const bool secondary = e.kind == EffectSpec::Kind::STAT_STAGE || e.kind == EffectSpec::Kind::STATUS || e.kind == EffectSpec::Kind::FLINCH;
-        if (secondary && !chance(e.chance / 100.0f)) return;
+        const bool secondary = e.kind == EffectSpec::Kind::STAT_STAGE || e.kind == EffectSpec::Kind::STATUS || e.kind == EffectSpec::Kind::FLINCH || e.kind == EffectSpec::Kind::CHIP;
+        if (secondary && !sure && e.chance < 100.0f && !chance(e.chance / 100.0f)) return;
         switch (e.kind) {
-            case EffectSpec::Kind::STAT_STAGE: {
-                int& stage = t.stage(e.stat);
-                const int next = std::clamp(stage + static_cast<int>(e.amount), -BattleRules::MAX_STAGE, BattleRules::MAX_STAGE);
-                if (next == stage) { say(std::string(who(t, tSlot)) + ": su " + EffectSpec::statName(e.stat) + " no puede " + (e.amount > 0 ? "subir" : "bajar") + " más."); break; }
-                const int diff = (std::abs)(next - stage);
-                stage = next;
-                say(who(t, tSlot) + (e.amount > 0 ? " sube " : " baja ") + (diff > 1 ? "mucho " : "") + "su " + EffectSpec::statName(e.stat) + ".");
-                tag(tSlot, e.amount > 0 ? 1 : 2, EffectSpec::statName(e.stat), static_cast<int>(e.stat), e.amount > 0 ? diff : -diff);
-                break;
-            }
-            case EffectSpec::Kind::STATUS:
-                if (t.status != Status::NONE || e.status == Status::NONE) break;
-                t.status = e.status;
-                say(who(t, tSlot) + " está " + EffectSpec::statusName(e.status) + ".");
-                break;
+            case EffectSpec::Kind::STAT_STAGE: changeStage(tSlot, e.stat, static_cast<int>(e.amount), user); break;
+            case EffectSpec::Kind::STATUS: applyStatus(tSlot, e.status, e.chance >= 100.0f); break;
             case EffectSpec::Kind::HEAL_SELF: {
                 const int gain = (std::min)(t.maxHp - t.hp, (std::max)(1, t.maxHp * static_cast<int>(e.amount) / 100));
                 if (gain <= 0) { say("Pero no pasó nada."); break; }
@@ -510,7 +734,11 @@ class Battle {
                 say(who(u, user) + " absorbe energía.");
                 break;
             case EffectSpec::Kind::FLINCH:
-                t.flinched = true;
+                if (!BattleRules::hasKind(*m_data, t, EffectSpec::Kind::FLINCH_IMMUNE)) t.flinched = true;
+                break;
+            case EffectSpec::Kind::CHIP:
+                t.hp = (std::max)(0, t.hp - (std::max)(1, t.maxHp * static_cast<int>(e.amount) / 100));
+                say(who(t, tSlot) + " se hiere al golpear.");
                 break;
             default: break;
         }
@@ -518,6 +746,8 @@ class Battle {
 
     // --- Fin de turno ---
     void endTurn() {
+        const Weather weather = effectiveWeather();
+        const int rock = BattleRules::typeByName(*m_data, "roca"), ground = BattleRules::typeByName(*m_data, "tierra"), steel = BattleRules::typeByName(*m_data, "acero");
         for (int slot = 0; slot < SLOTS; ++slot) {
             if (m_active[slot] < 0) continue;
             Fighter& f = cur(slot);
@@ -526,19 +756,31 @@ class Battle {
                 f.hp = (std::max)(0, f.hp - (std::max)(1, f.maxHp / (f.status == Status::BURN ? BattleRules::BURN_DIVISOR : BattleRules::POISON_DIVISOR)));
                 say(who(f, slot) + " sufre por estar " + EffectSpec::statusName(f.status) + ".");
             }
-            if (const HeldItem* held = m_data->held(f.heldId)) {
-                if (held->effect == HeldItem::Effect::LEFTOVERS && !f.fainted() && f.hp < f.maxHp) {
-                    f.hp = (std::min)(f.maxHp, f.hp + (std::max)(1, f.maxHp * held->amount / 100));
-                    say(who(f, slot) + " recupera PS con los Restos.");
-                }
+            if (!f.fainted() && f.status == Status::INFESTED) { // infestado: pierde velocidad cada turno
+                int& stage = f.stage(Stat::SPEED);
+                if (stage > -BattleRules::MAX_STAGE) { --stage; say(who(f, slot) + " pierde velocidad por la infestación."); tag(slot, 2, EffectSpec::statName(Stat::SPEED), static_cast<int>(Stat::SPEED), -1); }
+            }
+            if (!f.fainted() && weather == Weather::SAND && !BattleRules::hasType(f, rock) && !BattleRules::hasType(f, ground) && !BattleRules::hasType(f, steel)) {
+                f.hp = (std::max)(0, f.hp - (std::max)(1, f.maxHp / BattleRules::SAND_DIVISOR));
+                say(who(f, slot) + " sufre la tormenta de arena.");
+            }
+            if (!f.fainted() && f.hp < f.maxHp) {
+                if (const HeldItem* held = BattleRules::heldOf(*m_data, f)) {
+                    if (held->effect == HeldItem::Effect::LEFTOVERS) {
+                        f.hp = (std::min)(f.maxHp, f.hp + (std::max)(1, f.maxHp * held->amount / 100));
+                        say(who(f, slot) + " recupera PS con los Restos.");
+                    }
+                } else if (swindledWith(f, HeldItem::Effect::LEFTOVERS)) punishItem(slot);
             }
             if (!f.fainted()) for (const Ability* a : BattleRules::abilitiesOf(*m_data, f)) {
                 if (a->trigger != Ability::Trigger::END_TURN || !a->spec.active()) continue;
                 const int target = opponentOf(slot);
                 applyEffect(a->spec, slot, target >= 0 ? target : slot, 0, nullptr);
             }
+            if (!f.fainted() && BattleRules::isVolatile(f.status) && --f.statusTurns <= 0) { say(who(f, slot) + " ya no está " + EffectSpec::statusName(f.status) + "."); f.status = Status::NONE; }
             if (f.fainted()) { say(who(f, slot) + " se debilitó."); anim(slot, 3); m_onField[slot] = false; }
         }
+        if (m_weather != Weather::NONE && --m_weatherTurns <= 0) { say(std::string("Termina la ") + EffectSpec::weatherName(m_weather) + "."); m_weather = Weather::NONE; }
         m_coin = chance(0.5f);
         resolveFaints();
     }
@@ -584,6 +826,7 @@ class Battle {
     }
 
     void finish(Outcome outcome) {
+        restoreForms();
         m_outcome = outcome;
         m_phase = Phase::OVER;
         say(outcome == Outcome::WON ? "¡Has ganado el combate!" : "Te has quedado sin pokémon...");

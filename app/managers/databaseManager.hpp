@@ -4,6 +4,7 @@
 #include "../engine/audio/radio.hpp"
 #include "../engine/world/style/styleRegistry.hpp"
 #include "../daos/abilityDao.hpp"
+#include "../daos/statusDao.hpp"
 #include "../daos/moveDao.hpp"
 #include "../daos/natureDao.hpp"
 #include "../daos/dexRewardDao.hpp"
@@ -41,6 +42,7 @@ class DatabaseManager {
         data.abilities = AbilityDao().findAll();
         data.normalizeAbilities();
         MoveDao().load(data);
+        data.statuses = StatusDao().findAll();
         data.rarities = RarityDao().findAll();
         data.generations = GenerationDao().findAll();
         data.natures = NatureDao().findAll();
