@@ -136,7 +136,7 @@ namespace {
                 else gain += LampColor[i].rgb * l * l;
             }
             color *= lerp(float3(1.0f, 1.0f, 1.0f), gain, Env.x);
-            color += (color * 0.8f + aura * 0.5f) * aura;
+            color += aura * (color * 2.0f + 0.22f); // luz real: suma claridad aunque la superficie esté a oscuras
             float fog = 1.0f - exp(-dist * Env.y);
             if (Env.z > 0.5f) fog = max(fog, smoothstep(7.0f, 20.0f, dist)); // bajo el agua solo se ve un área alrededor del jugador
             fog *= 1.0f - saturate(max(aura.r, max(aura.g, aura.b)) * 1.5f);   // la luz del jugador atraviesa la niebla cercana
@@ -1183,13 +1183,13 @@ bool Renderer3D::addToolModel(const Scene& scene, PlayerAction action, const std
     const RenderModel* model = m_models.get(m_device, name, false);
     if (!model) return false;
     const bool rod = action == PlayerAction::FISH;
-    // Del modelo (mango en el origen, cabeza arriba; la caña apunta a +x y arriba) a la mano (-y es el brazo, +z delante).
-    const XMMATRIX orient = rod ? XMMATRIX(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f), XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f))
-                                : XMMATRIX(XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f), XMVectorSet(-1.0f, 0.0f, 0.0f, 0.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f));
-    const XMMATRIX grip = rod ? XMMatrixTranslation(0.30f, -0.05f, 0.0f) : XMMatrixTranslation(0.0f, -0.12f, 0.0f); // por dónde se agarra
+    // Del modelo a la mano (-y es el brazo, +z delante). Las herramientas estáticas tienen el mango en el origen y la cabeza arriba. La caña (assets 4_N.glb)
+    // tiene el mango en x = +0,36 y apunta hacia -x y arriba: su ápice queda hacia delante, igual que la cabeza de un hacha, y se agarra un poco por encima del culatín.
+    const XMMATRIX orient = XMMATRIX(XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f), XMVectorSet(-1.0f, 0.0f, 0.0f, 0.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f));
+    const XMMATRIX grip = rod ? XMMatrixTranslation(-0.296f, -0.093f, 0.0f) : XMMatrixTranslation(0.0f, -0.12f, 0.0f); // por dónde se agarra
     const XMMATRIX world = grip * orient * hand;
 
-    XMFLOAT3 local = { model->boundsMax.x, model->boundsMax.y, 0.0f }; // punta aproximada si no hay animación
+    XMFLOAT3 local = { model->boundsMin.x, model->boundsMax.y, 0.0f }; // punta aproximada si no hay animación
     if (model->skinned()) {
         const Fishing& fishing = scene.fishing;
         const char* clipName = nullptr;
@@ -2187,7 +2187,7 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
         const float night = (std::clamp)((0.30f - light.ambientSky.y) / 0.25f, 0.0f, 1.0f);
         const float deep = env.underwater ? (std::clamp)((scene.world.waterLevel(env.eye.x, env.eye.z, scene.player.body.feet()) - env.eye.y - 3.0f) / 8.0f, 0.0f, 1.0f) : 0.0f;
         const float gloom = (std::max)({ env.darkness, night, deep });
-        const float goal = scene.playerGlows() ? (std::clamp)((gloom - 0.55f) / 0.35f, 0.0f, 1.0f) : 0.0f;
+        const float goal = scene.companionGlows() ? (std::clamp)((gloom - 0.55f) / 0.35f, 0.0f, 1.0f) : 0.0f;
         m_glow += (goal - m_glow) * 0.06f;
     }
     const XMMATRIX view = scene.getViewMatrix();
@@ -2195,8 +2195,9 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     const XMMATRIX lightMatrix = lightViewProj(light.lightDir, env.focus);
     CrashUtil::stage("dibujo: recoger objetos");
     collect(scene);
-    if (m_glow > 0.01f) { // la luz del jugador entra en las lámparas del shader
-        m_lamps.insert(m_lamps.begin(), Lamp{ { player.x, player.y + 1.0f, player.z }, 16.0f, { 0.30f * m_glow, 0.85f * m_glow, 0.80f * m_glow }, 0.0f, true });
+    if (m_glow > 0.01f) { // la luz del pokémon con Bioluminiscencia (el acompañante) entra en las lámparas del shader
+        const XMFLOAT3 glowAt = scene.companionLightPoint();
+        m_lamps.insert(m_lamps.begin(), Lamp{ { glowAt.x, glowAt.y, glowAt.z }, 30.0f, { 1.00f * m_glow, 0.93f * m_glow, 0.80f * m_glow }, 0.0f, true });
         if (m_lamps.size() > static_cast<size_t>(kLamps)) m_lamps.resize(kLamps);
     }
     CrashUtil::stage("dibujo: constantes");

@@ -236,15 +236,16 @@ struct Scene {
         InputState moveInput = input;
         if (fishing.hooked()) moveInput.crouch = moveInput.crouchHeld = false; // los botones de decidir (Liberar) no agachan
         {   // las habilidades pasivas del jugador valen con el pokémon en el equipo (no hace falta que lo acompañe): Branquias da aire bajo el agua, Bioluminiscencia da luz
-            bool gills = false, glow = false;
+            bool gills = false;
             for (const OwnedPokemon& member : storage.team()) {
                 const PokemonSpecies* species = m_data->speciesById(member.speciesId);
                 if (!species) continue;
                 gills = gills || m_data->hasEffect(*species, member.abilityId, Ability::Effect::WATER_BREATHING);
-                glow = glow || m_data->hasEffect(*species, member.abilityId, Ability::Effect::BIOLUMINESCENCE);
             }
             player.breathesUnderwater = gills;
-            m_glows = glow;
+            const OwnedPokemon* out = storage.active();
+            const PokemonSpecies* outSpecies = out ? m_data->speciesById(out->speciesId) : nullptr;
+            m_glows = out && outSpecies && companion.active() && !companion.changing() && !storage.fainted(*out) && m_data->hasEffect(*outSpecies, out->abilityId, Ability::Effect::BIOLUMINESCENCE);
         }
         player.onCloud = habitats.cloudFloor(player.body.position.x, player.body.position.z, player.body.feet(), true);
         player.update(dt, moveInput, camera.yaw(), camera.lookAngle(), world);
@@ -840,7 +841,8 @@ struct Scene {
     }
 
     public:
-    bool playerGlows() const { return m_glows; }
+    bool companionGlows() const { return m_glows; } // el pokémon que acompaña tiene Bioluminiscencia: él brilla, no el entrenador
+    DirectX::XMFLOAT3 companionLightPoint() const { return { companion.body.position.x, companion.body.position.y + Companion::SIZE * 0.6f, companion.body.position.z }; }
     private:
 
     // --- Pesca ---
@@ -1454,6 +1456,9 @@ struct Scene {
 
     void interact() {
         m_interaction = validInteraction();
+        const DirectX::XMFLOAT3 focus = interactionAnchor();
+        const bool worked = m_interaction.kind == Interaction::CHEST || m_interaction.kind == Interaction::GROUND || m_interaction.kind == Interaction::FRUIT || m_interaction.kind == Interaction::NODE || m_interaction.kind == Interaction::PLOT;
+        struct FaceOnExit { Player& p; float x, z; bool on; ~FaceOnExit() { if (on) p.faceTarget(x, z); } } faceOnExit{ player, focus.x, focus.z, worked };
         if (m_interaction.kind == Interaction::WEAKENED && m_weak) {
             captureDirect(*m_weak);
             return;

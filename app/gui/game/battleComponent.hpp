@@ -510,7 +510,7 @@ namespace BattleComponent {
                     const float x = menuLeft, y = top + static_cast<float>(i) * (rowH + gap);
                     ImGui::SetCursorScreenPos(ImVec2(x, y));
                     ImGui::PushID(100 + i);
-                    const bool ok = battle->canSwitchTo(i, reserved) && battle->canSwitchOut(slot);
+                    const bool ok = battle->canSwitchTo(i, reserved) && (forced || battle->canSwitchOut(slot));
                     const bool clicked = ImGui::InvisibleButton("##member", ImVec2(w, rowH)) && ok;
                     const bool hover = ImGui::IsItemHovered() && ok;
                     ImGui::PopID();
