@@ -115,6 +115,7 @@ class Battle {
         const Move* m = mustStruggle(slot) ? nullptr : moveOf(fighter(slot), move);
         if (m && m->scope == Move::Scope::ANY) return true; // aliado, uno mismo o rival
         if (!m_doubles) return false;
+        if (allyOf(slot) >= 0 && (mustStruggle(slot) || (m && m->scope == Move::Scope::NORMAL && targetsFoeOf(*m)))) return true; // en dobles un ataque también puede ir al compañero
         if (foeSlots().size() < 2) return false;
         if (mustStruggle(slot)) return true;
         if (!m) return false;
@@ -125,7 +126,11 @@ class Battle {
     std::vector<int> targetChoices(int slot, int move) const {
         std::vector<int> list = foeSlots();
         const Move* m = mustStruggle(slot) ? nullptr : moveOf(fighter(slot), move);
-        if (m && m->scope == Move::Scope::ANY) for (int other = 0; other < SLOTS; ++other) if (sideOf(other) == sideOf(slot) && inField(other)) list.push_back(other);
+        if (m && m->scope == Move::Scope::ANY) {
+            for (int other = 0; other < SLOTS; ++other) if (sideOf(other) == sideOf(slot) && inField(other)) list.push_back(other);
+        } else if (m_doubles && (!m || (m->scope == Move::Scope::NORMAL && targetsFoeOf(*m))) && allyOf(slot) >= 0) {
+            list.push_back(allyOf(slot)); // en dobles un ataque también puede ir al compañero
+        }
         return list;
     }
     // Cambio a ese pokémon del equipo: en pie y fuera del campo ('reserved' = el que ya va a sacar el otro hueco este turno).
@@ -235,6 +240,7 @@ class Battle {
     const Fighter& cur(int slot) const { return m_team[sideOf(slot)][static_cast<size_t>(m_active[slot])]; }
     static std::string who(const Fighter& f, int slot) { return (sideOf(slot) == 1 ? "El " : "") + f.name + (sideOf(slot) == 1 ? " rival" : ""); }
     // Primer rival en pie de ese hueco (para habilidades y efectos sin objetivo elegido); -1 si no queda ninguno.
+    int allyOf(int slot) const { for (int other = 0; other < SLOTS; ++other) if (other != slot && sideOf(other) == sideOf(slot) && inField(other)) return other; return -1; }
     int opponentOf(int slot) const { const std::vector<int> list = aliveSlots(1 - sideOf(slot)); return list.empty() ? -1 : list.front(); }
 
     void say(const std::string& text, int attacker = -1, int moveType = -1, bool hit = false, int target = -1) {
@@ -503,6 +509,7 @@ class Battle {
         const int wanted = action.target;
         if (move->scope == Move::Scope::ANY && wanted >= 0 && wanted < SLOTS && inField(wanted)) return wanted; // aliado, uno mismo o rival
         if (!targetsFoeOf(*move)) return slot;
+        if (m_doubles && move->scope == Move::Scope::NORMAL && wanted >= 0 && wanted < SLOTS && wanted != slot && sideOf(wanted) == sideOf(slot) && inField(wanted)) return wanted; // el compañero
         if (wanted >= 0 && wanted < SLOTS && sideOf(wanted) != sideOf(slot) && inField(wanted)) return wanted;
         return opponentOf(slot);
     }

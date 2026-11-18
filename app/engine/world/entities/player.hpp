@@ -76,7 +76,7 @@ class Player {
         if (!streaming) liftByGeyser(dt, world);
         const bool inWater = !streaming && world.waterDepth(body.position.x, body.position.z, body.feet()) > Physics::World::SWIM_DEPTH;
         float dirX = 0.0f, dirZ = 0.0f;
-        const float amount = direction(input.moveX, input.moveY, inWater ? cameraYaw : m_moveYaw, dirX, dirZ); // nadando se va hacia donde mira la cámara, y gira con ella
+        const float amount = direction(input.moveX, input.moveY, m_moveYaw, dirX, dirZ); // también nadando o buceando la cámara es libre: girarla no desvía al personaje
         if (streaming) {
             // la corriente lo lleva: no hay entrada que valga
         } else if (inWater) {
@@ -148,11 +148,11 @@ class Player {
     // Durante la acción en curso el personaje mira hacia ese punto (el objeto trabajado), no hacia donde apunta la cámara.
     void faceTarget(float x, float z) {
         actionYaw = std::atan2(x - body.position.x, z - body.position.z);
-        m_actionFaces = m_action != PlayerAction::NONE;
+        m_actionFaces = m_action != PlayerAction::NONE || m_holding != PlayerAction::NONE;
     }
     PlayerAction action() const { return m_action; }
     // Acción que se mantiene en pose mientras no haya otra animación (la caña con el corcho en el agua).
-    void hold(PlayerAction action) { m_holding = action; }
+    void hold(PlayerAction action) { m_holding = action; if (action == PlayerAction::NONE) m_actionFaces = false; }
 
     PlayerPose pose() const {
         PlayerPose::Input in;
@@ -181,7 +181,7 @@ class Player {
         const bool faceCamera = aiming || m_action != PlayerAction::NONE || m_holding != PlayerAction::NONE;
         const float speed = std::hypot(body.velocity.x, body.velocity.z);
         float target = m_facing;
-        if (m_action == PlayerAction::POTION || (m_actionFaces && m_action != PlayerAction::NONE)) target = actionYaw;
+        if (m_action == PlayerAction::POTION || (m_actionFaces && (m_action != PlayerAction::NONE || m_holding != PlayerAction::NONE))) target = actionYaw;
         else if (faceCamera) target = cameraYaw;
         else if (speed > FACING_MIN_SPEED) target = std::atan2(body.velocity.x, body.velocity.z);
         const float delta = DirectX::XMScalarModAngle(target - m_facing);

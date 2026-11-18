@@ -919,6 +919,7 @@ struct Scene {
                 player.hold(PlayerAction::FISH);
             }
         }
+        if (fishing.active()) player.faceTarget(fishing.bobber().x, fishing.bobber().z); // mira hacia donde cayó el corcho, no hacia donde apunte la cámara
 
         switch (fishing.update(dt, reel, world, p.x, p.z)) {
             case Event::HOOKED:

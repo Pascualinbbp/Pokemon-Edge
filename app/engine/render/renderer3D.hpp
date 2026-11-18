@@ -116,9 +116,8 @@ class Renderer3D {
     void addCapture(const CaptureSequence& sequence);
     void addGlowBetween(const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to, float width, const DirectX::XMFLOAT4& tint);
     void addPlayer(const Scene& scene);
-    bool addToolModel(const Scene& scene, PlayerAction action, const std::string& name, DirectX::CXMMATRIX hand, DirectX::XMFLOAT3& tip, bool& tipKnown);
+    bool addToolModel(const Scene& scene, PlayerAction action, const std::string& name, DirectX::CXMMATRIX hand);
     void addWateringCan(DirectX::CXMMATRIX hand);
-    void addFishingLine(const Scene& scene, const DirectX::XMFLOAT3& rodTip);
     void addSky(const Scene& scene, float time);
     void addGeysers(const Scene& scene, float time);
     void addUnderground(const Scene& scene); // decorado de las galerías cercanas (estalactitas, raíles, lámparas...) y sus luces

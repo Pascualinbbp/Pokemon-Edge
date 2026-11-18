@@ -9,8 +9,8 @@
 // sembrar. Cada parcela es un ResourceNode vacío (no hay que arar: el suelo ya está preparado). El cultivo crece solo y se riega una vez por jugador y por
 // pokémon (ver ResourceNode); recogido, la parcela vuelve a quedar libre para sembrar.
 namespace Crops {
-    struct Crop { int nodeId; const char* seedName; }; // nodo del cultivo (tabla resource_node) y material de sus semillas (tabla material); nullptr = se siembra el propio producto (zanahoria, patata)
-    inline constexpr Crop LIST[] = { { 24, nullptr }, { 25, "Semillas de fresa" }, { 26, "Semillas de trigo" }, { 27, nullptr } };
+    struct Crop { int nodeId; const char* seedName; }; // nodo del cultivo (tabla resource_node) y material de sus semillas (tabla material); nullptr = se siembra el propio producto
+    inline constexpr Crop LIST[] = { { 24, "Semillas de zanahoria" }, { 25, "Semillas de fresa" }, { 26, "Semillas de trigo" }, { 27, "Semillas de patata" } };
     inline constexpr int COUNT = 4;
     inline constexpr int ZONES = 3;
     inline constexpr int PLOTS_PER_ZONE = 4;
@@ -23,6 +23,11 @@ namespace Crops {
         DirectX::XMFLOAT3 position{};
         int node = -1;  // índice en Scene::nodes
     };
+
+    // Etapas de crecimiento con modelo (assets/models/crops/<nodo>_<etapa>.glb); 0 = sin modelos (se dibuja con bloques). La fresa tendrá una tercera etapa.
+    inline int stagesOf(int nodeId) {
+        switch (nodeId) { case 24: return 3; case 25: return 2; case 27: return 3; default: return 0; }
+    }
 
     inline int cropOf(int nodeId) {
         for (int i = 0; i < COUNT; ++i) if (LIST[i].nodeId == nodeId) return i;

@@ -1162,34 +1162,31 @@ void Renderer3D::addPlayer(const Scene& scene) {
 
     if (pose.holding != PlayerAction::NONE) {
         const XMMATRIX hand = XMMatrixRotationX(-pose.toolTilt) * XMMatrixTranslation(0.0f, -ARM, 0.0f) * rightArm; // marco de la mano: -y sigue la dirección del brazo
-        XMFLOAT3 tip = {};
-        bool tipKnown = false;
         const Scene::HeldTool held = scene.heldTool(pose.holding);
         if (pose.holding == PlayerAction::WATER) addWateringCan(hand); // la regadera aún no tiene modelo 3D
-        else if (held.level >= 1) addToolModel(scene, pose.holding, held.model, hand, tip, tipKnown); // sin su modelo no se dibuja nada: el motivo queda en app.log
+        else if (held.level >= 1) addToolModel(scene, pose.holding, held.model, hand); // sin su modelo no se dibuja nada: el motivo queda en app.log
         addPotionFx(scene, hand);
-        if (pose.holding == PlayerAction::FISH) {
-            if (tipKnown) addFishingLine(scene, tip); // sin el modelo de la caña no hay punta de donde sacar el hilo
-        }
     }
 }
 
 // Modelo 3D de la herramienta en la mano (assets/models/items/herramientas/<id>_<nivel>.glb). Las hachas y los picos son estáticos; la caña tiene
-// huesos y cada fase de la pesca reproduce su animación (<modelo>_lanzar/picar/recoger.json) ajustada a lo que dura esa fase. Con la línea echada
-// el hilo y el corcho del modelo se recogen en la punta: los dibuja el juego en el agua. 'tip' recibe la punta de la caña en el mundo.
+// huesos y cada fase de la pesca reproduce su animación (<modelo>_lanzar/picar/recoger.json) ajustada a lo que dura esa fase. El modelo se dibuja entero,
+// tal como está hecho: con su hilo y su corcho, que son parte de la caña.
 // Devuelve false si el modelo no existe.
-bool Renderer3D::addToolModel(const Scene& scene, PlayerAction action, const std::string& name, CXMMATRIX hand, XMFLOAT3& tip, bool& tipKnown) {
+bool Renderer3D::addToolModel(const Scene& scene, PlayerAction action, const std::string& name, CXMMATRIX hand) {
     CRASH_SCOPE();
     const RenderModel* model = m_models.get(m_device, name, false);
     if (!model) return false;
     const bool rod = action == PlayerAction::FISH;
-    // Del modelo a la mano (-y es el brazo, +z delante). Las herramientas estáticas tienen el mango en el origen y la cabeza arriba. La caña (assets 4_N.glb)
-    // tiene el mango en x = +0,36 y apunta hacia -x y arriba: su ápice queda hacia delante, igual que la cabeza de un hacha, y se agarra un poco por encima del culatín.
-    const XMMATRIX orient = XMMATRIX(XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f), XMVectorSet(-1.0f, 0.0f, 0.0f, 0.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f));
+    // Del modelo a la mano (-y es el brazo, +z delante). Hacha y pico: mango en el origen y cabeza arriba, con el filo hacia +x del modelo, que debe quedar hacia delante.
+    // La caña (assets 4_N.glb) tiene el mango en x = +0,36 y apunta hacia -x y arriba (el lance también la inclina hacia -x): su punta queda hacia delante y el modelo se agarra
+    // un poco por encima del culatín.
+    const XMVECTOR fwd = rod ? XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f) : XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+    const XMVECTOR side = rod ? XMVectorSet(-1.0f, 0.0f, 0.0f, 0.0f) : XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f);
+    const XMMATRIX orient = XMMATRIX(fwd, XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f), side, XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f));
     const XMMATRIX grip = rod ? XMMatrixTranslation(-0.296f, -0.093f, 0.0f) : XMMatrixTranslation(0.0f, -0.12f, 0.0f); // por dónde se agarra
     const XMMATRIX world = grip * orient * hand;
 
-    XMFLOAT3 local = { model->boundsMin.x, model->boundsMax.y, 0.0f }; // punta aproximada si no hay animación
     if (model->skinned()) {
         const Fishing& fishing = scene.fishing;
         const char* clipName = nullptr;
@@ -1202,14 +1199,8 @@ bool Renderer3D::addToolModel(const Scene& scene, PlayerAction action, const std
             default: break;
         }
         const SkinUtil::Clip* clip = clipName ? m_models.clip(name, clipName) : nullptr;
-        XMFLOAT3 found = {};
         const float time = clip ? (std::clamp)(fraction, 0.0f, 1.0f) * clip->duration : 0.0f;
-        model->pose(m_context, clip, time, fishing.active(), &found);
-        if (clip && fishing.active() && (found.x != 0.0f || found.y != 0.0f || found.z != 0.0f)) local = found;
-    }
-    if (rod) {
-        XMStoreFloat3(&tip, XMVector3TransformCoord(XMLoadFloat3(&local), world));
-        tipKnown = true;
+        model->pose(m_context, clip, time, false);
     }
     addModel(*model, world, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
     return true;
@@ -1223,23 +1214,6 @@ void Renderer3D::addWateringCan(CXMMATRIX hand) {
     };
     part(0.26f, 0.22f, 0.22f, 0.0f, -0.12f, 0.08f);
     part(0.05f, 0.05f, 0.30f, 0.0f, -0.10f, 0.30f);
-}
-
-// Hilo de la caña (de la punta al corcho) y el corcho: la mitad de arriba roja y la de abajo blanca; se hunde cuando pica.
-void Renderer3D::addFishingLine(const Scene& scene, const XMFLOAT3& rodTip) {
-    if (!scene.fishing.active()) return;
-    XMFLOAT3 b = scene.fishing.bobber();
-    const float t = scene.dayCycle.lighting().time;
-    const float bite = scene.fishing.phase() == Fishing::Phase::BITING ? -0.12f + 0.05f * std::sin(t * 30.0f) : 0.0f;
-    b.y += std::sin(t * 2.0f + b.x) * 0.03f + bite;
-
-    const XMFLOAT3 d = { b.x - rodTip.x, b.y - rodTip.y, b.z - rodTip.z };
-    const float length = (std::max)(std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z), 0.01f);
-    const float yaw = std::atan2(d.x, d.z), pitch = -std::asin((std::clamp)(d.y / length, -1.0f, 1.0f));
-    add(m_cube, XMMatrixScaling(0.012f, 0.012f, length) * XMMatrixRotationX(pitch) * XMMatrixRotationY(yaw) *
-        XMMatrixTranslation((rodTip.x + b.x) * 0.5f, (rodTip.y + b.y) * 0.5f, (rodTip.z + b.z) * 0.5f), { 0.9f, 0.9f, 0.9f, 0.5f }, false);
-    const float r = 0.12f;
-    add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(b.x, b.y + r * 0.4f, b.z), { 0.95f, 0.15f, 0.12f, 0.2f }, false);
 }
 
 // Decorado de las galerías cercanas a la cámara y las luces que iluminan sus paredes (lámparas y cristales).
@@ -1546,6 +1520,14 @@ void Renderer3D::addNode(const ResourceNode& node) {
     }
 
     if (look.shape == Shape::CROP) { // cultivo: crece desde brotes hasta su tamaño; al madurar enseña lo que se recoge
+        if (const int stages = Crops::stagesOf(node.typeId()); stages > 0) { // modelo .glb por etapa de crecimiento (assets/models/crops/<nodo>_<etapa>.glb)
+            const int stage = (std::min)(stages - 1, static_cast<int>(g * stages));
+            if (const RenderModel* model = m_models.get(m_device, "crops/" + std::to_string(node.typeId()) + "_" + std::to_string(stage + 1), false)) {
+                const XMFLOAT3 c = model->center();
+                addModel(*model, XMMatrixTranslation(-c.x, 0.12f - model->boundsMin.y, -c.z) * base, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose()); // sobre el bancal (0,12 de alto)
+            }
+            return;
+        }
         const float k = std::clamp(0.2f + 0.8f * g, 0.0f, 1.0f), ripe = std::clamp((g - 0.7f) / 0.3f, 0.0f, 1.0f);
         if (node.typeId() == 26) { // trigo: espigas que pasan de verde a doradas
             const XMFLOAT3 stalk = { look.body.x + (look.accent.x - look.body.x) * ripe, look.body.y + (look.accent.y - look.body.y) * ripe, look.body.z + (look.accent.z - look.body.z) * ripe };

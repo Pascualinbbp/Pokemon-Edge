@@ -356,17 +356,23 @@ namespace PokemonComponent {
         }
 
         // --- Ficha ---
-        // Gráfico hexagonal: estadísticas base (azul) y, encima, lo que suman sus IV y EVs (naranja). En cada vértice: nombre, base y
+        // Gráfico hexagonal: lo que dan la base y el nivel (azul) y, encima, el total real con IV, EVs y naturaleza (naranja). En cada vértice: nombre, base y
         // estadística real (con nivel, IV, EVs y naturaleza), y el IV actual / tope con el que salió. La vitamina se usa aquí mismo con el "+" de cada estadística (las chapas, desde la mochila).
         inline void drawStats(const GameData& data, PokemonStorage& storage, Inventory& inventory, const OwnedPokemon& owned,
                               const PokemonSpecies& species, const ImVec2& area, float avail, float width = DETAIL_WIDTH - 32.0f) {
             constexpr int ORDER[6] = { 0, 1, 3, 5, 4, 2 }; // vértices de arriba en sentido horario (índices de BaseStats)
             constexpr float PI = 3.14159265f;
             constexpr float BLOCK_W = 96.0f, BLOCK_H = 50.0f;
+            // Escala: lo máximo que podría tener a su nivel una especie con la base más alta que cabe (IV 31, EVs 252, naturaleza favorable).
+            // Azul: lo que dan solo la base y el nivel. Naranja: el total real (base, nivel, IV, EVs y naturaleza), el mismo número que se escribe en cada vértice.
             float base[6], grown[6];
             for (int i = 0; i < 6; ++i) {
-                base[i] = static_cast<float>(species.stats.at(ORDER[i])) / MAX_STAT;
-                grown[i] = static_cast<float>(species.stats.at(ORDER[i])) / MAX_STAT + static_cast<float>(owned.ivs[ORDER[i]] + owned.evs[ORDER[i]] / 4) / (2.0f * MAX_STAT);
+                const int stat = ORDER[i];
+                const int lv = owned.level;
+                const float top = static_cast<float>(stat == 0 ? StatRules::hp(static_cast<int>(MAX_STAT), lv, 31, 252) : StatRules::stat(static_cast<int>(MAX_STAT), lv, 31, 252, 110));
+                const int plain = stat == 0 ? StatRules::hp(species.stats.at(stat), lv, 0, 0) : StatRules::stat(species.stats.at(stat), lv, 0, 0);
+                base[i] = static_cast<float>(plain) / top;
+                grown[i] = static_cast<float>(storage.statOf(owned, stat)) / top;
             }
             const float radius = (std::clamp)((avail - 2.0f * BLOCK_H - 16.0f) * 0.5f, 34.0f, 86.0f);
             const ImVec2 center(area.x + width * 0.5f, area.y + BLOCK_H + 8.0f + radius);
