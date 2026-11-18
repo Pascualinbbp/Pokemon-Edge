@@ -142,6 +142,31 @@ namespace SkinUtil {
         return split;
     }
 
+    // Estira la cadena del hilo (los huesos 'hidden') de la punta 'from' hasta 'to' (en coordenadas del modelo): cada hueso queda en su fracción
+    // del recorrido, con una pequeña comba, y conserva su giro. El último (el corcho) acaba exactamente en 'to'.
+    inline void stretchLine(const GltfUtil::Document& doc, const GltfUtil::Skin& skin, const Split& split, std::vector<DirectX::XMFLOAT4X4>& worlds,
+                            const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to, float sag) {
+        std::vector<int> depth(skin.joints.size(), -1);
+        int deepest = 0;
+        for (size_t j = 0; j < skin.joints.size(); ++j) {
+            if (!split.hidden[j] || skin.joints[j] < 0) continue;
+            int d = 0;
+            for (int n = doc.nodes[static_cast<size_t>(skin.joints[j])].parent; n >= 0 && d < 64; n = doc.nodes[static_cast<size_t>(n)].parent) {
+                for (size_t k = 0; k < skin.joints.size(); ++k) if (skin.joints[k] == n && split.hidden[k]) { ++d; break; }
+            }
+            depth[j] = d;
+            deepest = (std::max)(deepest, d);
+        }
+        for (size_t j = 0; j < skin.joints.size(); ++j) {
+            if (depth[j] < 0) continue;
+            const float f = static_cast<float>(depth[j] + 1) / static_cast<float>(deepest + 1);
+            DirectX::XMFLOAT4X4& w = worlds[static_cast<size_t>(skin.joints[j])];
+            w._41 = from.x + (to.x - from.x) * f;
+            w._42 = from.y + (to.y - from.y) * f - sag * 4.0f * f * (1.0f - f);
+            w._43 = from.z + (to.z - from.z) * f;
+        }
+    }
+
     // Mueve los vértices de una malla con las matrices de piel. Los vértices que cuelgan de 'split.hidden' (más de la mitad de su peso)
     // se recogen en el punto 'gather' (quedan sin superficie).
     inline void apply(const GltfUtil::Primitive& primitive, const std::vector<DirectX::XMFLOAT4X4>& matrices, std::vector<GltfUtil::Vertex>& out,

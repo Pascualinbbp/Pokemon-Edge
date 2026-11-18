@@ -1110,6 +1110,9 @@ void Renderer3D::collect(const Scene& scene) {
     for (const Fruit& fruit : scene.fruits) addFruit(fruit);
     addFootprints(scene);
     addMachine();
+    addPortal(scene.gate, { 0.35f, 0.80f, 1.0f });
+    addPortal(scene.farmGate, { 0.45f, 1.0f, 0.55f });
+    addFarm(scene);
     CRASH_AT();
     addProfessor(scene);
     CRASH_AT();
@@ -1178,13 +1181,10 @@ bool Renderer3D::addToolModel(const Scene& scene, PlayerAction action, const std
     const RenderModel* model = m_models.get(m_device, name, false);
     if (!model) return false;
     const bool rod = action == PlayerAction::FISH;
-    // Del modelo a la mano (-y es el brazo, +z delante). Hacha y pico: mango en el origen y cabeza arriba, con el filo hacia +x del modelo, que debe quedar hacia delante.
-    // La caña (assets 4_N.glb) tiene el mango en x = +0,36 y apunta hacia -x y arriba (el lance también la inclina hacia -x): su punta queda hacia delante y el modelo se agarra
-    // un poco por encima del culatín.
-    const XMVECTOR fwd = rod ? XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f) : XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-    const XMVECTOR side = rod ? XMVectorSet(-1.0f, 0.0f, 0.0f, 0.0f) : XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f);
-    const XMMATRIX orient = XMMATRIX(fwd, XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f), side, XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f));
-    const XMMATRIX grip = rod ? XMMatrixTranslation(-0.296f, -0.093f, 0.0f) : XMMatrixTranslation(0.0f, -0.12f, 0.0f); // por dónde se agarra
+    // Del modelo a la mano (-y es el brazo, +z delante). Hacha, pico y caña tienen el mango en el origen (la caña, en x = -0,36 ya espejado) y la cabeza arriba (y);
+    // el modelo llega espejado a DirectX y sus herramientas miran hacia +x: ese lado (el filo del hacha, la punta de la caña, que también se inclina hacia +x al lanzar) queda hacia delante.
+    const XMMATRIX orient = XMMATRIX(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f), XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f));
+    const XMMATRIX grip = rod ? XMMatrixTranslation(0.296f, -0.093f, 0.0f) : XMMatrixTranslation(0.0f, -0.12f, 0.0f); // por dónde se agarra: la caña, un poco por encima del culatín (x = -0,36 en el modelo)
     const XMMATRIX world = grip * orient * hand;
 
     if (model->skinned()) {
@@ -1200,7 +1200,14 @@ bool Renderer3D::addToolModel(const Scene& scene, PlayerAction action, const std
         }
         const SkinUtil::Clip* clip = clipName ? m_models.clip(name, clipName) : nullptr;
         const float time = clip ? (std::clamp)(fraction, 0.0f, 1.0f) * clip->duration : 0.0f;
-        model->pose(m_context, clip, time, false);
+        XMFLOAT3 end = {};
+        const XMFLOAT3* lineEnd = nullptr;
+        if (fishing.active()) { // el corcho va al agua: el punto donde cayó, en coordenadas del modelo
+            const XMFLOAT3& b = fishing.bobber();
+            XMStoreFloat3(&end, XMVector3Transform(XMVectorSet(b.x, b.y, b.z, 1.0f), XMMatrixInverse(nullptr, grip * orient * hand)));
+            lineEnd = &end;
+        }
+        model->pose(m_context, clip, time, false, nullptr, lineEnd);
     }
     addModel(*model, world, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
     return true;
@@ -1376,6 +1383,12 @@ void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, int speci
 // Nodo de recolección: árbol (tronco y copa), roca (bloques irregulares, con vetas si es mena) o arbusto. Se sacude al golpearlo.
 // Nunca desaparece: un árbol talado deja el tocón y vuelve a crecer, una roca o mena regenera su mineral y un arbusto
 // recogido se queda sin frutos hasta que le vuelven a crecer.
+namespace {
+constexpr int CHERRY_TREE_ID = 11;         // tipo de nodo del cerezo
+constexpr float CHERRY_TREE_SCALE = 2.0f;  // los modelos del cerezo vienen a medio tamaño: la etapa 3 (1,8 m) pasa a 3,6 m, la altura de su hitbox
+constexpr const char* CHERRY_MODEL = "fruits/cherry"; // assets/models/fruits/cherry.glb
+}
+
 void Renderer3D::addNode(const ResourceNode& node) {
     const ResourceStyle::Look look = ResourceStyle::look(node.typeId());
     const XMFLOAT3& p = node.body.position;
@@ -1396,6 +1409,16 @@ void Renderer3D::addNode(const ResourceNode& node) {
             part({ 0.55f, STUMP_HEIGHT, 0.55f }, 0.0f, { 0.0f, STUMP_HEIGHT * 0.5f, 0.0f }, look.body, 0.0f);
             part({ 0.4f, 0.03f, 0.4f }, 0.0f, { 0.0f, STUMP_HEIGHT + 0.01f, 0.0f }, { look.body.x * 1.35f, look.body.y * 1.3f, look.body.z * 1.2f }, 0.0f);
             return;
+        }
+        if (node.typeId() == CHERRY_TREE_ID) { // cerezo: modelo .glb por etapa (assets/models/trees/11_<etapa>.glb), 3 etapas de crecimiento
+            const float t = (g - ResourceStyle::STUMP_UNTIL) / (1.0f - ResourceStyle::STUMP_UNTIL); // 0..1 desde que brota del tocón
+            const int stage = t < 0.3f ? 1 : t < 0.65f ? 2 : 3;
+            const float lo = stage == 1 ? 0.0f : stage == 2 ? 0.3f : 0.65f, hi = stage == 1 ? 0.3f : stage == 2 ? 0.65f : 1.0f;
+            const float s = CHERRY_TREE_SCALE * (0.85f + 0.15f * std::clamp((t - lo) / (hi - lo), 0.0f, 1.0f)); // crece un poco dentro de cada etapa
+            if (const RenderModel* model = m_models.get(m_device, "trees/11_" + std::to_string(stage), false)) {
+                addModel(*model, XMMatrixTranslation(0.0f, -model->boundsMin.y, 0.0f) * XMMatrixScaling(s, s, s) * base, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
+                return;
+            }
         }
         const float k = ResourceStyle::treeScale(g); // el árbol joven crece entero desde el tocón
         const XMMATRIX tree = XMMatrixScaling(k, k, k) * base;
@@ -1636,7 +1659,13 @@ void Renderer3D::addFruit(const Fruit& fruit) {
         const XMMATRIX at = XMMatrixRotationX(fruit.spin()) * XMMatrixTranslation(p.x, p.y, p.z);
         add(m_sphere, XMMatrixScaling(r, r, r) * at, { 0.36f, 0.24f, 0.12f, 0.0f });
         add(m_cube, XMMatrixScaling(r * 0.35f, r * 0.35f, r * 0.2f) * XMMatrixTranslation(0.0f, r * 0.55f, r * 0.8f) * at, { 0.12f, 0.08f, 0.05f, 0.0f }, false);
-    } else if (fruit.kind() == Fruit::Kind::CHERRY) { // pareja de cerezas con rabillo
+    } else if (fruit.kind() == Fruit::Kind::CHERRY) { // modelo cherry.glb (a la misma escala que el cerezo); sin archivo, pareja de esferas
+        if (const RenderModel* model = m_models.get(m_device, CHERRY_MODEL, false)) {
+            const XMFLOAT3 c = model->center();
+            const float s = k * CHERRY_TREE_SCALE;
+            addModel(*model, XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(s, s, s) * XMMatrixRotationY(fruit.yaw()) * XMMatrixRotationX(fruit.spin()) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
+            return;
+        }
         const XMMATRIX at = XMMatrixRotationY(static_cast<float>(fruit.id()) * 1.7f) * XMMatrixTranslation(p.x, p.y - Fruit::RADIUS * 0.3f * k, p.z);
         const float c = r * 0.7f;
         add(m_sphere, XMMatrixScaling(c, c, c) * XMMatrixTranslation(-c * 0.9f, 0.0f, 0.0f) * at, { 0.85f, 0.05f, 0.12f, 0.0f });
@@ -1841,6 +1870,55 @@ void Renderer3D::addMachine() {
     part({ W * 0.7f, H * 0.2f, 0.06f }, { 0.0f, H * 0.8f, D * 0.36f }, { 0.35f, 0.85f, 0.95f }, 0.9f);   // pantalla
     part({ W * 0.6f, 0.08f, 0.06f }, { 0.0f, H * 0.45f, D * 0.5f }, { 0.95f, 0.78f, 0.22f }, 0.5f);      // franja de luz
     part({ 0.08f, 0.5f, 0.08f }, { W * 0.3f, H + 0.25f, 0.0f }, { 0.7f, 0.7f, 0.75f }, 0.0f);            // antena
+}
+
+// Portal: dos pilares y un dintel sobre una base, con un velo de luz que gira dentro (el color lo da el destino).
+void Renderer3D::addPortal(const Portal& portal, const XMFLOAT3& accent) {
+    const XMMATRIX place = XMMatrixRotationY(portal.yaw) * XMMatrixTranslation(portal.body.position.x, portal.body.position.y, portal.body.position.z);
+    const auto part = [&](const XMFLOAT3& size, const XMFLOAT3& at, const XMFLOAT3& color, float glow, float yaw = 0.0f) {
+        add(m_cube, XMMatrixScaling(size.x, size.y, size.z) * XMMatrixRotationY(yaw) * XMMatrixTranslation(at.x, at.y, at.z) * place, { color.x, color.y, color.z, glow });
+    };
+    constexpr float W = Portal::WIDTH, H = Portal::HEIGHT;
+    const XMFLOAT3 stone = { 0.30f, 0.32f, 0.40f };
+    part({ W, 0.16f, W }, { 0.0f, 0.08f, 0.0f }, { 0.22f, 0.24f, 0.30f }, 0.0f);              // base
+    part({ 0.28f, H, 0.28f }, { -W * 0.5f + 0.14f, H * 0.5f, 0.0f }, stone, 0.0f);            // pilares
+    part({ 0.28f, H, 0.28f }, { W * 0.5f - 0.14f, H * 0.5f, 0.0f }, stone, 0.0f);
+    part({ W, 0.28f, 0.28f }, { 0.0f, H - 0.14f, 0.0f }, stone, 0.0f);                         // dintel
+    part({ 0.12f, 0.12f, 0.30f }, { -W * 0.5f + 0.14f, H * 0.6f, 0.0f }, accent, 0.9f);       // runas
+    part({ 0.12f, 0.12f, 0.30f }, { W * 0.5f - 0.14f, H * 0.4f, 0.0f }, accent, 0.9f);
+    const float pulse = 0.75f + 0.25f * std::sin(m_clock * 3.0f);
+    part({ W - 0.56f, H - 0.44f, 0.05f }, { 0.0f, 0.16f + (H - 0.44f) * 0.5f, 0.0f }, { accent.x * pulse, accent.y * pulse, accent.z * pulse }, 1.0f); // velo de luz
+    for (int i = 0; i < 4; ++i) { // chispas que suben por el velo
+        const float t = std::fmod(m_clock * 0.4f + i * 0.25f, 1.0f), a = m_clock * 1.7f + i * 1.6f;
+        const float size = 0.10f * (1.0f - t);
+        add(m_star, XMMatrixScaling(size, size, size) * XMMatrixRotationY(m_clock * 2.0f + i) * XMMatrixTranslation(std::cos(a) * (W * 0.3f), 0.3f + t * (H - 0.6f), 0.0f) * place,
+            { accent.x * 0.5f + 0.5f, accent.y * 0.5f + 0.5f, accent.z * 0.5f + 0.5f, 1.0f }, false);
+    }
+}
+
+// La granja: un recinto cuadrado llano (mundo plano aparte, ver Physics::World::Flat) que flota en el cielo. Suelo de hierba con borde de piedra y
+// por debajo la tierra, que se estrecha en escalones.
+void Renderer3D::addFarm(const Scene& scene) {
+    const Physics::World::Flat& flat = scene.world.flat;
+    if (!flat.active) return;
+    const float dx = scene.player.body.position.x - flat.x, dz = scene.player.body.position.z - flat.z;
+    if (std::fabs(dx) > flat.half + 160.0f || std::fabs(dz) > flat.half + 160.0f) return; // lejos: ni se ve
+    const float side = flat.half * 2.0f;
+    const auto slab = [&](float size, float thickness, float top, const XMFLOAT3& color) {
+        add(m_cube, XMMatrixScaling(size, thickness, size) * XMMatrixTranslation(flat.x, flat.y + top - thickness * 0.5f, flat.z), { color.x, color.y, color.z, 0.0f });
+    };
+    slab(side, 3.0f, 0.0f, { 0.30f, 0.64f, 0.27f });                // hierba
+    slab(side - 1.0f, 4.0f, -3.0f, { 0.38f, 0.26f, 0.16f });         // tierra
+    slab(side * 0.7f, 4.0f, -7.0f, { 0.33f, 0.22f, 0.14f });
+    slab(side * 0.4f, 4.0f, -11.0f, { 0.30f, 0.20f, 0.13f });
+    slab(side * 0.18f, 4.0f, -15.0f, { 0.27f, 0.18f, 0.12f });
+    const float edge = 0.7f, off = flat.half - edge * 0.5f;          // borde de piedra
+    const XMFLOAT3 stone = { 0.55f, 0.55f, 0.58f };
+    const auto bar = [&](float sx, float sz, float x, float z) {
+        add(m_cube, XMMatrixScaling(sx, 0.35f, sz) * XMMatrixTranslation(flat.x + x, flat.y + 0.175f, flat.z + z), { stone.x, stone.y, stone.z, 0.0f });
+    };
+    bar(side, edge, 0.0f, off); bar(side, edge, 0.0f, -off);
+    bar(edge, side - 2.0f * edge, off, 0.0f); bar(edge, side - 2.0f * edge, -off, 0.0f);
 }
 
 // Cofre: cuerpo, cerradura y tapa con bisagra atrás; al abrirse suelta chispas del color de su rareza.

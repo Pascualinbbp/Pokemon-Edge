@@ -130,6 +130,8 @@ class Renderer3D {
     void addPotionFx(const Scene& scene, DirectX::CXMMATRIX hand);
     void addFootprints(const Scene& scene);
     void addMachine();
+    void addPortal(const Portal& portal, const DirectX::XMFLOAT3& accent);
+    void addFarm(const Scene& scene);
     void addProfessor(const Scene& scene);
     void addTrainers(const Scene& scene);
     void addBattle(const Scene& scene);

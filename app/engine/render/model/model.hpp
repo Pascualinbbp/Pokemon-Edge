@@ -44,8 +44,8 @@ struct RenderModel {
     bool skinned() const { return skeleton && !skinParts.empty(); }
 
     // Pone el modelo en el instante 'time' de 'clip' (nullptr: reposo). Con 'gatherLine' el hilo y el corcho que el clip mueve se recogen en la
-    // punta de la caña (el juego dibuja los suyos). 'tip' recibe la punta, en coordenadas del modelo.
-    bool pose(ID3D11DeviceContext* context, const SkinUtil::Clip* clip, float time, bool gatherLine, DirectX::XMFLOAT3* tip = nullptr) const {
+    // punta de la caña (el juego dibuja los suyos). 'tip' recibe la punta, en coordenadas del modelo. 'lineEnd' (modelo) estira el hilo hasta ahí.
+    bool pose(ID3D11DeviceContext* context, const SkinUtil::Clip* clip, float time, bool gatherLine, DirectX::XMFLOAT3* tip = nullptr, const DirectX::XMFLOAT3* lineEnd = nullptr) const {
         if (!skinned() || !context) return false;
         std::vector<DirectX::XMFLOAT4X4> worlds, matrices;
         SkinUtil::worlds(*skeleton, clip, time, worlds);
@@ -57,6 +57,7 @@ struct RenderModel {
             const DirectX::XMFLOAT4X4& w = worlds[static_cast<size_t>(firstSkin.joints[split.tip])];
             gather = { w._41, w._42, w._43 };
             if (tip) *tip = gather;
+            if (lineEnd && !gatherLine) SkinUtil::stretchLine(*skeleton, firstSkin, split, worlds, gather, *lineEnd, 0.12f); // el corcho va hasta el punto que se le pide (el agua)
         }
         std::vector<GltfUtil::Vertex> moved;
         for (const SkinPart& sp : skinParts) {

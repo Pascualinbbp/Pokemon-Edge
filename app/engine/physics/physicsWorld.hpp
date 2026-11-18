@@ -56,6 +56,13 @@ namespace Physics {
         std::vector<Geyser> geysers;
         std::vector<Spring> springs; // charcas termales (cada una con su propio temporizador)
         Disc archipelago{ 0.0f, 0.0f, HALF_SIZE };
+        // Mundo plano (la granja): un cuadrado llano a 'y', lejos del archipiélago. Sin agua, sin relieve y cerrado: quien está dentro no sale de él.
+        struct Flat {
+            bool active = false;
+            float x = 0.0f, z = 0.0f, half = 0.0f, y = 0.0f;
+            bool contains(float px, float pz, float extra = 0.0f) const { return active && std::fabs(px - x) <= half + extra && std::fabs(pz - z) <= half + extra; }
+        };
+        Flat flat;
         std::vector<Disc> regions;
         std::vector<Updraft> updrafts;
 
@@ -82,12 +89,14 @@ namespace Physics {
 
         // Altura del terreno en (x, z) (bajo el agua es el fondo); bajo tierra, la del suelo de la galería.
         float groundHeight(float x, float z, float y = ABOVE) const {
+            if (flat.contains(x, z)) return flat.y;
             if (under(x, z, y)) return caveFloor.sample(x, z);
             const float g = terrain.sample(x, z);
             return g < VOID_LIMIT ? SEA_FLOOR : g;
         }
         // Altura de la superficie del agua en (x, z) (con la marea); en tierra seca es la del terreno.
         float waterLevel(float x, float z, float y = ABOVE) const {
+            if (flat.contains(x, z)) return flat.y;
             if (under(x, z, y)) return (std::max)(caveWater.sample(x, z), caveFloor.sample(x, z));
             if (water.empty()) return 0.0f;
             const float w = water.sample(x, z);
@@ -102,8 +111,9 @@ namespace Physics {
         float waterDepth(float x, float z, float y = ABOVE) const { return (std::max)(0.0f, waterLevel(x, z, y) - groundHeight(x, z, y)); }
         bool swimmable(float x, float z, float y = ABOVE) const { return waterDepth(x, z, y) > SWIM_DEPTH; }
         // Pendiente del suelo (m/m).
-        float slope(float x, float z, float y = ABOVE) const { return under(x, z, y) ? caveFloor.slope(x, z) : terrain.slope(x, z); }
+        float slope(float x, float z, float y = ABOVE) const { return flat.contains(x, z) ? 0.0f : under(x, z, y) ? caveFloor.slope(x, z) : terrain.slope(x, z); }
         void gradient(float x, float z, float y, float& gx, float& gz) const {
+            if (flat.contains(x, z)) { gx = gz = 0.0f; return; }
             if (under(x, z, y)) caveFloor.gradient(x, z, gx, gz); else terrain.gradient(x, z, gx, gz);
         }
         // Rectángulos (minX, maxX, minZ, maxZ) que envuelven cada sistema de galerías: fuera de ellos no hay nada que mirar.
@@ -198,6 +208,12 @@ namespace Physics {
         // y = altura de los pies: quien cae de una isla del cielo (por debajo de su minY) no queda atado a ella y cae libre hasta el mar.
         // free: quien ya estaba fuera del archipiélago (cayó de una isla del cielo al mar) se mueve libre por la malla en vez de ser devuelto al borde.
         void clampToWorld(float& x, float& z, float y = ABOVE, float margin = 2.0f, bool free = false) const {
+            if (flat.contains(x, z, 40.0f)) { // el mundo plano es un recinto cuadrado
+                const float reach = flat.half - margin;
+                x = std::clamp(x, flat.x - reach, flat.x + reach);
+                z = std::clamp(z, flat.z - reach, flat.z + reach);
+                return;
+            }
             for (const Disc& region : regions) {
                 const float dx = x - region.x, dz = z - region.z;
                 const float reach = region.trigger > 0.0f ? region.trigger : region.radius + 40.0f;

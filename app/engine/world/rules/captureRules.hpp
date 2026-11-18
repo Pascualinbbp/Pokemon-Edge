@@ -69,6 +69,8 @@ namespace CaptureRules {
     inline constexpr float HP_BONUS = 1.5f;
     inline float hpFactor(float hpFraction) { return 1.0f + (1.0f - hpFraction) * HP_BONUS; }
 
+    inline constexpr float SHINY_RATE = 0.35f; // un shiny es mucho más difícil de capturar: solo la Shinyball (su multiplicador sobre shiny) lo compensa
+
     inline float basePercent(int catchRate, int wildLevel, int playerLevel) {
         const float factor = (std::clamp)(1.0f - static_cast<float>(wildLevel - playerLevel) * LEVEL_STEP, MIN_LEVEL_FACTOR, MAX_LEVEL_FACTOR);
         return static_cast<float>(catchRate) / 255.0f * 100.0f * RATE_SCALE * factor;

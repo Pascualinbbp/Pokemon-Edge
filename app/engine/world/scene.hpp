@@ -31,6 +31,7 @@
 #include "state/playerProgress.hpp"
 #include "rules/pokemonRules.hpp"
 #include "state/researchMachine.hpp"
+#include "state/portal.hpp"
 #include "state/professor.hpp"
 #include "spawn/groundSpawn.hpp"
 #include "spawn/groundField.hpp"
@@ -113,6 +114,8 @@ struct Scene {
     PlayerProgress progress;  // nivel, experiencia y medallas del jugador
     PlayerHealth health;      // vida del jugador (caídas, ahogamiento)
     ResearchMachine machine;  // máquina de investigación (fija)
+    Portal gate{ { -6.0f, Physics::World::START_HEIGHT, 3.0f }, 0.6f };                                        // portal del inicio: lleva a la granja
+    Portal farmGate{ { Crops::Farm::X, Physics::World::START_HEIGHT, Crops::Farm::Z }, 0.0f };               // portal de la granja: vuelve al inicio
     Professor oak;            // Profesor Oak (fijo junto al inicio)
     bool starterRequested = false; // el jugador ha hablado con Oak sin tener pokémon: la interfaz abre la elección del inicial
     bool seedRequested = false;     // junto a una parcela con varias semillas: la interfaz abre la pantalla de elección
@@ -141,11 +144,8 @@ struct Scene {
         inventory.setData(gameData);
         storage.setData(gameData);
         groundItems.setup(GroundSpawn::COUNT);
-        constexpr float BASE = Physics::World::START_HEIGHT; // el inicio es llano: las paredes se apoyan en él
-        world.obstacles = {
-            { {  6.0f, BASE + 1.75f,  5.0f }, { 4.0f, 1.75f, 0.5f } },
-            { { -7.0f, BASE + 1.75f, -4.0f }, { 0.5f, 1.75f, 4.0f } },
-        };
+        // El punto de partida no tiene paredes: el terreno de salida está despejado.
+        world.flat = { true, Crops::Farm::X, Crops::Farm::Z, Crops::Farm::HALF, Physics::World::START_HEIGHT }; // la granja: mundo plano aparte
         nodes = ResourceSpawn::generate(gameData, habitats, worldSeed, world);
         plots = Crops::generate(gameData, world, nodes);
         trainers.push_back(Trainer("Entrenador Rojo", Trainer::Style::REAL_TIME, -1.0f, 10.0f, { 0.85f, 0.2f, 0.2f }));
@@ -164,7 +164,9 @@ struct Scene {
     bool update(float dt, const InputState& rawInput) {
         CRASH_SCOPE();
         const InputState blank;
-        const InputState& input = m_respawn > 0.0f ? blank : rawInput; // mientras carga tras desmayarse no se controla nada
+        InputState warpInput; // al cambiar de mapa no se controla nada, pero el personaje camina un poco hacia delante para que la pantalla cubierta no se sienta parada
+        warpInput.moveY = WARP_WALK;
+        const InputState& input = m_respawn > 0.0f ? blank : m_warpTo != 0 ? warpInput : rawInput; // mientras carga tras desmayarse no se controla nada
         bool pause = false;
         if (input.escape) {
             if (radioOpen) closeRadio();
@@ -198,7 +200,9 @@ struct Scene {
         }
         if (input.teamSelect > 0) storage.setActive(input.teamSelect - 1); // la misma tecla que el que ya está fuera no cambia nada
 
-        wild.update(dt, player.body.position.x, player.body.position.z, camera.yaw(), player.body.underground, *m_data, habitats, [this](CaptureTarget& target) { return assignSpecies(target); },
+        const bool farm = inFarm(); // en la granja no sale nada: ni pokémon, ni cofres, ni flores, ni objetos
+        updateWarp(dt);
+        if (!farm) wild.update(dt, player.body.position.x, player.body.position.z, camera.yaw(), player.body.underground, *m_data, habitats, [this](CaptureTarget& target) { return assignSpecies(target); },
                     [this](float x, float y, float z) { return canSee(x, y, z); });
 
         for (const CaptureTarget* target : wild.loaded()) { // lo que se ve de cerca queda registrado en la Pokédex
@@ -229,6 +233,8 @@ struct Scene {
         for (const Chest& chest : chests.entities) if (chest.closed()) world.props.push_back(chest.solid());
         for (const ResourceNode& node : nodes) if (!node.gone() && !node.vein() && nearPlayer(node.body.position, PROP_RANGE)) world.props.push_back(node.solid());
         world.props.push_back(machine.solid());
+        world.props.push_back(gate.solid());
+        world.props.push_back(farmGate.solid());
         world.props.push_back(oak.solid());
         for (const Trainer& trainer : trainers) world.props.push_back(trainer.solid());
 
@@ -267,12 +273,12 @@ struct Scene {
             handleCaptureEvent(*target, event);
         }
         updateBalls(dt);
-        chests.update(dt, dayCycle.day(), player.body.position.x, player.body.position.z, *m_data, habitats, world);
+        if (!farm) chests.update(dt, dayCycle.day(), player.body.position.x, player.body.position.z, *m_data, habitats, world);
         m_concealed = false;
         m_flowerTimer += dt;
         if (m_flowerTimer >= FLOWER_CHECK_SECONDS) {
             m_flowerTimer = 0.0f;
-            if (!player.body.underground) ResourceSpawn::regrowFlower(nodes, *m_data, habitats, world, player.body.position.x, player.body.position.z, m_flowerWeights);
+            if (!player.body.underground && !farm) ResourceSpawn::regrowFlower(nodes, *m_data, habitats, world, player.body.position.x, player.body.position.z, m_flowerWeights);
         }
         for (ResourceNode& node : nodes) {
             node.update(dt);
@@ -282,7 +288,7 @@ struct Scene {
         groundItems.update(dt, GroundSpawn::DELAY,
             [&](GroundItem& item) { world.step(item.body, dt); item.update(dt); },
             [&](int spot) { return GroundSpawn::make(*m_data, spot); });
-        GroundField::update(dt, m_groundTimer, player.body.position.x, player.body.position.z, player.body.underground, *m_data, habitats, world, groundItems.entities);
+        if (!farm) GroundField::update(dt, m_groundTimer, player.body.position.x, player.body.position.z, player.body.underground, *m_data, habitats, world, groundItems.entities);
         updateFruits(dt);
         updateCompanion(dt);
         updateTrainerDuel(dt);
@@ -386,6 +392,7 @@ struct Scene {
         GameStatus s;
         s.aimBlend = camera.aimBlend();
         s.loading = loadingFade();
+        s.warp = warpCover();
         s.deathTitle = &m_deathTitle;
         s.deathDetail = &m_deathDetail;
         s.playerLevel = progress.level();
@@ -463,6 +470,9 @@ struct Scene {
         } else if (ia.kind == Interaction::MACHINE) {
             s.interactVerb = USE_VERB;
             s.interactTarget = &MACHINE_NAME;
+        } else if (ia.kind == Interaction::PORTAL) {
+            s.interactVerb = USE_VERB;
+            s.interactTarget = inFarm() ? &PORTAL_HOME_NAME : &PORTAL_FARM_NAME;
         }
         s.radioStation = radioStation;
         s.radioFade = radioFade;
@@ -613,6 +623,7 @@ struct Scene {
             case Interaction::GROUND:  return above(groundItems.entities[ia.index].body, 0.9f);
             case Interaction::FRUIT:   return above(fruits[ia.index].body, 0.7f);
             case Interaction::MACHINE: return above(machine.body, ResearchMachine::HEIGHT + 0.5f);
+            case Interaction::PORTAL:  return above(inFarm() ? farmGate.body : gate.body, Portal::HEIGHT + 0.5f);
             case Interaction::PROFESSOR: return above(oak.body, Professor::HEIGHT + 0.5f);
             case Interaction::TRAINER: return above(trainers[ia.index].body, Trainer::HEIGHT + 0.5f);
             case Interaction::WEAKENED: return m_weak ? DirectX::XMFLOAT3{ m_weak->body.position.x, m_weak->body.position.y + CaptureTarget::SIZE + 0.9f, m_weak->body.position.z } : DirectX::XMFLOAT3{};
@@ -654,6 +665,43 @@ struct Scene {
             health.restore();
             storage.healTeam(); // al volver al inicio, el equipo se cura
         }
+    }
+
+    bool inFarm() const { return world.flat.contains(player.body.position.x, player.body.position.z, 2.0f); }
+
+    void startWarp(int to) {
+        if (m_warpTo != 0 || m_respawn > 0.0f) return;
+        m_warpTo = to;
+        m_warp = 0.0f;
+        m_warpMoved = false;
+        aimMode = false;
+        lockedTarget = nullptr;
+    }
+
+    void updateWarp(float dt) {
+        if (m_warpTo == 0) return;
+        m_warp += dt;
+        if (!m_warpMoved && m_warp >= WARP_COVER) { // ya cubierta la pantalla: se cambia de mapa
+            m_warpMoved = true;
+            const Portal& exit = m_warpTo == WARP_FARM ? farmGate : gate;
+            player.body.position = exit.exitPoint();
+            player.body.velocity = { 0.0f, 0.0f, 0.0f };
+            player.body.onGround = false;
+            lockedTarget = nullptr;
+        }
+        if (m_warpMoved && m_warp >= WARP_TIME && player.body.onGround) { // todo cargado (tiempo mínimo y pisando suelo): se descubre
+            m_warpTo = 0;
+            m_warp = 0.0f;
+            m_warpMoved = false;
+        }
+    }
+
+    // 0 = sin velo; 1 = pantalla cubierta. Se cubre rápido, aguanta mientras carga y se descubre poco a poco.
+    float warpCover() const {
+        if (m_warpTo == 0) return 0.0f;
+        const float in = (std::min)(m_warp / WARP_COVER, 1.0f);
+        const float reveal = m_warp - (WARP_TIME - WARP_REVEAL);
+        return (std::min)(in, m_warpMoved && reveal > 0.0f ? (std::max)(0.0f, 1.0f - reveal / WARP_REVEAL) : 1.0f);
     }
 
     // 0 = sin pantalla de carga; 1 = pantalla completa (se funde a negro, espera y vuelve).
@@ -698,7 +746,7 @@ struct Scene {
 
     float chancePercent(const CaptureTarget& t, float ballMultiplier) const {
         const PokemonSpecies* species = m_data->speciesById(t.speciesId());
-        const float base = species ? CaptureRules::basePercent(species->catchRate, t.level(), progress.level()) * CaptureRules::hpFactor(t.hpFraction()) : 0.0f;
+        const float base = species ? CaptureRules::basePercent(species->catchRate, t.level(), progress.level()) * CaptureRules::hpFactor(t.hpFraction()) * (t.shiny() ? CaptureRules::SHINY_RATE : 1.0f) : 0.0f;
         return CaptureRules::percent(base, isBehind(t), m_concealed, ballMultiplier, t.eating());
     }
 
@@ -1357,6 +1405,14 @@ struct Scene {
             best = d2;
             m_interaction = { Interaction::MACHINE, 0 };
         }
+        {   // portal: el del inicio fuera de la granja y el de la granja dentro
+            const Portal& portal = inFarm() ? farmGate : gate;
+            const float gx = portal.body.position.x - player.body.position.x, gz = portal.body.position.z - player.body.position.z;
+            if (const float d2 = gx * gx + gz * gz; d2 <= portal.reach() * portal.reach() && d2 < best) {
+                best = d2;
+                m_interaction = { Interaction::PORTAL, 0 };
+            }
+        }
         const float ox = oak.body.position.x - player.body.position.x, oz = oak.body.position.z - player.body.position.z;
         if (const float d2 = ox * ox + oz * oz; d2 <= oak.reach() * oak.reach() && d2 < best) {
             best = d2;
@@ -1474,6 +1530,7 @@ struct Scene {
             player.act(PlayerAction::PICK);
             collectFruit(fruits[m_interaction.index]);
         } else if (m_interaction.kind == Interaction::MACHINE) researchRequested = true;
+        else if (m_interaction.kind == Interaction::PORTAL) startWarp(inFarm() ? WARP_HOME : WARP_FARM);
         else if (m_interaction.kind == Interaction::PROFESSOR) {
             if (needsStarter()) starterRequested = true;
             else showNotice(Notice::REWARD, std::string(Professor::NAME) + ": ¡Cuida bien de tu compañero!");
@@ -1541,6 +1598,10 @@ struct Scene {
         }
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
         if (const Item* item = m_data->materialItem(type.materialId)) giveReward(item->id, RandomUtil::integer(type.minYield, type.maxYield));
+        for (int crop = 0; crop < static_cast<int>(Crops::COUNT); ++crop) { // un cultivo con bolsa de semillas propia devuelve una al cosecharse (los que se siembran tal cual, no)
+            if (Crops::LIST[crop].nodeId != type.id || !Crops::LIST[crop].seedName) continue;
+            if (const Item* seeds = seedItem(crop)) giveReward(seeds->id, 1);
+        }
         gainXp(Xp::GATHER);
     }
 
@@ -2075,7 +2136,7 @@ struct Scene {
     }
 
     struct Interaction {
-        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PROFESSOR, WEAKENED, FRUIT, PLOT, TRAINER } kind = NONE;
+        enum Kind { NONE, CHEST, NODE, GROUND, MACHINE, PORTAL, PROFESSOR, WEAKENED, FRUIT, PLOT, TRAINER } kind = NONE;
         int index = -1;
     };
 
@@ -2118,6 +2179,7 @@ struct Scene {
     inline static const std::string PLOT_NAME = "Parcela de cultivo";
     inline static const std::string GROUND_NAME = "objeto brillante";
     inline static const std::string MACHINE_NAME = "máquina de investigación";
+    inline static const std::string PORTAL_FARM_NAME = "portal a la granja", PORTAL_HOME_NAME = "portal al inicio";
     static constexpr float CAVE_TEMPERATURE = 12.0f;   // °C dentro de la cueva, la mina y la isla del cielo
     static constexpr float MINE_TEMPERATURE = 14.0f;
     static constexpr float SKY_TEMPERATURE = 8.0f;
@@ -2132,6 +2194,16 @@ struct Scene {
     float m_clock = 0.0f;       // segundos de partida (marea)
     static constexpr float RESPAWN_TIME = 3.4f; // duración de la pantalla de carga tras desmayarse (s)
     float m_respawn = 0.0f;
+    // Cambio de mapa (portales): la pantalla se cubre con un velo, ya cubierta se coloca al jugador en el otro mapa y se descubre cuando ha cargado
+    // (el jugador ya pisa suelo y ha pasado el tiempo mínimo). Sin pantalla de carga: solo el velo, y el personaje avanza un poco.
+    static constexpr int   WARP_FARM = 1, WARP_HOME = 2;
+    static constexpr float WARP_COVER = 0.6f;   // lo que tarda en cubrirse la pantalla (s)
+    static constexpr float WARP_TIME = 2.0f;    // duración mínima del cambio (s)
+    static constexpr float WARP_REVEAL = 0.7f;  // lo que tarda en descubrirse (s)
+    static constexpr float WARP_WALK = 0.3f;    // avance del personaje mientras tanto (0..1 de su velocidad)
+    int   m_warpTo = 0;                         // 0 = ninguno; WARP_FARM o WARP_HOME
+    float m_warp = 0.0f;
+    bool  m_warpMoved = false;
     std::string m_deathTitle, m_deathDetail; // lo que cuenta la pantalla de carga tras desmayarse
     static constexpr const char* RESPAWN_PLACE = "el punto de inicio"; // pasará a ser el último centro pokémon visitado
     bool m_respawnMoved = false;
@@ -2182,7 +2254,7 @@ struct Scene {
         const OwnedPokemon* lead = storage.active();
         const PokemonSpecies* mine = lead ? m_data->speciesById(lead->speciesId) : nullptr;
         const PokemonSpecies* species = nullptr;
-        for (int tries = 0; tries < 30 && (!species || (mine && !DamageRules::compute(*m_data, *mine, level, *species, level).lands())); ++tries) { // nunca uno al que el líder no pueda hacer daño
+        for (int tries = 0; tries < 200 && (!species || m_data->legendary(*species) || (mine && tries < 30 && !DamageRules::compute(*m_data, *mine, level, *species, level).lands())); ++tries) { // nunca un legendario, ni uno al que el líder no pueda hacer daño
             species = &m_data->species[static_cast<size_t>(RandomUtil::integer(0, static_cast<int>(m_data->species.size()) - 1))];
         }
         rival.speciesId = species->id;

@@ -108,6 +108,7 @@ struct GameData {
     const Rarity* rarityOf(const PokemonSpecies& species) const { return rarity(species.rarityId); }
     float spawnWeight(const ChestType& chest) const { const Rarity* r = rarity(chest.rarity); return r ? r->spawnMultiplier : 1.0f; }
     float spawnMultiplier(const PokemonSpecies& species) const { const Rarity* r = rarityOf(species); return r ? r->spawnMultiplier : 1.0f; }
+    bool legendary(const PokemonSpecies& species) const { const Rarity* r = rarityOf(species); return r && r->name == "Legendario"; }
     float xpMultiplier(const PokemonSpecies& species) const { const Rarity* r = rarityOf(species); return r ? r->xpMultiplier : 1.0f; }
     const PokemonSpecies* speciesById(int id) const { return find(species, id); }
     const Habitat* habitat(int id) const { return find(habitats, id); }

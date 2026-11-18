@@ -364,6 +364,24 @@ namespace HudComponent {
             }
         }
 
+        // Velo al cambiar de mapa por un portal: la pantalla se cubre con un color suave y remolinos de luz, sin texto ni pantalla de carga.
+        inline void drawWarp(ImDrawList* dl, float cover) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            const float k = (std::clamp)(cover, 0.0f, 1.0f);
+            const float time = static_cast<float>(ImGui::GetTime());
+            dl->AddRectFilled(ImVec2(0.0f, 0.0f), screen, IM_COL32(18, 26, 52, static_cast<int>(255.0f * k)));
+            const ImVec2 c(screen.x * 0.5f, screen.y * 0.5f);
+            const float reach = (std::max)(screen.x, screen.y) * 0.75f;
+            for (int i = 0; i < 6; ++i) { // anillos que se abren desde el centro
+                const float t = std::fmod(time * 0.5f + i / 6.0f, 1.0f);
+                dl->AddCircle(c, reach * t, IM_COL32(150, 200, 255, static_cast<int>(90.0f * k * (1.0f - t))), 64, 3.0f + 8.0f * t);
+            }
+            for (int i = 0; i < 14; ++i) { // motas de luz que giran
+                const float a = time * 0.8f + i * 0.449f, r = reach * (0.15f + 0.5f * std::fmod(i * 0.37f + time * 0.07f, 1.0f));
+                dl->AddCircleFilled(ImVec2(c.x + std::cos(a) * r, c.y + std::sin(a) * r * 0.6f), 3.0f + (i % 3) * 2.0f, IM_COL32(200, 230, 255, static_cast<int>(160.0f * k)));
+            }
+        }
+
         // Nivel del jugador, justo debajo del círculo.
         inline void drawLevel(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
@@ -498,6 +516,7 @@ namespace HudComponent {
         detail::drawPrompts(dl, status, device);
 
         if (status.loading > 0.0f) detail::drawLoading(dl, status.loading, status.deathTitle, status.deathDetail);
+        if (status.warp > 0.0f) detail::drawWarp(dl, status.warp);
 
         if (status.notice != Notice::NONE && status.loading <= 0.0f) {
             const ImVec2 size = ImGui::GetIO().DisplaySize;

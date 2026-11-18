@@ -72,6 +72,7 @@ struct GameStatus {
     const std::string* deathTitle = nullptr;     // por qué se desmayó y dónde despierta (pantalla de carga)
     const std::string* deathDetail = nullptr;
     float loading = 0.0f;                        // 0..1: pantalla de carga tras desmayarse
+    float warp = 0.0f;                           // 0..1: velo que cubre la pantalla al cambiar de mapa por un portal
     float hurt = 0.0f;                           // 0..1: destello de dolor
     float heal = 0.0f;                           // 0..1: brillo de curación
     float oxygen = 1.0f;                         // aire restante (0..1)

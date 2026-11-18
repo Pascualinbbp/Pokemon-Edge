@@ -362,7 +362,7 @@ namespace PokemonComponent {
                               const PokemonSpecies& species, const ImVec2& area, float avail, float width = DETAIL_WIDTH - 32.0f) {
             constexpr int ORDER[6] = { 0, 1, 3, 5, 4, 2 }; // vértices de arriba en sentido horario (índices de BaseStats)
             constexpr float PI = 3.14159265f;
-            constexpr float BLOCK_W = 96.0f, BLOCK_H = 50.0f;
+            constexpr float BLOCK_W = 118.0f, BLOCK_H = 64.0f;
             // Escala: lo máximo que podría tener a su nivel una especie con la base más alta que cabe (IV 31, EVs 252, naturaleza favorable).
             // Azul: lo que dan solo la base y el nivel. Naranja: el total real (base, nivel, IV, EVs y naturaleza), el mismo número que se escribe en cada vértice.
             float base[6], grown[6];
@@ -394,17 +394,29 @@ namespace PokemonComponent {
                 const ImVec2 anchor(center.x + cx * (radius + 10.0f), center.y + cy * (radius + 10.0f));
                 const float x = anchor.x + (cx > 0.3f ? 0.0f : cx < -0.3f ? -BLOCK_W : -BLOCK_W * 0.5f);
                 const float y = anchor.y + (cy < -0.3f ? -BLOCK_H : cy > 0.3f ? 0.0f : -BLOCK_H * 0.5f);
-                const float lineH = ImGui::GetFontSize() * 0.85f + 1.0f;
+                const float lineH = ImGui::GetFontSize() * 0.8f + 1.0f;
 
-                std::snprintf(line, sizeof(line), "%s %d", BaseStats::name(stat), species.stats.at(stat));
-                GuiCards::text(dl, ImVec2(x, y), IM_COL32(255, 255, 255, 230), line, 0.85f);
-                std::snprintf(line, sizeof(line), "%d  IV %d/%d", storage.statOf(owned, stat), owned.ivs[stat], owned.ivCaps[stat]);
-                GuiCards::text(dl, ImVec2(x, y + lineH), IM_COL32(255, 170, 60, 255), line, 0.85f);
+                // Desglose del total: lo que dan la base y el nivel, lo que suma el IV, lo que suman los EVs y lo que cambia la naturaleza.
+                const int lv = owned.level, ivs = owned.ivs[stat], evs = owned.evs[stat];
+                const int plain = StatRules::of(species.stats, stat, lv, 0, 0, nullptr);
+                const int withIv = StatRules::of(species.stats, stat, lv, ivs, 0, nullptr);
+                const int withEv = StatRules::of(species.stats, stat, lv, ivs, evs, nullptr);
+                const int total = storage.statOf(owned, stat);
+                std::snprintf(line, sizeof(line), "%s %d", BaseStats::name(stat), total);
+                GuiCards::text(dl, ImVec2(x, y), IM_COL32(255, 255, 255, 240), line, 0.85f);
+                std::snprintf(line, sizeof(line), "Base y nivel %d", plain);
+                GuiCards::text(dl, ImVec2(x, y + lineH), IM_COL32(190, 200, 220, 230), line, 0.8f);
+                std::snprintf(line, sizeof(line), "IV %d/%d: +%d", ivs, owned.ivCaps[stat], withIv - plain);
+                GuiCards::text(dl, ImVec2(x, y + lineH * 2.0f), IM_COL32(255, 170, 60, 255), line, 0.8f);
+                const int natureGain = total - withEv;
+                std::snprintf(line, sizeof(line), natureGain != 0 ? "EV %d: +%d  Nat %+d" : "EV %d: +%d", evs, withEv - withIv, natureGain);
+                GuiCards::text(dl, ImVec2(x, y + lineH * 3.0f), IM_COL32(120, 200, 255, 240), line, 0.8f);
+                std::snprintf(line, sizeof(line), "IV %d/%d: +%d", ivs, owned.ivCaps[stat], withIv - plain); // para colocar el "+" de la vitamina
 
                 // Vitamina: "+" junto al IV; gris si no quedan vitaminas o el IV ya está en su tope.
                 if (vitamin) {
                     const bool can = inventory.count(vitamin->id) > 0 && owned.ivs[stat] < owned.ivCaps[stat];
-                    ImGui::SetCursorScreenPos(ImVec2(x + GuiCards::textWidth(line, 0.85f) + 6.0f, y + lineH - 1.0f));
+                    ImGui::SetCursorScreenPos(ImVec2(x + GuiCards::textWidth(line, 0.8f) + 6.0f, y + lineH * 2.0f - 2.0f));
                     ImGui::PushID(700 + stat);
                     if (GuiCards::button("##vitamin", "+", ImVec2(22.0f, 20.0f), can, IM_COL32(230, 140, 40, 255)) && storage.trainIv(selection.inTeam, selection.index, stat, vitaminTraining->amount)) inventory.add(vitamin->id, -1);
                     ImGui::PopID();
