@@ -58,6 +58,7 @@ class GameEngine {
         scene.storage.restoreDex(save.dexSeen, save.dexCaught);
         scene.storage.restoreFarm(save.farm);
         scene.farmWork.restore(save.farmClock);
+        scene.restorePlots(save.farmPlots);
         scene.storage.dexProgress.restore(save.dexProgress);
         scene.progress.restore(save.playerLevel, save.playerXp, save.badgeMask);
         return scene;
@@ -76,7 +77,8 @@ class GameEngine {
         m_scene.storage.store(save.team, save.pc);
         m_scene.storage.storeDex(save.dexSeen, save.dexCaught);
         m_scene.storage.storeFarm(save.farm);
-        save.farmClock = m_scene.farmWork.clock(m_scene.inFarm());
+        save.farmClock = m_scene.farmWork.clock(m_scene.atFarm());
+        save.farmPlots = m_scene.storePlots();
         m_scene.storage.dexProgress.store(save.dexProgress);
         save.autoReleaseRank = m_scene.storage.autoRankIndex();
         save.activeIndex = m_scene.storage.activeIndex();

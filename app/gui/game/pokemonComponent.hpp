@@ -303,7 +303,7 @@ namespace PokemonComponent {
         inline void drawFarm(const GameData& data, PokemonStorage& storage, const ImVec2& pos, float width) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             char header[64];
-            std::snprintf(header, sizeof(header), "GRANJA  %d / %d  (trabajan solos mientras estás fuera)", static_cast<int>(storage.farm().size()), PokemonStorage::FARM_SLOTS);
+            std::snprintf(header, sizeof(header), "HOGAR: TRABAJADORES  %d / %d  (arrastra un pokémon del PC; trabajan aunque estés fuera)", static_cast<int>(storage.farm().size()), PokemonStorage::FARM_SLOTS);
             GuiCards::text(dl, pos, IM_COL32(255, 255, 255, 255), header, 1.1f);
             farmSlots.clear();
             const float radius = 34.0f, cell = (std::min)(130.0f, (width - 8.0f) / PokemonStorage::FARM_SLOTS);
@@ -325,7 +325,7 @@ namespace PokemonComponent {
                 else {
                     TeamCircle::draw(dl, c, radius, data, *species, owned->level, owned->shiny, owned->ballId, false, 0, 1.0f, false);
                     const Skill* skill = data.skill(species->skillId);
-                    const bool works = FarmWork::skillOf(*species) >= 0;
+                    const bool works = FarmWork::roleOf(*species) != FarmWork::Role::NONE;
                     char job[48];
                     std::snprintf(job, sizeof(job), works && skill ? "%s Nv %d" : "Sin oficio", skill ? skill->name.c_str() : "", species->skillLevel);
                     GuiCards::centeredText(dl, ImVec2(c.x, b.y - 12.0f), works ? IM_COL32(180, 230, 150, 255) : GuiStyle::MUTED, job, 0.85f);

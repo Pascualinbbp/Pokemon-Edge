@@ -56,7 +56,7 @@ class PokemonStorage {
     public:
     static constexpr int TEAM_SIZE = 6;
     static constexpr int PC_CAPACITY = 120;
-    static constexpr int FARM_SLOTS = 6; // pokémon que pueden trabajar en la granja
+    static constexpr int FARM_SLOTS = 2; // pokémon que pueden trabajar en el hogar
 
     enum class LevelResult { NONE, LEVELED, EVOLVED };
 
@@ -510,7 +510,11 @@ class PokemonStorage {
     void storeFarm(std::vector<std::string>& farm) const { farm = encode(m_farm); }
     void restoreFarm(const std::vector<std::string>& farm) {
         m_farm.clear();
-        for (const std::string& text : farm) if (!farmFull()) decode(text, m_farm);
+        for (const std::string& text : farm) { // si hay más de los que caben (antes eran más huecos), el resto vuelve al PC
+            std::vector<OwnedPokemon> one;
+            decode(text, one);
+            for (OwnedPokemon& owned : one) (farmFull() ? m_pc : m_farm).push_back(std::move(owned));
+        }
         for (const OwnedPokemon& owned : m_farm) markDex(owned.speciesId, DEX_CAUGHT);
     }
 

@@ -283,7 +283,9 @@ struct Scene {
             m_flowerTimer = 0.0f;
             if (!player.body.underground && !farm) ResourceSpawn::regrowFlower(nodes, *m_data, habitats, world, player.body.position.x, player.body.position.z, m_flowerWeights);
         }
+        const bool atHome = inFarm();
         for (ResourceNode& node : nodes) {
+            if (node.plot() && !atHome) continue; // las parcelas del hogar no avanzan mientras estás fuera: al volver se simula el tiempo (ver updateFarmWork)
             node.update(dt);
             if (!m_concealed && concealsPlayer(node)) m_concealed = true;
         }
@@ -689,34 +691,159 @@ struct Scene {
         lockedTarget = nullptr;
     }
 
-    // --- Trabajadores de la granja ---
-    // Al llegar a la granja se entrega lo que trabajaron mientras estabas fuera (con tope); al irse se anota el momento. Dentro, se ven trabajando.
+    // --- Trabajadores del hogar ---
+    // Al llegar al hogar se simula lo que pasó mientras estabas fuera (con tope): crecen las plantas y los pokémon trabajan; se avisa de lo recogido.
+    // Dentro del hogar se ven trabajando. Los oficios están en FarmWork; aquí se aplican a las parcelas reales.
     void updateFarmWork(float dt) {
         const bool here = inFarm() && m_warpTo != WARP_HOME;
         if (here && !m_wasFarm) {
-            const std::map<int, int> made = farmWork.settle(*m_data, storage);
+            const double away = farmWork.settle();
+            m_summary.clear();
+            m_quiet = true;
+            for (double t = 0.0; t < away; t += FarmWork::STEP_SECONDS) {
+                for (const Crops::Plot& plot : plots) nodes[static_cast<size_t>(plot.node)].update(FarmWork::STEP_SECONDS);
+                stepCrew(FarmWork::STEP_SECONDS, false);
+            }
+            m_quiet = false;
             std::string text;
-            for (const auto& [material, count] : made) {
-                const Item* item = m_data->materialItem(material);
-                if (!item || !inventory.add(item->id, count)) continue;
-                text += (text.empty() ? "" : ", ") + std::to_string(count) + "x " + m_data->itemName(*item);
+            for (const auto& [itemId, count] : m_summary) {
+                const Item* item = m_data->item(itemId);
+                if (item) text += (text.empty() ? "" : ", ") + std::to_string(count) + "x " + m_data->itemName(*item);
             }
             if (!text.empty()) showNotice(Notice::REWARD, "Trabajadores: " + text);
+            m_summary.clear();
         } else if (!here && m_wasFarm) farmWork.leave();
         m_wasFarm = here;
-        if (!here || storage.farm().empty()) return;
-        std::vector<std::pair<float, float>> spots;
-        for (const Crops::Plot& plot : plots) spots.emplace_back(plot.position.x, plot.position.z);
-        farmWork.update(dt, *m_data, storage, spots, world.flat.x, world.flat.z, [&](int, int plotIndex, const PokemonSpecies& species) {
-            if (FarmWork::skillOf(species) == FarmWork::SKILL_WATER && plotIndex >= 0 && plotIndex < static_cast<int>(plots.size())) {
-                ResourceNode& node = nodes[static_cast<size_t>(plots[static_cast<size_t>(plotIndex)].node)];
-                if (node.growing() && node.canWork(false)) node.work(false, 1.0f + FarmWork::LEVEL_SPEEDUP * static_cast<float>((std::max)(1, species.skillLevel) - 1)); // riega: la planta crece antes
-            }
-            const std::pair<int, int> made = FarmWork::product(species);
-            if (made.first < 0) return;
-            if (const Item* item = m_data->materialItem(made.first)) inventory.add(item->id, made.second);
-        });
+        if (here) stepCrew(dt, true);
     }
+
+    bool plotRipe(const Crops::Plot& plot) const {
+        const ResourceNode& node = nodes[static_cast<size_t>(plot.node)];
+        if (node.gone()) return false;
+        return node.fruitTree() ? node.fruitReady() : (!node.growing() && node.plant() && node.workable());
+    }
+
+    bool plotPlantable(const Crops::Plot& plot) const {
+        if (plot.plan < 0 || !nodes[static_cast<size_t>(plot.node)].gone() || Crops::LIST[plot.plan].tree != plot.tree) return false;
+        const Item* seeds = seedItem(plot.plan);
+        return seeds && inventory.count(seeds->id) > 0 && Crops::typeIndexOf(*m_data, plot.plan) >= 0;
+    }
+
+    // Parcela a la que va un trabajador según su oficio, o -1 si no hay nada que hacer. 'other': la que atiende su compañero.
+    int pickPlot(FarmWork::Role role, const FarmWork::Worker& w, int other) const {
+        const int count = static_cast<int>(plots.size());
+        if (role == FarmWork::Role::WATER) { // riega las plantas que aún crecen, rotando (puede repetir la misma si es la única)
+            for (int k = 1; k <= count; ++k) {
+                const int i = (w.last + k + count) % count;
+                const ResourceNode& node = nodes[static_cast<size_t>(plots[static_cast<size_t>(i)].node)];
+                if (!node.gone() && node.growing() && i != other) return i;
+            }
+            for (int i = 0; i < count; ++i) { const ResourceNode& node = nodes[static_cast<size_t>(plots[static_cast<size_t>(i)].node)]; if (!node.gone() && node.growing()) return i; }
+        } else if (role == FarmWork::Role::GATHER) { // primero lo que está listo; si no, sembrar lo designado
+            for (int i = 0; i < count; ++i) if (i != other && plotRipe(plots[static_cast<size_t>(i)])) return i;
+            for (int i = 0; i < count; ++i) if (i != other && plotPlantable(plots[static_cast<size_t>(i)])) return i;
+        }
+        return -1;
+    }
+
+    bool jobValid(FarmWork::Role role, int plotIndex) const {
+        const Crops::Plot& plot = plots[static_cast<size_t>(plotIndex)];
+        const ResourceNode& node = nodes[static_cast<size_t>(plot.node)];
+        if (role == FarmWork::Role::WATER) return !node.gone() && node.growing();
+        return plotRipe(plot) || plotPlantable(plot);
+    }
+
+    void performJob(FarmWork::Role role, int plotIndex, const PokemonSpecies& species) {
+        Crops::Plot& plot = plots[static_cast<size_t>(plotIndex)];
+        ResourceNode& node = nodes[static_cast<size_t>(plot.node)];
+        if (role == FarmWork::Role::WATER) node.water(FarmWork::speed(species));
+        else if (plotRipe(plot)) {
+            if (node.fruitTree()) collectTreeFruit(node);
+            else workNode(node, false); // cosecha: el cultivo da su material y la parcela queda libre (la planta muere)
+        } else if (plotPlantable(plot)) {
+            m_seedCrop = plot.plan;
+            sow(plotIndex, false);
+        }
+    }
+
+    // Un paso del trabajo de los pokémon del hogar. 'visual': caminan hasta la parcela (en la simulación de la ausencia llegan al instante).
+    void stepCrew(float dt, bool visual) {
+        const std::vector<OwnedPokemon>& team = storage.farm();
+        farmWork.sync(team.size());
+        std::vector<FarmWork::Worker>& crew = farmWork.crew();
+        for (size_t i = 0; i < team.size(); ++i) {
+            FarmWork::Worker& w = crew[i];
+            const PokemonSpecies* species = m_data->speciesById(team[i].speciesId);
+            const FarmWork::Role role = species ? FarmWork::roleOf(*species) : FarmWork::Role::NONE;
+            const float angle = static_cast<float>(i) * 3.1415927f, restX = world.flat.x + std::cos(angle) * 6.5f, restZ = world.flat.z + std::sin(angle) * 6.5f;
+            if (!w.placed) { w.x = restX; w.z = restZ; w.placed = true; w.phase = static_cast<float>(i) * 20.0f; }
+            w.phase = std::fmod(w.phase + dt, FarmWork::WORK_SECONDS + FarmWork::REST_SECONDS);
+            w.working = false;
+            const bool shift = role != FarmWork::Role::NONE && w.phase < FarmWork::WORK_SECONDS && !plots.empty();
+            const int other = crew.size() > 1 ? crew[1 - i % 2].plot : -1;
+            if (shift && w.plot >= 0 && !jobValid(role, w.plot)) w.plot = -1; // ya no hay nada que hacer ahí (lo hizo el jugador, etc.)
+            if (shift && w.plot < 0) { w.plot = pickPlot(role, w, i < 2 ? other : -1); w.cycle = 0.0f; }
+            float tx = restX, tz = restZ;
+            if (shift && w.plot >= 0) {
+                const Crops::Plot& plot = plots[static_cast<size_t>(w.plot)];
+                const float dx = world.flat.x - plot.position.x, dz = world.flat.z - plot.position.z, d = (std::max)(0.01f, std::sqrt(dx * dx + dz * dz));
+                tx = plot.position.x + dx / d * (plot.tree ? 2.4f : 1.4f);
+                tz = plot.position.z + dz / d * (plot.tree ? 2.4f : 1.4f);
+            } else w.plot = -1;
+            const float dx = tx - w.x, dz = tz - w.z, d = std::sqrt(dx * dx + dz * dz);
+            if (visual && d > 0.15f) {
+                const float step = (std::min)(d, FarmWork::WALK_SPEED * dt);
+                w.x += dx / d * step;
+                w.z += dz / d * step;
+                w.yaw = std::atan2(dx, dz);
+                continue;
+            }
+            if (!visual) { w.x = tx; w.z = tz; }
+            if (w.plot < 0 || !shift) continue;
+            const Crops::Plot& plot = plots[static_cast<size_t>(w.plot)];
+            w.yaw = std::atan2(plot.position.x - w.x, plot.position.z - w.z); // mira a la parcela que trabaja
+            w.working = true;
+            w.cycle += dt;
+            if (species && w.cycle >= FarmWork::cycleSeconds(*species)) {
+                performJob(role, w.plot, *species);
+                w.last = w.plot;
+                w.plot = -1;
+                w.cycle = 0.0f;
+            }
+        }
+    }
+
+    public:
+    // Estado de las parcelas del hogar para la partida guardada: "designación|tipo de planta (0 = vacía)|crecimiento|fruta".
+    std::vector<std::string> storePlots() const {
+        std::vector<std::string> list;
+        for (const Crops::Plot& plot : plots) {
+            const ResourceNode& node = nodes[static_cast<size_t>(plot.node)];
+            list.push_back(std::to_string(plot.plan) + "|" + std::to_string(node.gone() ? 0 : node.typeId()) + "|" + std::to_string(node.growth()) + "|" + std::to_string(node.fruitRipeness()));
+        }
+        return list;
+    }
+
+    void restorePlots(const std::vector<std::string>& list) {
+        for (size_t i = 0; i < plots.size() && i < list.size(); ++i) {
+            int plan = -1, typeId = 0;
+            float growth = 0.0f, fruit = 0.0f;
+            if (std::sscanf(list[i].c_str(), "%d|%d|%f|%f", &plan, &typeId, &growth, &fruit) < 3) continue;
+            plots[i].plan = (plan >= 0 && plan < Crops::COUNT && Crops::LIST[plan].tree == plots[i].tree) ? plan : -1;
+            if (typeId <= 0) continue;
+            for (size_t t = 0; t < m_data->nodes.size(); ++t) {
+                const ResourceNodeType& type = m_data->nodes[t];
+                if (type.id != typeId) continue;
+                ResourceNode& node = nodes[static_cast<size_t>(plots[i].node)];
+                const float grow = plots[i].tree ? Crops::TREE_GROW_SECONDS : static_cast<float>(type.growSeconds);
+                node.sow(static_cast<int>(t), type.id, type.hits, grow, RandomUtil::range(0.0f, 6.2831853f), Crops::fruitTreeNode(type.id));
+                node.setState(growth, fruit);
+                break;
+            }
+        }
+    }
+
+    private:
 
     void updateWarp(float dt) {
         if (m_warpTo == 0) return;
@@ -929,6 +1056,7 @@ struct Scene {
     }
 
     public:
+    bool atFarm() const { return inFarm(); } // el jugador está en la base (la granja)
     bool companionGlows() const { return m_glows; } // el pokémon que acompaña tiene Bioluminiscencia: él brilla, no el entrenador
     DirectX::XMFLOAT3 companionLightPoint() const { return { companion.body.position.x, companion.body.position.y + Companion::SIZE * 0.6f, companion.body.position.z }; }
     private:
@@ -1427,7 +1555,7 @@ struct Scene {
         return node.plot() && (byPlayer || !node.fruitTree());
     }
 
-    const std::string& treeFruitName(int treeType) const { return treeType == PALM_TYPE ? COCONUT_NAME : treeType == JUNGLE_TYPE ? BANANA_NAME : treeType == APPLE_TYPE ? APPLE_NAME : CHERRY_NAME; }
+    const std::string& treeFruitName(int treeType) const { return treeType == PALM_TYPE ? COCONUT_NAME : treeType == BANANA_TYPE ? BANANA_NAME : treeType == APPLE_TYPE ? APPLE_NAME : CHERRY_NAME; }
 
     // Recoge la fruta madura directamente del árbol (solo existe en la granja).
     void collectTreeFruit(ResourceNode& tree) {
@@ -1498,8 +1626,8 @@ struct Scene {
         }
         const bool hasSeeds[2] = { !availableSeeds(false).empty(), !availableSeeds(true).empty() };
         if (!hasSeeds[0] && !hasSeeds[1]) m_seedCrop = -1;
-        else for (int i = 0; i < static_cast<int>(plots.size()); ++i) { // parcela vacía y con alguna semilla de su clase: se puede sembrar lo que se elija
-            if (!nodes[plots[i].node].gone() || !hasSeeds[plots[i].tree ? 1 : 0]) continue;
+        for (int i = 0; i < static_cast<int>(plots.size()); ++i) { // parcela vacía con semillas de su clase (se siembra lo que se elija) o con cultivo designado (se puede quitar)
+            if (!nodes[plots[i].node].gone() || !(hasSeeds[plots[i].tree ? 1 : 0] || plots[i].plan >= 0)) continue;
             const float reach = plots[i].tree ? Crops::TREE_REACH : Crops::REACH;
             const float dx = plots[i].position.x - player.body.position.x, dz = plots[i].position.z - player.body.position.z, d2 = dx * dx + dz * dz;
             if (d2 <= reach * reach && d2 < best) { best = d2; m_interaction = { Interaction::PLOT, i }; }
@@ -1545,20 +1673,22 @@ struct Scene {
             const Item* item = seedItem(crop);
             choices.push_back({ crop, item, item->name, inventory.count(item->id) });
         }
+        if (m_pendingPlot >= 0 && m_pendingPlot < static_cast<int>(plots.size()) && plots[m_pendingPlot].plan >= 0) choices.push_back({ -1, nullptr, "Quitar designación", 0 });
         return choices;
     }
 
     // Siembra en la parcela pendiente las semillas elegidas en la pantalla de elección.
     void plantSeed(int crop) {
         if (m_pendingPlot >= 0 && m_pendingPlot < static_cast<int>(plots.size())) {
-            m_seedCrop = crop;
-            sow(plots[m_pendingPlot]);
+            if (crop < 0) plots[m_pendingPlot].plan = -1; // "quitar designación"
+            else { m_seedCrop = crop; sow(m_pendingPlot); }
         }
         m_pendingPlot = -1;
     }
 
     private:
-    void sow(const Crops::Plot& plot) {
+    void sow(int plotIndex, bool byPlayer = true) {
+        Crops::Plot& plot = plots[static_cast<size_t>(plotIndex)];
         const std::vector<int> seeds = availableSeeds(plot.tree);
         if (std::find(seeds.begin(), seeds.end(), m_seedCrop) == seeds.end()) return;
         ResourceNode& node = nodes[plot.node];
@@ -1569,7 +1699,7 @@ struct Scene {
         inventory.add(item->id, -1);
         const float grow = plot.tree ? Crops::TREE_GROW_SECONDS : static_cast<float>(type.growSeconds); // los árboles tardan bastante más que los cultivos
         node.sow(typeIndex, type.id, type.hits, grow, RandomUtil::range(0.0f, 6.2831853f), Crops::fruitTreeNode(type.id));
-        player.act(PlayerAction::PICK);
+        if (byPlayer) { plot.plan = m_seedCrop; player.act(PlayerAction::PICK); } // lo que siembra el jugador queda designado: los recolectores lo vuelven a sembrar
         Sound::emit(Sound::Sfx::PICK, node.body.position);
     }
 
@@ -1610,8 +1740,8 @@ struct Scene {
         }
         else if (m_interaction.kind == Interaction::PLOT) {
             const std::vector<int> seeds = availableSeeds(plots[m_interaction.index].tree);
-            if (seeds.size() == 1) { m_seedCrop = seeds.front(); sow(plots[m_interaction.index]); }
-            else if (seeds.size() > 1) { m_pendingPlot = m_interaction.index; seedRequested = true; } // varias semillas: la interfaz deja elegir
+            if (plots[m_interaction.index].plan < 0 && seeds.size() == 1) { m_seedCrop = seeds.front(); sow(m_interaction.index); }
+            else if (plots[m_interaction.index].plan >= 0 || seeds.size() > 1) { m_pendingPlot = m_interaction.index; seedRequested = true; } // varias semillas: la interfaz deja elegir
         }
         else if (m_interaction.kind == Interaction::NODE) {
             ResourceNode& node = nodes[m_interaction.index];
@@ -1631,6 +1761,7 @@ struct Scene {
     // Suma 'quantity' unidades de un objeto al inventario y lo anuncia.
     void giveReward(int itemId, int quantity) {
         if (!inventory.add(itemId, quantity)) return;
+        if (m_quiet) { m_summary[itemId] += quantity; return; } // simulando la ausencia: un solo aviso al final
         const Item* item = m_data->item(itemId);
         std::string text = std::to_string(quantity) + "x " + (item ? m_data->itemName(*item) : std::string("?"));
         showNotice(Notice::REWARD, std::move(text));
@@ -1683,7 +1814,7 @@ struct Scene {
     static constexpr int   MAX_FRUITS = 20, MAX_PER_KIND = 5; // como mucho en el suelo a la vez (en total y de cada clase: así los cocos no tapan a los plátanos)
     static constexpr float FRUIT_DROP_MIN = 7.0f, FRUIT_DROP_MAX = 16.0f; // segundos entre caídas
     static constexpr float FRUIT_RANGE = 55.0f;      // solo caen en árboles cercanos al jugador
-    static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13, CHERRY_TYPE = 11, APPLE_TYPE = 28;
+    static constexpr int   PALM_TYPE = 10, BANANA_TYPE = 29, CHERRY_TYPE = 11, APPLE_TYPE = 28;
 
     inline static const std::string COCONUT_NAME = "Coco", HALF_COCONUT_NAME = "Mitad de coco", BANANA_NAME = "Plátano", BANANAS_NAME = "Plátanos", BUNCH_NAME = "Racimo de plátanos", CHERRY_NAME = "Cereza", APPLE_NAME = "Manzana";
     static const std::string& fruitName(const Fruit& fruit) {
@@ -1693,7 +1824,7 @@ struct Scene {
     }
     static bool fruitKind(int treeType, Fruit::Kind& kind) {
         if (treeType == PALM_TYPE) kind = Fruit::Kind::COCONUT;
-        else if (treeType == JUNGLE_TYPE) kind = Fruit::Kind::BANANA;
+        else if (treeType == BANANA_TYPE) kind = Fruit::Kind::BANANA;
         else if (treeType == CHERRY_TYPE) kind = Fruit::Kind::CHERRY;
         else return false;
         return true;
@@ -2253,7 +2384,7 @@ struct Scene {
     inline static const std::string PLOT_NAME = "Parcela de cultivo";
     inline static const std::string GROUND_NAME = "objeto brillante";
     inline static const std::string MACHINE_NAME = "máquina de investigación";
-    inline static const std::string PORTAL_FARM_NAME = "portal a la granja", PORTAL_HOME_NAME = "portal al inicio";
+    inline static const std::string PORTAL_FARM_NAME = "portal al hogar", PORTAL_HOME_NAME = "portal al inicio";
     static constexpr float CAVE_TEMPERATURE = 12.0f;   // °C dentro de la cueva, la mina y la isla del cielo
     static constexpr float MINE_TEMPERATURE = 14.0f;
     static constexpr float SKY_TEMPERATURE = 8.0f;
@@ -2278,6 +2409,8 @@ struct Scene {
     int   m_warpTo = 0;                         // 0 = ninguno; WARP_FARM o WARP_HOME
     float m_warp = 0.0f;
     bool  m_warpMoved = false;
+    bool  m_quiet = false;                      // simulando el trabajo de la ausencia: las recompensas se acumulan en m_summary
+    std::map<int, int> m_summary;
     bool  m_wasFarm = false;                    // el fotograma anterior el jugador estaba en la granja (para entregar el trabajo al llegar)
     std::string m_deathTitle, m_deathDetail; // lo que cuenta la pantalla de carga tras desmayarse
     static constexpr const char* RESPAWN_PLACE = "el punto de inicio"; // pasará a ser el último centro pokémon visitado

@@ -31,6 +31,7 @@ struct SaveData {
     int money = 0;                    // pokémonedas
     std::vector<std::string> team;    // especies del equipo (el primero es el líder)
     std::vector<std::string> pc;      // pokémon guardados en el PC
+    std::vector<std::string> farmPlots; // estado de las parcelas del hogar (designación, planta, crecimiento)
     std::vector<std::string> farm;    // pokémon que trabajan en la granja (hasta 6)
     long long farmClock = 0;          // segundos (reloj del sistema) desde los que los trabajadores acumulan trabajo; 0 = sin dato
     int playerLevel = 1;              // nivel, experiencia y medallas del jugador

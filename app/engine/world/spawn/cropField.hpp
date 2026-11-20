@@ -13,10 +13,10 @@ namespace Crops {
     inline constexpr Crop LIST[] = {
         { 24, nullptr }, { 25, "Semillas de fresa" }, { 26, "Semillas de trigo" }, { 27, nullptr },
         { 1, "Semillas de roble", true }, { 8, "Semillas de pino", true }, { 9, "Semillas de abedul", true }, { 10, "Semillas de palmera", true },
-        { 11, "Semillas de cerezo", true }, { 13, "Semillas de jungla", true }, { 14, "Semillas de acacia", true }, { 28, "Semillas de manzano", true } };
-    inline constexpr int COUNT = 12;
-    // Árboles que dan fruta (palmera: cocos, jungla: plátanos, cerezo: cerezas, manzano: manzanas): no se talan, se les recoge la fruta. El resto de árboles se talan.
-    inline constexpr bool fruitTreeNode(int nodeId) { return nodeId == 10 || nodeId == 11 || nodeId == 13 || nodeId == 28; }
+        { 11, "Semillas de cerezo", true }, { 13, "Semillas de jungla", true }, { 14, "Semillas de acacia", true }, { 28, "Semillas de manzano", true }, { 29, "Semillas de platanera", true } };
+    inline constexpr int COUNT = 13;
+    // Árboles que dan fruta (palmera: cocos, platanera: plátanos, cerezo: cerezas, manzano: manzanas): no se talan, se les recoge la fruta. El resto de árboles se talan.
+    inline constexpr bool fruitTreeNode(int nodeId) { return nodeId == 10 || nodeId == 11 || nodeId == 28 || nodeId == 29; }
     inline constexpr int ZONES = 3;
     inline constexpr int PLOTS_PER_ZONE = 4;
     inline constexpr float ZONE_DISTANCE = 9.0f;  // del centro del mundo al centro de cada zona
@@ -40,6 +40,7 @@ namespace Crops {
         DirectX::XMFLOAT3 position{};
         int node = -1;  // índice en Scene::nodes
         bool tree = false; // parcela grande para árboles
+        int plan = -1;     // cultivo designado (índice de LIST): los pokémon recolectores lo vuelven a sembrar; -1 = nada designado
     };
 
     // Etapas de crecimiento con modelo (assets/models/crops/<nodo>_<etapa>.glb); 0 = sin modelos (se dibuja con bloques). La fresa tendrá una tercera etapa.

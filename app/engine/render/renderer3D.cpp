@@ -1386,8 +1386,8 @@ void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, int speci
 // Nunca desaparece: un árbol talado deja el tocón y vuelve a crecer, una roca o mena regenera su mineral y un arbusto
 // recogido se queda sin frutos hasta que le vuelven a crecer.
 namespace {
-// Árboles con modelo .glb por etapa (assets/models/trees/<id>_<etapa>.glb, 3 etapas de crecimiento; ya vienen a su tamaño): palmera, cerezo, árbol de jungla y manzano.
-constexpr bool hasTreeModel(int typeId) { return typeId == 10 || typeId == 11 || typeId == 13 || typeId == 28; }
+// Árboles con modelo .glb por etapa (assets/models/trees/<id>_<etapa>.glb, 3 etapas de crecimiento; ya vienen a su tamaño): roble, palmera, cerezo, acacia, manzano y platanera.
+constexpr bool hasTreeModel(int typeId) { return typeId == 1 || typeId == 10 || typeId == 11 || typeId == 14 || typeId == 28 || typeId == 29; }
 constexpr float CHERRY_FRUIT_SCALE = 2.0f; // cereza.glb viene a medio tamaño
 constexpr float APPLE_FRUIT_SCALE = 1.5f;  // la manzana (10 cm) se agranda un poco para que se vea colgando del árbol
 constexpr const char* CHERRY_MODEL = "fruits/cherry"; // assets/models/fruits/cherry.glb
@@ -1410,7 +1410,7 @@ void Renderer3D::addNode(const ResourceNode& node) {
 
     using Shape = ResourceStyle::Shape;
     if (node.fruitReady()) { // frutal maduro de la granja: se ve la fruta en el árbol (se recoge con interactuar)
-        const Fruit::Kind kind = node.typeId() == 10 ? Fruit::Kind::COCONUT : node.typeId() == 13 ? Fruit::Kind::BANANA : node.typeId() == 28 ? Fruit::Kind::APPLE : Fruit::Kind::CHERRY;
+        const Fruit::Kind kind = node.typeId() == 10 ? Fruit::Kind::COCONUT : node.typeId() == 29 ? Fruit::Kind::BANANA : node.typeId() == 28 ? Fruit::Kind::APPLE : Fruit::Kind::CHERRY;
         const int count = kind == Fruit::Kind::COCONUT ? 3 : kind == Fruit::Kind::BANANA ? 2 : 7;
         for (int i = 0; i < count; ++i) {
             const float angle = node.yaw() + i * 2.4f, out = kind == Fruit::Kind::COCONUT ? 0.4f : kind == Fruit::Kind::BANANA ? 0.7f : 1.0f + 0.25f * (i % 4);
@@ -1475,7 +1475,7 @@ void Renderer3D::addNode(const ResourceNode& node) {
                 const float a = static_cast<float>(i) * 1.2566f + 0.4f;
                 ball(0.17f, { std::cos(a) * 0.28f, 2.86f - 0.05f * (i % 2), std::sin(a) * 0.28f }, { 0.36f, 0.24f, 0.12f });
             }
-        } else if (type == 13) { // árbol de jungla: racimos de plátanos colgando bajo la copa
+        } else if (type == 29) { // platanera: racimos de plátanos colgando bajo la copa
             for (int i = 0; i < 6; ++i) {
                 const float a = static_cast<float>(i) * 1.0472f + 0.3f, rad = 1.0f + 0.35f * (i % 2);
                 for (int j = 0; j < 4; ++j) {
@@ -1926,7 +1926,7 @@ void Renderer3D::addFarm(const Scene& scene) {
     const float dx = scene.player.body.position.x - flat.x, dz = scene.player.body.position.z - flat.z;
     if (std::fabs(dx) > flat.half * 1.3f + 160.0f || std::fabs(dz) > flat.half * 1.3f + 160.0f) return; // lejos: ni se ve
     add(m_island, XMMatrixScaling(flat.half, 1.0f, flat.half) * XMMatrixTranslation(flat.x, flat.y, flat.z), { 0.30f, 0.64f, 0.27f, 0.0f });
-    if (!scene.inFarm()) return;
+    if (!scene.atFarm()) return;
     // Los pokémon que trabajan en la granja: caminan a su parcela, trabajan (se balancean) y descansan.
     const std::vector<FarmWork::Worker>& crew = scene.farmWork.workers();
     for (size_t i = 0; i < crew.size() && i < scene.storage.farm().size(); ++i) {

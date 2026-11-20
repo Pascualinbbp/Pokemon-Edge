@@ -23,7 +23,7 @@ namespace SeedComponent {
         const float height = CARD_H + PAD * 2.0f + 46.0f;
         const ImVec2 origin((screen.x - width) * 0.5f, (screen.y - height) * 0.5f);
         GuiCards::panel(dl, origin, ImVec2(origin.x + width, origin.y + height));
-        GuiCards::centeredText(dl, ImVec2(origin.x + width * 0.5f, origin.y + PAD + 6.0f), IM_COL32(255, 255, 255, 255), "¿Qué quieres plantar?", 1.3f);
+        GuiCards::centeredText(dl, ImVec2(origin.x + width * 0.5f, origin.y + PAD + 6.0f), IM_COL32(255, 255, 255, 255), "¿Qué quieres plantar? (los pokémon recolectores lo repondrán)", 1.3f);
 
         if (choices.empty()) { state = back; return; } // se quedó sin semillas
         float x = origin.x + PAD;
@@ -41,11 +41,12 @@ namespace SeedComponent {
             GuiCards::centeredText(dl, ImVec2(x + CARD_W * 0.5f, y + 140.0f), IM_COL32(255, 255, 255, 255), choice.name.c_str(), 0.95f);
             char amount[24];
             std::snprintf(amount, sizeof(amount), "x%d", choice.count);
-            GuiCards::centeredText(dl, ImVec2(x + CARD_W * 0.5f, y + 172.0f), IM_COL32(255, 215, 90, 255), amount, 1.1f);
+            if (choice.crop >= 0) GuiCards::centeredText(dl, ImVec2(x + CARD_W * 0.5f, y + 172.0f), IM_COL32(255, 215, 90, 255), amount, 1.1f);
+            else GuiCards::centeredText(dl, ImVec2(x + CARD_W * 0.5f, y + 172.0f), GuiStyle::MUTED, "los pokémon dejan de sembrar aquí", 0.8f);
             if (clicked) { engine.plantSeed(choice.crop); state = back; return; }
             x += CARD_W + GAP;
         }
-        GuiCards::text(dl, ImVec2(origin.x + PAD, origin.y + height + 10.0f), GuiStyle::MUTED, "Clic: plantar   ESC: cancelar", 0.9f);
+        GuiCards::text(dl, ImVec2(origin.x + PAD, origin.y + height + 10.0f), GuiStyle::MUTED, "Clic: plantar y designar la parcela   ESC: cancelar", 0.9f);
         if (GuiInput::backPressed()) state = back;
     }
 }

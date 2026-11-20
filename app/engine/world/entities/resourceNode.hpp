@@ -19,7 +19,7 @@ namespace ResourceStyle {
 
     inline Look look(int typeId) {
         switch (typeId) {
-            case 1:  return { Shape::TREE, { 0.40f, 0.26f, 0.13f }, { 0.18f, 0.55f, 0.20f }, false, 0.35f, 3.8f }; // árbol
+            case 1:  return { Shape::TREE, { 0.40f, 0.26f, 0.13f }, { 0.18f, 0.55f, 0.20f }, false, 0.35f, 8.0f }; // árbol
             case 3:  return { Shape::ROCK, { 0.50f, 0.48f, 0.47f }, { 0.88f, 0.55f, 0.35f }, true,  0.85f, 1.1f }; // mena de hierro
             case 5:  return { Shape::ROCK, { 0.45f, 0.47f, 0.52f }, { 0.45f, 0.90f, 0.98f }, true,  0.85f, 1.1f }; // veta de diamante
             case 6:  return { Shape::BUSH, { 0.20f, 0.50f, 0.22f }, { 0.85f, 0.18f, 0.25f }, true,  0.55f, 0.9f }; // arbusto de bayas
@@ -30,7 +30,7 @@ namespace ResourceStyle {
             case 11: return { Shape::TREE, { 0.30f, 0.20f, 0.16f }, { 0.98f, 0.68f, 0.80f }, false, 0.3f, 4.2f };   // cerezo en flor
             case 12: return { Shape::FLOWER, { 0.28f, 0.58f, 0.24f }, { 0.98f, 0.98f, 0.96f }, true, 0.25f, 0.55f };  // margarita (pétalos blancos)
             case 13: return { Shape::JUNGLE, { 0.30f, 0.22f, 0.14f }, { 0.08f, 0.40f, 0.12f }, false, 0.45f, 6.5f };  // árbol de jungla
-            case 14: return { Shape::ACACIA, { 0.42f, 0.30f, 0.18f }, { 0.50f, 0.58f, 0.18f }, false, 0.3f, 4.2f };   // acacia
+            case 14: return { Shape::ACACIA, { 0.42f, 0.30f, 0.18f }, { 0.50f, 0.58f, 0.18f }, false, 0.3f, 6.5f };   // acacia
             case 15: return { Shape::BUSH, { 0.14f, 0.50f, 0.20f }, { 0.98f, 0.58f, 0.14f }, true, 0.6f, 1.0f };     // planta tropical
             case 16: return { Shape::TULIP, { 0.28f, 0.58f, 0.24f }, { 0.92f, 0.24f, 0.36f }, true, 0.25f, 0.6f };  // tulipán
             case 17: return { Shape::SUNFLOWER, { 0.30f, 0.56f, 0.22f }, { 0.99f, 0.82f, 0.14f }, true, 0.3f, 1.5f }; // girasol
@@ -44,6 +44,7 @@ namespace ResourceStyle {
             case 25: return { Shape::CROP, { 0.20f, 0.50f, 0.18f }, { 0.88f, 0.10f, 0.16f }, true, 0.30f, 0.45f };  // fresa
             case 27: return { Shape::CROP, { 0.22f, 0.50f, 0.18f }, { 0.78f, 0.60f, 0.32f }, true, 0.30f, 0.5f };   // patata
             case 26: return { Shape::CROP, { 0.55f, 0.62f, 0.20f }, { 0.92f, 0.76f, 0.26f }, false, 0.30f, 1.0f };  // trigo
+            case 29: return { Shape::JUNGLE, { 0.30f, 0.22f, 0.14f }, { 0.08f, 0.40f, 0.12f }, false, 0.45f, 6.5f };   // platanera
             case 28: return { Shape::TREE, { 0.34f, 0.22f, 0.14f }, { 0.30f, 0.62f, 0.22f }, false, 0.3f, 3.8f };   // manzano
             case 4:  return { Shape::ROCK, { 0.42f, 0.42f, 0.45f }, { 0.07f, 0.07f, 0.08f }, true,  0.85f, 1.1f }; // filón de carbón
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca
@@ -137,6 +138,15 @@ class ResourceNode {
     bool takeFruit() { if (!fruitReady()) return false; m_fruit = 0.0f; m_shake = SHAKE_TIME; return true; }
     // Avanza la maduración de la fruta 'seconds' segundos sin más (cálculo de ausencia: ver FarmWork).
     void ripen(float seconds) { if (m_fruitTree && !m_gone && !growing()) m_fruit = (std::min)(1.0f, m_fruit + seconds / FRUIT_SECONDS); }
+    // Riego repetible (los pokémon que riegan lo hacen una y otra vez): da crecimiento sin las limitaciones de work().
+    void water(float rate) {
+        if (m_gone || !growing()) return;
+        m_growth = (std::min)(1.0f, m_growth + WATER_STEP * rate);
+        if (m_growth >= 1.0f) m_wateredByPlayer = m_wateredByCompanion = false;
+        m_shake = SHAKE_TIME * 0.5f;
+    }
+    // Estado guardado de una parcela (crecimiento y madurez de la fruta).
+    void setState(float growth, float fruit) { m_growth = (std::clamp)(growth, 0.0f, 1.0f); m_fruit = (std::clamp)(fruit, 0.0f, 1.0f); }
     void grow(float seconds) { if (!m_gone && growing()) { m_growth = (std::min)(1.0f, m_growth + seconds / m_regrowSeconds); if (m_growth >= 1.0f) m_wateredByPlayer = m_wateredByCompanion = false; } }
 
     int typeIndex() const { return m_type; }

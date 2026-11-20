@@ -87,7 +87,7 @@ namespace MapComponent {
         // Mapa de la granja: el recinto entero (suelo, borde de piedra, parcelas y portal) siempre visible, con el jugador; a la derecha, la leyenda.
         inline void drawFarm(ImDrawList* dl, const GameStatus& status) {
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
-            GuiCards::text(dl, ImVec2(MARGIN + 260.0f, MARGIN), IM_COL32(190, 230, 190, 255), "GRANJA", 1.1f);
+            GuiCards::text(dl, ImVec2(MARGIN + 260.0f, MARGIN), IM_COL32(190, 230, 190, 255), "HOGAR", 1.1f);
             const float top = MARGIN + 50.0f;
             const float side = (std::min)(screen.y - top - MARGIN - 6.0f, screen.x * 0.68f);
             const ImVec2 a(MARGIN, top), b(a.x + side, a.y + side);

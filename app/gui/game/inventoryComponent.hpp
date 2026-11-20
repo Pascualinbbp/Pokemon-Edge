@@ -34,7 +34,7 @@ namespace InventoryComponent {
         inline int selectedItem = -1; // id del objeto seleccionado
         inline bool farm = false;     // la mochila se abrió en la granja: solo se ven los objetos de la granja (en el mundo principal, solo los del mundo)
 
-        inline constexpr const char* FARM_SECTION = "Granja";   // apartado de las categorías propias de la granja (madera, semillas, cultivos)
+        inline constexpr const char* FARM_SECTION = "Hogar";     // apartado de las categorías propias de la granja (madera, semillas, cultivos)
         inline constexpr int SKILL_CHOP = 1, SKILL_WATER = 3;   // el hacha y la regadera son herramientas de la granja (tabla skill)
 
         // ¿Este objeto es de la granja? Las categorías del apartado "Granja", el hacha y la regadera.
@@ -389,7 +389,7 @@ namespace InventoryComponent {
         const float height = screen.y - top - detail::MARGIN - 28.0f;
 
         if (GuiCards::backButton(ImVec2(detail::MARGIN, detail::MARGIN - 8.0f))) state = back;
-        GuiCards::text(dl, ImVec2(detail::MARGIN + 140.0f, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), inFarm ? "MOCHILA DE LA GRANJA" : "MOCHILA", 1.6f);
+        GuiCards::text(dl, ImVec2(detail::MARGIN + 140.0f, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), inFarm ? "MOCHILA DEL HOGAR" : "MOCHILA", 1.6f);
         char money[48];
         std::snprintf(money, sizeof(money), "Pokémonedas: %d", inventory.money());
         GuiCards::text(dl, ImVec2(screen.x - detail::MARGIN - GuiCards::textWidth(money, 1.2f), detail::MARGIN - 4.0f), IM_COL32(255, 215, 90, 255), money, 1.2f);
