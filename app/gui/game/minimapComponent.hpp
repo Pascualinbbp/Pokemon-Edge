@@ -1,4 +1,5 @@
 #pragma once
+#include "../../engine/physics/physicsWorld.hpp"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -111,6 +112,28 @@ namespace MinimapComponent {
                 const float dx = corner.x + cell * 0.5f - mid.x, dy = corner.y + cell * 0.5f - mid.y;
                 if (dx * dx + dy * dy > (RADIUS - 1.0f) * (RADIUS - 1.0f)) continue;
                 dl->AddRectFilled(corner, ImVec2(corner.x + cell + 0.5f, corner.y + cell + 0.5f), MapTerrain::color(terrain, static_cast<size_t>(row) * Exploration::SIZE + col, status.layer));
+            }
+        }
+
+        if (status.farm) { // la granja: su mapa está siempre completo (suelo, borde, parcelas y portal), sin explorar
+            const float step = 2.0f;
+            for (float gx = status.farmX - status.farmHalf * 1.25f; gx < status.farmX + status.farmHalf * 1.25f; gx += step) {
+                for (float gz = status.farmZ - status.farmHalf * 1.25f; gz < status.farmZ + status.farmHalf * 1.25f; gz += step) {
+                    const ImVec2 corner = toScreen(gx, gz + step);
+                    const float dx = corner.x + step * scale * 0.5f - mid.x, dy = corner.y + step * scale * 0.5f - mid.y;
+                    if (dx * dx + dy * dy > (RADIUS - 1.0f) * (RADIUS - 1.0f)) continue;
+                    const float mx = gx + step * 0.5f - status.farmX, mz = gz + step * 0.5f - status.farmZ; // solo las celdas dentro del contorno de la isla
+                    if (std::hypot(mx, mz) > Physics::World::Flat::edgeAt(status.farmHalf, std::atan2(mz, mx))) continue;
+                    dl->AddRectFilled(corner, ImVec2(corner.x + step * scale + 0.5f, corner.y + step * scale + 0.5f), IM_COL32(78, 164, 69, 255));
+                }
+            }
+            for (const DirectX::XMFLOAT3& mark : status.farmMarks) {
+                const ImVec2 at = toScreen(mark.x, mark.y);
+                const float cx = at.x - mid.x, cy = at.y - mid.y;
+                if (cx * cx + cy * cy > (RADIUS - 6.0f) * (RADIUS - 6.0f)) continue;
+                const float h = (mark.z > 0.5f ? 1.1f : 0.8f) * scale;
+                dl->AddRectFilled(ImVec2(at.x - h, at.y - h), ImVec2(at.x + h, at.y + h), mark.z > 0.5f ? IM_COL32(90, 200, 255, 255) : IM_COL32(120, 80, 44, 255));
+                dl->AddRect(ImVec2(at.x - h, at.y - h), ImVec2(at.x + h, at.y + h), IM_COL32(0, 0, 0, 200), 0.0f, 0, 1.0f);
             }
         }
 

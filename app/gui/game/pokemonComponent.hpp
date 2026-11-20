@@ -24,6 +24,7 @@
 #include "../../engine/world/state/itemUse.hpp"
 #include "../../engine/world/state/playerProgress.hpp"
 #include "../../engine/world/state/pokemonStorage.hpp"
+#include "../../engine/world/state/farmWork.hpp"
 #include "../../models/gameData.hpp"
 
 // Gestión de pokémon: el equipo (6 círculos) a la izquierda, el PC en el centro y la ficha del seleccionado a la derecha.
@@ -59,6 +60,7 @@ namespace PokemonComponent {
         inline Place selection;
         inline Held held;
         inline std::vector<SlotRect> slots;      // casillas dibujadas este fotograma (destinos posibles)
+        inline std::vector<SlotRect> farmSlots;  // casillas de los trabajadores de la granja (destino al arrastrar desde el PC)
         inline ImVec2 teamArea[2], boxArea[2];   // zonas donde soltar un pokémon sin apuntar a una casilla
         inline bool selecting = false;           // modo de selección múltiple para liberar
         inline std::set<int> teamMarks, pcMarks; // pokémon marcados
@@ -137,6 +139,15 @@ namespace PokemonComponent {
             if (!held.active || held.pad || !ImGui::IsMouseReleased(ImGuiMouseButton_Left)) return;
             const ImVec2 mouse = ImGui::GetIO().MousePos;
             const auto inside = [&](const ImVec2& a, const ImVec2& b) { return mouse.x >= a.x && mouse.x <= b.x && mouse.y >= a.y && mouse.y <= b.y; };
+            if (manage && !held.from.inTeam) { // del PC a un hueco de la granja
+                for (const SlotRect& slot : farmSlots) {
+                    if (!inside(slot.a, slot.b)) continue;
+                    held.active = false;
+                    storage.sendToFarm(held.from.index, slot.place.index < static_cast<int>(storage.farm().size()) ? slot.place.index : -1);
+                    clearMarks();
+                    return;
+                }
+            }
             for (const SlotRect& slot : slots) {
                 if (inside(slot.a, slot.b)) {
                     if (!manage && !ownedAt(storage, slot.place)) break; // menú rápido: solo se intercambia con otro pokémon del equipo
@@ -286,6 +297,48 @@ namespace PokemonComponent {
             ImGui::EndChild();
         }
 
+        // --- Granja: hasta 6 pokémon del PC que trabajan solos (se arrastran desde el PC a un hueco; un clic en un trabajador lo devuelve al PC) ---
+        inline constexpr float FARM_HEIGHT = 128.0f;
+
+        inline void drawFarm(const GameData& data, PokemonStorage& storage, const ImVec2& pos, float width) {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            char header[64];
+            std::snprintf(header, sizeof(header), "GRANJA  %d / %d  (trabajan solos mientras estás fuera)", static_cast<int>(storage.farm().size()), PokemonStorage::FARM_SLOTS);
+            GuiCards::text(dl, pos, IM_COL32(255, 255, 255, 255), header, 1.1f);
+            farmSlots.clear();
+            const float radius = 34.0f, cell = (std::min)(130.0f, (width - 8.0f) / PokemonStorage::FARM_SLOTS);
+            for (int i = 0; i < PokemonStorage::FARM_SLOTS; ++i) {
+                const ImVec2 a(pos.x + i * cell, pos.y + 30.0f), b(a.x + cell - 8.0f, a.y + FARM_HEIGHT - 36.0f);
+                const ImVec2 c((a.x + b.x) * 0.5f, a.y + radius + 6.0f);
+                const bool filled = i < static_cast<int>(storage.farm().size());
+                ImGui::SetCursorScreenPos(a);
+                ImGui::PushID(200000 + i);
+                const bool clicked = ImGui::InvisibleButton("##farm", ImVec2(b.x - a.x, b.y - a.y));
+                ImGui::PopID();
+                farmSlots.push_back({ { false, i }, a, b });
+                const bool target = held.active && !held.from.inTeam && ImGui::IsItemHovered();
+                dl->AddRectFilled(a, b, IM_COL32(40, 44, 58, 255), 10.0f);
+                dl->AddRect(a, b, target ? GuiCards::SELECT : IM_COL32(255, 255, 255, filled ? 70 : 40), 10.0f, 0, target ? 3.0f : 1.5f);
+                const OwnedPokemon* owned = filled ? &storage.farm()[static_cast<size_t>(i)] : nullptr;
+                const PokemonSpecies* species = owned ? data.speciesById(owned->speciesId) : nullptr;
+                if (!species) { GuiCards::centeredText(dl, ImVec2(c.x, c.y), GuiStyle::MUTED, "+", 1.8f); }
+                else {
+                    TeamCircle::draw(dl, c, radius, data, *species, owned->level, owned->shiny, owned->ballId, false, 0, 1.0f, false);
+                    const Skill* skill = data.skill(species->skillId);
+                    const bool works = FarmWork::skillOf(*species) >= 0;
+                    char job[48];
+                    std::snprintf(job, sizeof(job), works && skill ? "%s Nv %d" : "Sin oficio", skill ? skill->name.c_str() : "", species->skillLevel);
+                    GuiCards::centeredText(dl, ImVec2(c.x, b.y - 12.0f), works ? IM_COL32(180, 230, 150, 255) : GuiStyle::MUTED, job, 0.85f);
+                }
+                if (!clicked) continue;
+                if (held.active && held.pad && !held.from.inTeam) { // mando: se coge un pokémon del PC y se elige el hueco
+                    held.active = false;
+                    storage.sendToFarm(held.from.index, filled ? i : -1);
+                    clearMarks();
+                } else if (filled && !held.active && manage) storage.recallFromFarm(i);
+            }
+        }
+
         // --- Barra inferior: filtros del PC y liberar ---
         inline std::string capital(std::string name) {
             if (!name.empty() && static_cast<unsigned char>(name[0]) < 128) name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
@@ -362,10 +415,14 @@ namespace PokemonComponent {
                               const PokemonSpecies& species, const ImVec2& area, float avail, float width = DETAIL_WIDTH - 32.0f) {
             constexpr int ORDER[6] = { 0, 1, 3, 5, 4, 2 }; // vértices de arriba en sentido horario (índices de BaseStats)
             constexpr float PI = 3.14159265f;
-            constexpr float BLOCK_W = 118.0f, BLOCK_H = 64.0f;
+            constexpr float BLOCK_W = 132.0f;
+            const float line = ImGui::GetFontSize() * 0.9f + 4.0f;
+            const float blockH = line * 2.0f + 2.0f;
+            const ImU32 BASE_COLOR = IM_COL32(120, 200, 255, 255), TOTAL_COLOR = IM_COL32(255, 170, 60, 255), DASH_COLOR = IM_COL32(170, 178, 200, 255);
             // Escala: lo máximo que podría tener a su nivel una especie con la base más alta que cabe (IV 31, EVs 252, naturaleza favorable).
-            // Azul: lo que dan solo la base y el nivel. Naranja: el total real (base, nivel, IV, EVs y naturaleza), el mismo número que se escribe en cada vértice.
+            // Azul: lo que dan solo la base y el nivel. Naranja: el total real (base, nivel, IV, EVs y naturaleza).
             float base[6], grown[6];
+            int sum = 0;
             for (int i = 0; i < 6; ++i) {
                 const int stat = ORDER[i];
                 const int lv = owned.level;
@@ -373,11 +430,12 @@ namespace PokemonComponent {
                 const int plain = stat == 0 ? StatRules::hp(species.stats.at(stat), lv, 0, 0) : StatRules::stat(species.stats.at(stat), lv, 0, 0);
                 base[i] = static_cast<float>(plain) / top;
                 grown[i] = static_cast<float>(storage.statOf(owned, stat)) / top;
+                sum += storage.statOf(owned, stat);
             }
-            const float radius = (std::clamp)((avail - 2.0f * BLOCK_H - 16.0f) * 0.5f, 34.0f, 86.0f);
-            const ImVec2 center(area.x + width * 0.5f, area.y + BLOCK_H + 8.0f + radius);
+            const float radius = (std::clamp)((avail - 2.0f * blockH - 16.0f) * 0.5f, 34.0f, 86.0f);
+            const ImVec2 center(area.x + width * 0.5f, area.y + blockH + 8.0f + radius);
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            GuiCards::radar(dl, center, radius, base, GuiStyle::ACCENT, &grown, IM_COL32(255, 160, 40, 255));
+            GuiCards::radar(dl, center, radius, base, GuiStyle::ACCENT, &grown, TOTAL_COLOR);
 
             const Item* vitamin = nullptr; // la vitamina de la mochila (sube un IV hasta su tope)
             const TrainingItem* vitaminTraining = nullptr;
@@ -386,42 +444,53 @@ namespace PokemonComponent {
                 const TrainingItem* training = data.training(item.refId);
                 if (training && training->effect == TrainingItem::Effect::IV) { vitamin = &item; vitaminTraining = training; break; }
             }
-            char line[48];
+            constexpr float BUTTON_W = 22.0f, GAP = 6.0f;
+            char text[48], numbers[3][16];
             for (int i = 0; i < 6; ++i) {
                 const float angle = -PI * 0.5f + static_cast<float>(i) * PI / 3.0f;
                 const float cx = std::cos(angle), cy = std::sin(angle);
                 const int stat = ORDER[i];
                 const ImVec2 anchor(center.x + cx * (radius + 10.0f), center.y + cy * (radius + 10.0f));
                 const float x = anchor.x + (cx > 0.3f ? 0.0f : cx < -0.3f ? -BLOCK_W : -BLOCK_W * 0.5f);
-                const float y = anchor.y + (cy < -0.3f ? -BLOCK_H : cy > 0.3f ? 0.0f : -BLOCK_H * 0.5f);
-                const float lineH = ImGui::GetFontSize() * 0.8f + 1.0f;
+                const float y = anchor.y + (cy < -0.3f ? -blockH : cy > 0.3f ? 0.0f : -blockH * 0.5f);
 
-                // Desglose del total: lo que dan la base y el nivel, lo que suma el IV, lo que suman los EVs y lo que cambia la naturaleza.
-                const int lv = owned.level, ivs = owned.ivs[stat], evs = owned.evs[stat];
-                const int plain = StatRules::of(species.stats, stat, lv, 0, 0, nullptr);
-                const int withIv = StatRules::of(species.stats, stat, lv, ivs, 0, nullptr);
-                const int withEv = StatRules::of(species.stats, stat, lv, ivs, evs, nullptr);
-                const int total = storage.statOf(owned, stat);
-                std::snprintf(line, sizeof(line), "%s %d", BaseStats::name(stat), total);
-                GuiCards::text(dl, ImVec2(x, y), IM_COL32(255, 255, 255, 240), line, 0.85f);
-                std::snprintf(line, sizeof(line), "Base y nivel %d", plain);
-                GuiCards::text(dl, ImVec2(x, y + lineH), IM_COL32(190, 200, 220, 230), line, 0.8f);
-                std::snprintf(line, sizeof(line), "IV %d/%d: +%d", ivs, owned.ivCaps[stat], withIv - plain);
-                GuiCards::text(dl, ImVec2(x, y + lineH * 2.0f), IM_COL32(255, 170, 60, 255), line, 0.8f);
-                const int natureGain = total - withEv;
-                std::snprintf(line, sizeof(line), natureGain != 0 ? "EV %d: +%d  Nat %+d" : "EV %d: +%d", evs, withEv - withIv, natureGain);
-                GuiCards::text(dl, ImVec2(x, y + lineH * 3.0f), IM_COL32(120, 200, 255, 240), line, 0.8f);
-                std::snprintf(line, sizeof(line), "IV %d/%d: +%d", ivs, owned.ivCaps[stat], withIv - plain); // para colocar el "+" de la vitamina
-
-                // Vitamina: "+" junto al IV; gris si no quedan vitaminas o el IV ya está en su tope.
-                if (vitamin) {
+                // Línea 1, centrada: el nombre de la estadística, el IV (x/tope) y el botón de la vitamina. Línea 2, centrada: base - total.
+                std::snprintf(text, sizeof(text), "%s %d/%d", BaseStats::name(stat), owned.ivs[stat], owned.ivCaps[stat]);
+                const float w1 = GuiCards::textWidth(text, 0.9f) + (vitamin ? GAP + BUTTON_W : 0.0f);
+                const float x1 = x + (BLOCK_W - w1) * 0.5f;
+                GuiCards::text(dl, ImVec2(x1, y), IM_COL32(255, 255, 255, 245), text, 0.9f);
+                if (vitamin) { // "+" junto al IV; gris si no quedan vitaminas o el IV ya está en su tope
                     const bool can = inventory.count(vitamin->id) > 0 && owned.ivs[stat] < owned.ivCaps[stat];
-                    ImGui::SetCursorScreenPos(ImVec2(x + GuiCards::textWidth(line, 0.8f) + 6.0f, y + lineH * 2.0f - 2.0f));
+                    ImGui::SetCursorScreenPos(ImVec2(x1 + w1 - BUTTON_W, y - 2.0f));
                     ImGui::PushID(700 + stat);
-                    if (GuiCards::button("##vitamin", "+", ImVec2(22.0f, 20.0f), can, IM_COL32(230, 140, 40, 255)) && storage.trainIv(selection.inTeam, selection.index, stat, vitaminTraining->amount)) inventory.add(vitamin->id, -1);
+                    if (GuiCards::button("##vitamin", "+", ImVec2(BUTTON_W, line), can, IM_COL32(230, 140, 40, 255)) && storage.trainIv(selection.inTeam, selection.index, stat, vitaminTraining->amount)) inventory.add(vitamin->id, -1);
                     ImGui::PopID();
                 }
+                const int plain = StatRules::of(species.stats, stat, owned.level, 0, 0, nullptr);
+                std::snprintf(numbers[0], sizeof(numbers[0]), "%d", plain);
+                std::snprintf(numbers[1], sizeof(numbers[1]), " - ");
+                std::snprintf(numbers[2], sizeof(numbers[2]), "%d", storage.statOf(owned, stat));
+                const float w2 = GuiCards::textWidth(numbers[0], 0.95f) + GuiCards::textWidth(numbers[1], 0.95f) + GuiCards::textWidth(numbers[2], 0.95f);
+                float x2 = x + (BLOCK_W - w2) * 0.5f;
+                const float y2 = y + line + 2.0f;
+                GuiCards::text(dl, ImVec2(x2, y2), BASE_COLOR, numbers[0], 0.95f);
+                x2 += GuiCards::textWidth(numbers[0], 0.95f);
+                GuiCards::text(dl, ImVec2(x2, y2), DASH_COLOR, numbers[1], 0.95f);
+                x2 += GuiCards::textWidth(numbers[1], 0.95f);
+                GuiCards::text(dl, ImVec2(x2, y2), TOTAL_COLOR, numbers[2], 0.95f);
             }
+
+            // Esquina inferior derecha del gráfico: la suma de todas las estadísticas (total). Esquina inferior izquierda: qué es cada color.
+            std::snprintf(text, sizeof(text), "Total %d", sum);
+            const float totalW = GuiCards::textWidth(text, 1.0f);
+            GuiCards::text(dl, ImVec2(area.x + width - totalW, area.y + avail - line), TOTAL_COLOR, text, 1.0f);
+            float lx = area.x;
+            const float ly = area.y + avail - line;
+            GuiCards::text(dl, ImVec2(lx, ly), BASE_COLOR, "Base", 0.85f);
+            lx += GuiCards::textWidth("Base", 0.85f);
+            GuiCards::text(dl, ImVec2(lx, ly), DASH_COLOR, " - ", 0.85f);
+            lx += GuiCards::textWidth(" - ", 0.85f);
+            GuiCards::text(dl, ImVec2(lx, ly), TOTAL_COLOR, "Total", 0.85f);
         }
 
         // Habilidad activa o pasiva: ficha con su nombre y su descripción al lado, en una línea.
@@ -750,7 +819,8 @@ namespace PokemonComponent {
         const float boxX = detail::MARGIN + teamWidth + 36.0f;
         if (manage) {
             const float boxWidth = screen.x - boxX - detail::DETAIL_WIDTH - detail::MARGIN - 28.0f;
-            detail::drawBox(data, storage, ImVec2(boxX, top), ImVec2(boxWidth, height));
+            detail::drawFarm(data, storage, ImVec2(boxX, top), boxWidth);
+            detail::drawBox(data, storage, ImVec2(boxX, top + detail::FARM_HEIGHT + 10.0f), ImVec2(boxWidth, height - detail::FARM_HEIGHT - 10.0f));
             detail::drawBar(data, storage, ImVec2(boxX, barY), boxWidth);
             detail::drawDetail(data, storage, inventory, progress, ImVec2(screen.x - detail::MARGIN - detail::DETAIL_WIDTH, top), ImVec2(detail::DETAIL_WIDTH, height));
         } else { // menú rápido: solo el equipo y, a su lado, la ficha con pestañas (los pokémon del PC se ven y se mueven desde la máquina del inicio)

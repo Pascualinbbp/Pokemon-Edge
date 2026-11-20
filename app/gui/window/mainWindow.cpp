@@ -395,7 +395,7 @@ void MainWindow::run() {
                 UpdateComponent::render(g_state);
                 break;
             case GameState::INVENTORY:
-                InventoryComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress());
+                InventoryComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.inventory(), engine.progress(), engine.status().farm);
                 break;
             case GameState::POKEDEX:
                 PokedexComponent::render(g_state, g_backState, engine.data(), engine.storage(), engine.progress());

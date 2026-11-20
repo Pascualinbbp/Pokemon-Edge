@@ -26,10 +26,10 @@ namespace ResourceStyle {
             case 7:  return { Shape::BUSH, { 0.22f, 0.48f, 0.20f }, { 0.98f, 0.80f, 0.18f }, true,  0.55f, 0.9f }; // arbusto dorado
             case 8:  return { Shape::CONIFER, { 0.34f, 0.22f, 0.12f }, { 0.10f, 0.42f, 0.24f }, false, 0.35f, 3.8f }; // pino
             case 9:  return { Shape::TREE, { 0.86f, 0.84f, 0.78f }, { 0.52f, 0.72f, 0.22f }, false, 0.3f, 3.4f };   // abedul
-            case 10: return { Shape::PALM, { 0.55f, 0.40f, 0.22f }, { 0.28f, 0.62f, 0.22f }, false, 0.3f, 3.8f };   // palmera
-            case 11: return { Shape::TREE, { 0.30f, 0.20f, 0.16f }, { 0.98f, 0.68f, 0.80f }, false, 0.3f, 3.6f };   // cerezo en flor
+            case 10: return { Shape::PALM, { 0.55f, 0.40f, 0.22f }, { 0.28f, 0.62f, 0.22f }, false, 0.3f, 6.1f };   // palmera
+            case 11: return { Shape::TREE, { 0.30f, 0.20f, 0.16f }, { 0.98f, 0.68f, 0.80f }, false, 0.3f, 4.2f };   // cerezo en flor
             case 12: return { Shape::FLOWER, { 0.28f, 0.58f, 0.24f }, { 0.98f, 0.98f, 0.96f }, true, 0.25f, 0.55f };  // margarita (pétalos blancos)
-            case 13: return { Shape::JUNGLE, { 0.30f, 0.22f, 0.14f }, { 0.08f, 0.40f, 0.12f }, false, 0.45f, 5.0f };  // árbol de jungla
+            case 13: return { Shape::JUNGLE, { 0.30f, 0.22f, 0.14f }, { 0.08f, 0.40f, 0.12f }, false, 0.45f, 6.5f };  // árbol de jungla
             case 14: return { Shape::ACACIA, { 0.42f, 0.30f, 0.18f }, { 0.50f, 0.58f, 0.18f }, false, 0.3f, 4.2f };   // acacia
             case 15: return { Shape::BUSH, { 0.14f, 0.50f, 0.20f }, { 0.98f, 0.58f, 0.14f }, true, 0.6f, 1.0f };     // planta tropical
             case 16: return { Shape::TULIP, { 0.28f, 0.58f, 0.24f }, { 0.92f, 0.24f, 0.36f }, true, 0.25f, 0.6f };  // tulipán
@@ -44,6 +44,7 @@ namespace ResourceStyle {
             case 25: return { Shape::CROP, { 0.20f, 0.50f, 0.18f }, { 0.88f, 0.10f, 0.16f }, true, 0.30f, 0.45f };  // fresa
             case 27: return { Shape::CROP, { 0.22f, 0.50f, 0.18f }, { 0.78f, 0.60f, 0.32f }, true, 0.30f, 0.5f };   // patata
             case 26: return { Shape::CROP, { 0.55f, 0.62f, 0.20f }, { 0.92f, 0.76f, 0.26f }, false, 0.30f, 1.0f };  // trigo
+            case 28: return { Shape::TREE, { 0.34f, 0.22f, 0.14f }, { 0.30f, 0.62f, 0.22f }, false, 0.3f, 3.8f };   // manzano
             case 4:  return { Shape::ROCK, { 0.42f, 0.42f, 0.45f }, { 0.07f, 0.07f, 0.08f }, true,  0.85f, 1.1f }; // filón de carbón
             default: return { Shape::ROCK, { 0.56f, 0.56f, 0.59f }, { 0.56f, 0.56f, 0.59f }, false, 0.85f, 1.1f }; // roca
         }
@@ -116,13 +117,27 @@ class ResourceNode {
     }
 
     // Parcela de cultivo: el nodo existe siempre, pero vacío (gone) hasta que se siembra; el hábitat nunca lo reutiliza para flores.
-    void makePlot() { m_plot = true; m_gone = true; m_goneTime = 0.0f; m_plant = true; m_waterable = true; m_ephemeral = true; }
+    // 'tree': parcela grande para árboles (se siembran semillas de árbol); si no, para cultivos pequeños.
+    void makePlot(bool tree = false) { m_plot = true; m_plotTree = tree; m_gone = true; m_goneTime = 0.0f; m_plant = true; m_waterable = true; m_ephemeral = true; }
     bool plot() const { return m_plot; }
-    void sow(int typeIndex, int typeId, int hitsNeeded, float growSeconds, float yaw) {
+    bool treePlot() const { return m_plotTree; }
+    // 'fruitTree': árbol frutal (palmera, jungla, cerezo): crecido no se tala, da su fruta cada cierto tiempo. El resto se tala (con sus golpes) y deja la parcela libre.
+    void sow(int typeIndex, int typeId, int hitsNeeded, float growSeconds, float yaw, bool fruitTree = false) {
         m_type = typeIndex; m_typeId = typeId; m_need = hitsNeeded; m_yaw = yaw; m_regrowSeconds = (std::max)(1.0f, growSeconds);
         m_growth = 0.0f; m_hits = 0; m_wateredByPlayer = m_wateredByCompanion = false; m_gone = false; m_goneTime = 0.0f; m_harvested = false;
         m_plant = true; m_waterable = true; m_ephemeral = true;
+        m_fruitTree = fruitTree; m_fruit = 0.0f;
     }
+
+    // Árbol frutal crecido: la fruta madura sola (FRUIT_SECONDS) y se recoge directamente del árbol.
+    static constexpr float FRUIT_SECONDS = 90.0f;
+    bool fruitTree() const { return m_fruitTree; }
+    bool fruitReady() const { return m_fruitTree && !m_gone && !growing() && m_fruit >= 1.0f; }
+    float fruitRipeness() const { return m_fruit; }
+    bool takeFruit() { if (!fruitReady()) return false; m_fruit = 0.0f; m_shake = SHAKE_TIME; return true; }
+    // Avanza la maduración de la fruta 'seconds' segundos sin más (cálculo de ausencia: ver FarmWork).
+    void ripen(float seconds) { if (m_fruitTree && !m_gone && !growing()) m_fruit = (std::min)(1.0f, m_fruit + seconds / FRUIT_SECONDS); }
+    void grow(float seconds) { if (!m_gone && growing()) { m_growth = (std::min)(1.0f, m_growth + seconds / m_regrowSeconds); if (m_growth >= 1.0f) m_wateredByPlayer = m_wateredByCompanion = false; } }
 
     int typeIndex() const { return m_type; }
     int typeId() const { return m_typeId; }
@@ -132,7 +147,7 @@ class ResourceNode {
     bool depleted() const { return m_gone || (!m_plant && growing()); } // extraíble agotado: nada que hacer hasta que se regenere
     float growth() const { return m_growth; }
     // ¿Se puede trabajar ahora? (no una flor o alga que aún crece sola, ni un nodo agotado)
-    bool workable() const { return !depleted() && !(m_plant && growing() && !m_waterable); }
+    bool workable() const { return !depleted() && !(m_plant && growing() && !m_waterable) && !(m_fruitTree && !growing() && !fruitReady()); }
     // ¿Puede quien trabaja (jugador o su pokémon) hacerlo ahora? Una planta que crece solo se riega una vez por cada uno hasta que termina de crecer.
     bool canWork(bool byPlayer) const { return workable() && !(m_plant && growing() && (byPlayer ? m_wateredByPlayer : m_wateredByCompanion)); }
     int hits() const { return m_hits; } // golpes ya dados al extraerlo (0 = sin empezar)
@@ -153,6 +168,7 @@ class ResourceNode {
     // Devuelve true si cuenta (no está agotado ni en enfriamiento).
     bool work(bool byPlayer, float speed = 1.0f) {
         if (depleted() || m_cooldown > 0.0f) return false;
+        if (m_fruitTree && !growing()) return false; // el frutal crecido no se tala: se le recoge la fruta (takeFruit)
         if (m_plant && growing() && !m_waterable) return false; // las flores y algas crecen solas: no se riegan
         if (m_plant && growing()) { // regar: una vez por jugador y una por pokémon hasta que crezca (si no, las cosechas serían infinitas)
             bool& watered = byPlayer ? m_wateredByPlayer : m_wateredByCompanion;
@@ -194,6 +210,7 @@ class ResourceNode {
             m_growth = (std::min)(1.0f, m_growth + dt / m_regrowSeconds);
             if (m_growth >= 1.0f) m_wateredByPlayer = m_wateredByCompanion = false; // crecida: se podrá volver a regar una vez cada uno
         }
+        else ripen(dt);
         m_playerTimer = (std::max)(0.0f, m_playerTimer - dt);
         m_companionTimer = (std::max)(0.0f, m_companionTimer - dt);
     }
@@ -221,6 +238,9 @@ class ResourceNode {
     bool m_wateredByPlayer = false, m_wateredByCompanion = false; // ya regada por el jugador / por su pokémon en este crecimiento
     bool m_vein = false;           // mineral incrustado en una pared
     bool m_plot = false;           // parcela de cultivo (ver makePlot)
+    bool m_plotTree = false;       // parcela de árbol
+    bool m_fruitTree = false;      // árbol frutal sembrado en la parcela
+    float m_fruit = 0.0f;          // 0..1 madurez de la fruta
     bool m_gone = false;
     float m_goneTime = 0.0f;
     int m_hits = 0;

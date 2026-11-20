@@ -48,6 +48,9 @@ struct GameStatus {
     const HabitatMap* habitatMap = nullptr;      // mapa de hábitats (para el minimapa)
     float playerX = 0.0f, playerZ = 0.0f, playerYaw = 0.0f;
     const Exploration* exploration = nullptr;    // lo explorado (mapa grande)
+    bool farm = false;                           // el jugador está en la granja (mundo plano): su mapa está siempre completo
+    float farmX = 0.0f, farmZ = 0.0f, farmHalf = 0.0f; // centro y semilado del recinto de la granja
+    std::vector<DirectX::XMFLOAT3> farmMarks;    // (x, z, tipo) de lo que muestra el mapa de la granja: 0 parcela, 1 portal
     std::vector<DirectX::XMFLOAT4> mapBlocks;    // construcciones fijas (x, z, semilado x, semilado z) para los mapas
     const std::string* habitatName = nullptr;    // hábitat dominante donde está el jugador
     int weatherId = 1;                           // id del clima (para su logo; 1 = sol cuando está despejado)

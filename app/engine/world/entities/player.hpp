@@ -141,18 +141,19 @@ class Player {
     // Empieza la animación de una acción (si ya hay una del mismo tipo a medias, la reinicia).
     void act(PlayerAction action) {
         m_action = action;
+        m_focus = false; // cada acción empieza sin objetivo: quien trabaja un objeto lo fija justo después con faceTarget
         m_actionTime = 0.0f;
         m_actionDuration = PlayerActions::duration(action);
     }
     // Durante la acción en curso el personaje mira hacia ese punto (el objeto trabajado), no hacia donde apunta la cámara.
-    // Se mantiene mirando ahí un rato (FOCUS_TIME) aunque acabe la animación o se mueva la cámara; la caña lo renueva en cada fotograma.
+    // Mira ahí mientras dura la acción y sigue mirando ahí al acabar (hasta que el jugador se mueva); la cámara no interviene.
     void faceTarget(float x, float z) {
         actionYaw = std::atan2(x - body.position.x, z - body.position.z);
-        m_focusTime = FOCUS_TIME;
+        m_focus = true;
     }
     PlayerAction action() const { return m_action; }
     // Acción que se mantiene en pose mientras no haya otra animación (la caña con el corcho en el agua).
-    void hold(PlayerAction action) { m_holding = action; if (action == PlayerAction::NONE) m_focusTime = 0.0f; }
+    void hold(PlayerAction action) { m_holding = action; }
 
     PlayerPose pose() const {
         PlayerPose::Input in;
@@ -178,13 +179,13 @@ class Player {
     static constexpr float SLIDE_HEIGHT = 0.45f;
 
     void updateFacing(float dt, float cameraYaw) {
-        const bool faceCamera = aiming || m_action != PlayerAction::NONE || m_holding != PlayerAction::NONE;
         const float speed = std::hypot(body.velocity.x, body.velocity.z);
         float target = m_facing;
-        m_focusTime = (std::max)(0.0f, m_focusTime - dt);
-        if (m_action == PlayerAction::POTION || m_focusTime > 0.0f) target = actionYaw;
-        else if (faceCamera) target = cameraYaw;
+        // La cámara no decide hacia dónde mira el personaje. Mira al objeto de su acción y se queda mirando ahí al acabar, hasta que se mueva él.
+        if (m_focus && speed > FACING_MIN_SPEED && m_action == PlayerAction::NONE && m_holding == PlayerAction::NONE) m_focus = false;
+        if (m_action == PlayerAction::POTION || m_focus) target = actionYaw;
         else if (speed > FACING_MIN_SPEED) target = std::atan2(body.velocity.x, body.velocity.z);
+        (void)cameraYaw;
         const float delta = DirectX::XMScalarModAngle(target - m_facing);
         m_facing += (std::clamp)(delta, -TURN_SPEED * dt, TURN_SPEED * dt);
     }
@@ -509,8 +510,7 @@ class Player {
     static constexpr float CLIMB_PROBE = 0.45f;        // a qué distancia por delante se mira la pendiente
 
     PlayerAction m_action = PlayerAction::NONE;
-    float m_focusTime = 0.0f; // lo que queda mirando hacia actionYaw (el objeto trabajado)
-    static constexpr float FOCUS_TIME = 0.9f;
+    bool m_focus = false;     // hay un objeto al que mirar (actionYaw)
     float m_facing = 0.0f;
     PlayerAction m_holding = PlayerAction::NONE;
     float m_actionTime = 0.0f, m_actionDuration = 0.0f;

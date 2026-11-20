@@ -8,7 +8,7 @@
 // se pudre pasado un buen rato. Lo recogen el jugador (tiene prioridad), su acompañante o un pokémon salvaje (que se lo come).
 class Fruit {
     public:
-    enum class Kind { COCONUT, BANANA, CHERRY };
+    enum class Kind { COCONUT, BANANA, CHERRY, APPLE };
     // El coco partido son dos mitades (nodos mitad_a y mitad_b del modelo), cada una con su propio cuerpo físico. El racimo de plátanos (WHOLE) lleva
     // un plátano por bit de 'bananas' (nodos platano_1..5 de banana_bunch.glb); un plátano suelto es PIECE y recuerda cuál era (variant).
     enum class Part { WHOLE, HALF_A, HALF_B, PIECE };

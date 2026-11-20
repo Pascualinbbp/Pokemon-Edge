@@ -56,11 +56,21 @@ namespace Physics {
         std::vector<Geyser> geysers;
         std::vector<Spring> springs; // charcas termales (cada una con su propio temporizador)
         Disc archipelago{ 0.0f, 0.0f, HALF_SIZE };
-        // Mundo plano (la granja): un cuadrado llano a 'y', lejos del archipiélago. Sin agua, sin relieve y cerrado: quien está dentro no sale de él.
+        // Mundo plano (la granja): una isla llana de contorno redondeado y abstracto, a la altura 'y', lejos del archipiélago. Sin relieve y cerrada: quien está dentro no sale de ella.
         struct Flat {
             bool active = false;
-            float x = 0.0f, z = 0.0f, half = 0.0f, y = 0.0f;
-            bool contains(float px, float pz, float extra = 0.0f) const { return active && std::fabs(px - x) <= half + extra && std::fabs(pz - z) <= half + extra; }
+            float x = 0.0f, z = 0.0f, half = 0.0f, y = 0.0f; // 'half': radio medio de la isla
+            // Radio del contorno en la dirección 'angle' (rad): un círculo deformado con tres ondas.
+            static float edgeAt(float half, float angle) {
+                return half * (1.0f + 0.10f * std::sin(2.0f * angle + 0.6f) + 0.07f * std::sin(3.0f * angle + 2.1f) + 0.04f * std::sin(5.0f * angle + 4.0f));
+            }
+            float edge(float px, float pz) const { return edgeAt(half, std::atan2(pz - z, px - x)); }
+            bool contains(float px, float pz, float extra = 0.0f) const { return active && std::hypot(px - x, pz - z) <= edge(px, pz) + extra; }
+            // Mete el punto dentro del contorno (a 'margin' del borde).
+            void clampInside(float& px, float& pz, float margin) const {
+                const float d = std::hypot(px - x, pz - z), reach = edge(px, pz) - margin;
+                if (d > reach && d > 1.0e-4f) { px = x + (px - x) * reach / d; pz = z + (pz - z) * reach / d; }
+            }
         };
         Flat flat;
         std::vector<Disc> regions;
@@ -208,10 +218,8 @@ namespace Physics {
         // y = altura de los pies: quien cae de una isla del cielo (por debajo de su minY) no queda atado a ella y cae libre hasta el mar.
         // free: quien ya estaba fuera del archipiélago (cayó de una isla del cielo al mar) se mueve libre por la malla en vez de ser devuelto al borde.
         void clampToWorld(float& x, float& z, float y = ABOVE, float margin = 2.0f, bool free = false) const {
-            if (flat.contains(x, z, 40.0f)) { // el mundo plano es un recinto cuadrado
-                const float reach = flat.half - margin;
-                x = std::clamp(x, flat.x - reach, flat.x + reach);
-                z = std::clamp(z, flat.z - reach, flat.z + reach);
+            if (flat.contains(x, z, 40.0f)) { // el mundo plano es un recinto cerrado
+                flat.clampInside(x, z, margin);
                 return;
             }
             for (const Disc& region : regions) {

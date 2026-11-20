@@ -1,4 +1,5 @@
 #pragma once
+#include "../../engine/physics/physicsWorld.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -83,6 +84,55 @@ namespace MapComponent {
             drawList(dl, pos, width, "POKÉMON", topShares(pokemon, MAX_ROWS, hidden), hidden, IM_COL32(255, 190, 90, 255));
         }
 
+        // Mapa de la granja: el recinto entero (suelo, borde de piedra, parcelas y portal) siempre visible, con el jugador; a la derecha, la leyenda.
+        inline void drawFarm(ImDrawList* dl, const GameStatus& status) {
+            const ImVec2 screen = ImGui::GetIO().DisplaySize;
+            GuiCards::text(dl, ImVec2(MARGIN + 260.0f, MARGIN), IM_COL32(190, 230, 190, 255), "GRANJA", 1.1f);
+            const float top = MARGIN + 50.0f;
+            const float side = (std::min)(screen.y - top - MARGIN - 6.0f, screen.x * 0.68f);
+            const ImVec2 a(MARGIN, top), b(a.x + side, a.y + side);
+            const float span = status.farmHalf * 2.6f; // la isla (radio medio 'farmHalf', contorno irregular) cabe con margen
+            const auto toScreen = [&](float x, float z) { return ImVec2(a.x + (x - (status.farmX - span * 0.5f)) / span * side, b.y - (z - (status.farmZ - span * 0.5f)) / span * side); };
+            dl->AddRectFilled(a, b, IM_COL32(16, 22, 40, 255));
+            constexpr int SEGMENTS = 96;
+            const ImVec2 mid = toScreen(status.farmX, status.farmZ);
+            ImVec2 previous;
+            for (int i = 0; i <= SEGMENTS; ++i) { // la isla: abanico plano con su contorno
+                const float angle = 6.2831853f * static_cast<float>(i) / static_cast<float>(SEGMENTS);
+                const float r = Physics::World::Flat::edgeAt(status.farmHalf, angle);
+                const ImVec2 point = toScreen(status.farmX + std::cos(angle) * r, status.farmZ + std::sin(angle) * r);
+                if (i > 0) dl->AddTriangleFilled(mid, previous, point, IM_COL32(78, 164, 69, 255));
+                previous = point;
+            }
+            const float unit = side / span; // píxeles por metro
+            for (const DirectX::XMFLOAT3& mark : status.farmMarks) {
+                const ImVec2 at = toScreen(mark.x, mark.y);
+                const float h = (mark.z > 0.5f ? 1.1f : 0.8f) * unit;
+                dl->AddRectFilled(ImVec2(at.x - h, at.y - h), ImVec2(at.x + h, at.y + h), mark.z > 0.5f ? IM_COL32(90, 200, 255, 255) : IM_COL32(120, 80, 44, 255));
+                dl->AddRect(ImVec2(at.x - h, at.y - h), ImVec2(at.x + h, at.y + h), IM_COL32(0, 0, 0, 220), 0.0f, 0, 1.5f);
+            }
+            const ImVec2 me = toScreen(status.playerX, status.playerZ);
+            const float dirX = std::sin(status.playerYaw), dirY = -std::cos(status.playerYaw);
+            const ImVec2 tip(me.x + dirX * 11.0f, me.y + dirY * 11.0f);
+            const ImVec2 left(me.x - dirY * 7.0f - dirX * 6.0f, me.y + dirX * 7.0f - dirY * 6.0f);
+            const ImVec2 right(me.x + dirY * 7.0f - dirX * 6.0f, me.y - dirX * 7.0f - dirY * 6.0f);
+            dl->AddTriangleFilled(tip, left, right, IM_COL32(255, 255, 255, 255));
+            dl->AddTriangle(tip, left, right, IM_COL32(0, 0, 0, 230), 2.0f);
+
+            const ImVec2 pa(b.x + 24.0f, a.y - 6.0f), pb(screen.x - MARGIN, b.y + 6.0f);
+            GuiCards::panel(dl, pa, pb);
+            GuiCards::text(dl, ImVec2(pa.x + 16.0f, pa.y + 14.0f), GuiStyle::MUTED, "LEYENDA", 0.9f);
+            const struct { ImU32 color; const char* name; } legend[] = {
+                { IM_COL32(120, 80, 44, 255), "Parcela de cultivo" }, { IM_COL32(90, 200, 255, 255), "Portal al inicio" }, { IM_COL32(255, 255, 255, 255), "Tú" } };
+            float y = pa.y + 14.0f + ImGui::GetFontSize() + 14.0f;
+            for (const auto& entry : legend) {
+                dl->AddRectFilled(ImVec2(pa.x + 16.0f, y), ImVec2(pa.x + 34.0f, y + 18.0f), entry.color);
+                dl->AddRect(ImVec2(pa.x + 16.0f, y), ImVec2(pa.x + 34.0f, y + 18.0f), IM_COL32(0, 0, 0, 220), 0.0f, 0, 1.5f);
+                GuiCards::text(dl, ImVec2(pa.x + 46.0f, y), IM_COL32(255, 255, 255, 255), entry.name, 0.95f);
+                y += 32.0f;
+            }
+        }
+
         inline int g_selected = -1; // hábitat elegido en la lista
         inline int g_layer = -1;    // capa que se ve (-1 = la del jugador)
         inline int g_lastFrame = -100;
@@ -99,6 +149,7 @@ namespace MapComponent {
         if (GuiCards::backButton(ImVec2(MARGIN, MARGIN - 8.0f))) state = back;
         GuiCards::text(dl, ImVec2(MARGIN + 140.0f, MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), "MAPA", 1.6f);
         if (GuiInput::backPressed()) state = back;
+        if (status.farm) { detail::drawFarm(dl, status); return; } // la granja se conoce entera: sin exploración
         if (!status.habitatMap || !status.data || !status.exploration) return;
 
         const int frame = ImGui::GetFrameCount();

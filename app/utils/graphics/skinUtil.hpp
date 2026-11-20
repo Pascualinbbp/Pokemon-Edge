@@ -145,7 +145,8 @@ namespace SkinUtil {
     // Estira la cadena del hilo (los huesos 'hidden') de la punta 'from' hasta 'to' (en coordenadas del modelo): cada hueso queda en su fracción
     // del recorrido, con una pequeña comba, y conserva su giro. El último (el corcho) acaba exactamente en 'to'.
     inline void stretchLine(const GltfUtil::Document& doc, const GltfUtil::Skin& skin, const Split& split, std::vector<DirectX::XMFLOAT4X4>& worlds,
-                            const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to, float sag) {
+                            const DirectX::XMFLOAT3& from, const DirectX::XMFLOAT3& to, float sag, const DirectX::XMFLOAT3* up = nullptr) {
+        using namespace DirectX;
         std::vector<int> depth(skin.joints.size(), -1);
         int deepest = 0;
         for (size_t j = 0; j < skin.joints.size(); ++j) {
@@ -164,6 +165,19 @@ namespace SkinUtil {
             w._41 = from.x + (to.x - from.x) * f;
             w._42 = from.y + (to.y - from.y) * f - sag * 4.0f * f * (1.0f - f);
             w._43 = from.z + (to.z - from.z) * f;
+            if (up && depth[j] == deepest) { // el corcho flota derecho: su eje (+y en reposo: la parte roja arriba, la blanca abajo) apunta hacia arriba del mundo, 'up' en coordenadas del modelo
+                const XMVECTOR u = XMVector3Normalize(XMLoadFloat3(up));
+                const XMVECTOR y = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+                const float d = (std::clamp)(XMVectorGetX(XMVector3Dot(y, u)), -1.0f, 1.0f);
+                XMVECTOR axis = XMVector3Cross(y, u);
+                if (XMVectorGetX(XMVector3LengthSq(axis)) < 1.0e-8f) axis = XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f);
+                const XMMATRIX r = XMMatrixRotationAxis(XMVector3Normalize(axis), std::acos(d));
+                XMFLOAT4X4 m;
+                XMStoreFloat4x4(&m, r);
+                w._11 = m._11; w._12 = m._12; w._13 = m._13;
+                w._21 = m._21; w._22 = m._22; w._23 = m._23;
+                w._31 = m._31; w._32 = m._32; w._33 = m._33;
+            }
         }
     }
 

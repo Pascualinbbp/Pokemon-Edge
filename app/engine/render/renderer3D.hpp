@@ -100,6 +100,7 @@ class Renderer3D {
     static Mesh createOcean(ID3D11Device* device);
     static Mesh createCone(ID3D11Device* device);
     static Mesh createCube(ID3D11Device* device);
+    static Mesh createIsland(ID3D11Device* device);
     static Mesh createSphere(ID3D11Device* device, bool dome = false); // pokéball o, con dome, la semiesfera superior blanca
     static Mesh createStar(ID3D11Device* device);
     static Mesh createBeam(ID3D11Device* device); // cono abierto a lo largo de +Z: estrecho en z = 0 (la bola) y ancho en z = 1 (el pokémon)
@@ -188,6 +189,7 @@ class Renderer3D {
     float m_glow = 0.0f;   // cuánto brilla el jugador (Bioluminiscencia), 0..1
     float m_darkness = 0.0f;      // oscuridad actual (suave al entrar y salir de cuevas)
 
+    Mesh m_island; // malla plana de la isla de la granja
     Mesh m_cube;   // cubo unitario blanco centrado en el origen: paredes, pokémon y su morro (se tiñe al dibujar)
     Mesh m_sphere; // pokéball: mitad tintada con el color del tipo, banda oscura y mitad blanca
     Mesh m_dome;   // semiesfera blanca de los objetos sueltos

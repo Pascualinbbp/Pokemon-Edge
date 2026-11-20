@@ -32,6 +32,24 @@ namespace InventoryComponent {
 
         inline int tab = 0;
         inline int selectedItem = -1; // id del objeto seleccionado
+        inline bool farm = false;     // la mochila se abrió en la granja: solo se ven los objetos de la granja (en el mundo principal, solo los del mundo)
+
+        inline constexpr const char* FARM_SECTION = "Granja";   // apartado de las categorías propias de la granja (madera, semillas, cultivos)
+        inline constexpr int SKILL_CHOP = 1, SKILL_WATER = 3;   // el hacha y la regadera son herramientas de la granja (tabla skill)
+
+        // ¿Este objeto es de la granja? Las categorías del apartado "Granja", el hacha y la regadera.
+        inline bool isFarmItem(const GameData& data, const Item& item) {
+            for (const ItemCategoryInfo& category : data.categories) if (category.id == item.categoryId && category.section == FARM_SECTION) return true;
+            const Tool* tool = data.toolOf(item);
+            return tool && (tool->skillId == SKILL_CHOP || tool->skillId == SKILL_WATER);
+        }
+
+        // ¿Hay algo que mostrar en esta categoría según dónde estemos? Las categorías de la granja solo en la granja; las herramientas en los dos sitios (cada uno con las suyas).
+        inline bool categoryVisible(const ItemCategoryInfo& category) {
+            if (category.section == FARM_SECTION) return farm;
+            if (category.section == "Herramientas") return true;
+            return !farm;
+        }
 
         struct Entry {
             const Item* item;
@@ -39,9 +57,10 @@ namespace InventoryComponent {
         };
 
         // Objetos de una categoría: los que se tienen y, en herramientas, todas (para poder fabricarlas).
-        inline std::vector<Entry> entries(const Inventory& inventory, int categoryId) {
+        inline std::vector<Entry> entries(const GameData& data, const Inventory& inventory, int categoryId) {
             std::vector<Entry> list;
             inventory.forEach([&](const Item& item, int count) {
+                if (item.category == ItemCategory::TOOL && isFarmItem(data, item) != farm) return; // cada sitio con sus herramientas
                 if (item.categoryId == categoryId && (count > 0 || item.category == ItemCategory::TOOL)) list.push_back({ &item, count });
             });
             return list;
@@ -57,10 +76,10 @@ namespace InventoryComponent {
         // Orden de la mochila: las categorías agrupadas por apartado (en el orden en que aparece cada apartado) y por id dentro de cada uno.
         inline std::vector<int> order(const GameData& data) {
             std::vector<std::string> sections;
-            for (const ItemCategoryInfo& category : data.categories) if (std::find(sections.begin(), sections.end(), category.section) == sections.end()) sections.push_back(category.section);
+            for (const ItemCategoryInfo& category : data.categories) if (categoryVisible(category) && std::find(sections.begin(), sections.end(), category.section) == sections.end()) sections.push_back(category.section);
             std::vector<int> list;
             for (const std::string& section : sections) {
-                for (size_t i = 0; i < data.categories.size(); ++i) if (data.categories[i].section == section) list.push_back(static_cast<int>(i));
+                for (size_t i = 0; i < data.categories.size(); ++i) if (data.categories[i].section == section && categoryVisible(data.categories[i])) list.push_back(static_cast<int>(i));
             }
             return list;
         }
@@ -341,7 +360,8 @@ namespace InventoryComponent {
     }
 
     // ESC, I o el botón de volver del mando cierran la mochila (vuelven a 'back'). Q/E o L1/R1 cambian de pestaña.
-    inline void render(GameState& state, GameState back, const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress) {
+    inline void render(GameState& state, GameState back, const GameData& data, PokemonStorage& storage, Inventory& inventory, const PlayerProgress& progress, bool inFarm = false) {
+        detail::farm = inFarm;
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, 170));
 
         const int categories = static_cast<int>(data.categories.size());
@@ -352,9 +372,15 @@ namespace InventoryComponent {
         detail::tab = (std::clamp)(detail::tab, 0, categories - 1);
         {
             const std::vector<int> sequence = detail::order(data); // Q / E recorren las categorías en el orden de la pantalla, pasando de un apartado al siguiente
+            if (sequence.empty()) {
+                state = back;
+                return;
+            }
+            const int count = static_cast<int>(sequence.size());
+            if (std::find(sequence.begin(), sequence.end(), detail::tab) == sequence.end()) { detail::tab = sequence.front(); detail::selectedItem = -1; } // la categoría no existe en este sitio (mundo / granja)
             const int at = static_cast<int>(std::find(sequence.begin(), sequence.end(), detail::tab) - sequence.begin());
-            if (ImGui::IsKeyPressed(ImGuiKey_Q, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) { detail::tab = sequence[(at + categories - 1) % categories]; detail::selectedItem = -1; }
-            if (ImGui::IsKeyPressed(ImGuiKey_E, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) { detail::tab = sequence[(at + 1) % categories]; detail::selectedItem = -1; }
+            if (ImGui::IsKeyPressed(ImGuiKey_Q, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) { detail::tab = sequence[(at + count - 1) % count]; detail::selectedItem = -1; }
+            if (ImGui::IsKeyPressed(ImGuiKey_E, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) { detail::tab = sequence[(at + 1) % count]; detail::selectedItem = -1; }
         }
 
         const ImVec2 screen = ImGui::GetIO().DisplaySize;
@@ -363,7 +389,7 @@ namespace InventoryComponent {
         const float height = screen.y - top - detail::MARGIN - 28.0f;
 
         if (GuiCards::backButton(ImVec2(detail::MARGIN, detail::MARGIN - 8.0f))) state = back;
-        GuiCards::text(dl, ImVec2(detail::MARGIN + 140.0f, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), "MOCHILA", 1.6f);
+        GuiCards::text(dl, ImVec2(detail::MARGIN + 140.0f, detail::MARGIN - 6.0f), IM_COL32(255, 255, 255, 255), inFarm ? "MOCHILA DE LA GRANJA" : "MOCHILA", 1.6f);
         char money[48];
         std::snprintf(money, sizeof(money), "Pokémonedas: %d", inventory.money());
         GuiCards::text(dl, ImVec2(screen.x - detail::MARGIN - GuiCards::textWidth(money, 1.2f), detail::MARGIN - 4.0f), IM_COL32(255, 215, 90, 255), money, 1.2f);
@@ -373,7 +399,7 @@ namespace InventoryComponent {
 
         const ImVec2 gridPos(detail::MARGIN, top + detail::SECTION_HEIGHT + 12.0f + detail::TAB_SIZE + 16.0f);
         const ItemCategoryInfo& category = data.categories[detail::tab];
-        const std::vector<detail::Entry> list = detail::entries(inventory, category.id);
+        const std::vector<detail::Entry> list = detail::entries(data, inventory, category.id);
 
         const detail::Entry* picked = nullptr;
         for (const detail::Entry& entry : list) if (entry.item->id == detail::selectedItem) picked = &entry;

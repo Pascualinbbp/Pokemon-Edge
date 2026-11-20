@@ -56,6 +56,7 @@ class PokemonStorage {
     public:
     static constexpr int TEAM_SIZE = 6;
     static constexpr int PC_CAPACITY = 120;
+    static constexpr int FARM_SLOTS = 6; // pokémon que pueden trabajar en la granja
 
     enum class LevelResult { NONE, LEVELED, EVOLVED };
 
@@ -63,6 +64,7 @@ class PokemonStorage {
         m_data = &data;
         m_team.clear();
         m_pc.clear();
+        m_farm.clear();
         m_autoMin = IvRules::Rank::D;
         m_active = 0;
         m_dex.assign(data.species.size(), DEX_UNSEEN);
@@ -86,9 +88,29 @@ class PokemonStorage {
 
     const std::vector<OwnedPokemon>& team() const { return m_team; }
     const std::vector<OwnedPokemon>& pc() const { return m_pc; }
+    const std::vector<OwnedPokemon>& farm() const { return m_farm; } // los que trabajan en la granja (salen del PC; no cuentan como equipo)
+    bool farmFull() const { return static_cast<int>(m_farm.size()) >= FARM_SLOTS; }
+
+    // Manda un pokémon del PC a trabajar en la granja (al hueco 'slot' si está libre; si está ocupado, intercambian). Devuelve false si no se pudo.
+    bool sendToFarm(int pcIndex, int slot = -1) {
+        if (pcIndex < 0 || pcIndex >= static_cast<int>(m_pc.size())) return false;
+        if (slot >= 0 && slot < static_cast<int>(m_farm.size())) { std::swap(m_pc[pcIndex], m_farm[slot]); return true; }
+        if (farmFull()) return false;
+        m_farm.push_back(m_pc[pcIndex]);
+        m_pc.erase(m_pc.begin() + pcIndex);
+        return true;
+    }
+
+    // Devuelve un trabajador al PC.
+    bool recallFromFarm(int slot) {
+        if (slot < 0 || slot >= static_cast<int>(m_farm.size()) || pcFull()) return false;
+        m_pc.push_back(m_farm[slot]);
+        m_farm.erase(m_farm.begin() + slot);
+        return true;
+    }
     bool teamFull() const { return static_cast<int>(m_team.size()) >= TEAM_SIZE; }
     bool pcFull() const { return static_cast<int>(m_pc.size()) >= PC_CAPACITY; }
-    bool empty() const { return m_team.empty() && m_pc.empty(); }
+    bool empty() const { return m_team.empty() && m_pc.empty() && m_farm.empty(); }
 
     // El pokémon que acompaña al jugador: uno del equipo. Cambiarlo no altera el orden del equipo.
     const OwnedPokemon* active() const { return m_team.empty() ? nullptr : &m_team[m_active]; }
@@ -485,6 +507,13 @@ class PokemonStorage {
     }
 
     // Pokédex guardada por nombre de especie: las vistas y las capturadas.
+    void storeFarm(std::vector<std::string>& farm) const { farm = encode(m_farm); }
+    void restoreFarm(const std::vector<std::string>& farm) {
+        m_farm.clear();
+        for (const std::string& text : farm) if (!farmFull()) decode(text, m_farm);
+        for (const OwnedPokemon& owned : m_farm) markDex(owned.speciesId, DEX_CAUGHT);
+    }
+
     void storeDex(std::vector<std::string>& seen, std::vector<std::string>& caught) const {
         seen.clear();
         caught.clear();
@@ -630,6 +659,7 @@ class PokemonStorage {
     const GameData* m_data = &GameData::empty();
     std::vector<OwnedPokemon> m_team;
     std::vector<OwnedPokemon> m_pc;
+    std::vector<OwnedPokemon> m_farm;
     IvRules::Rank m_autoMin = IvRules::Rank::D;
     MedicineUse m_medicine;
     bool m_medicinePending = false;

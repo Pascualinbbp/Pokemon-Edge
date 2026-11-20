@@ -56,6 +56,8 @@ class GameEngine {
         scene.inventory.restore(save.items, save.selectedBall, save.money);
         scene.storage.restore(save.team, save.pc, save.autoReleaseRank, save.activeIndex);
         scene.storage.restoreDex(save.dexSeen, save.dexCaught);
+        scene.storage.restoreFarm(save.farm);
+        scene.farmWork.restore(save.farmClock);
         scene.storage.dexProgress.restore(save.dexProgress);
         scene.progress.restore(save.playerLevel, save.playerXp, save.badgeMask);
         return scene;
@@ -73,6 +75,8 @@ class GameEngine {
         m_scene.inventory.store(save.items, save.selectedBall, save.money);
         m_scene.storage.store(save.team, save.pc);
         m_scene.storage.storeDex(save.dexSeen, save.dexCaught);
+        m_scene.storage.storeFarm(save.farm);
+        save.farmClock = m_scene.farmWork.clock(m_scene.inFarm());
         m_scene.storage.dexProgress.store(save.dexProgress);
         save.autoReleaseRank = m_scene.storage.autoRankIndex();
         save.activeIndex = m_scene.storage.activeIndex();

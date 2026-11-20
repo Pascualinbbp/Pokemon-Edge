@@ -1000,6 +1000,7 @@ void Renderer3D::init(ID3D11Device* device) {
     m_ocean = createOcean(device);
     m_cone = createCone(device);
     m_cube = createCube(device);
+    m_island = createIsland(device);
     m_sphere = createSphere(device);
     m_dome = createSphere(device, true);
     m_star = createStar(device);
@@ -1200,14 +1201,15 @@ bool Renderer3D::addToolModel(const Scene& scene, PlayerAction action, const std
         }
         const SkinUtil::Clip* clip = clipName ? m_models.clip(name, clipName) : nullptr;
         const float time = clip ? (std::clamp)(fraction, 0.0f, 1.0f) * clip->duration : 0.0f;
-        XMFLOAT3 end = {};
+        XMFLOAT3 end = {}, up = {};
         const XMFLOAT3* lineEnd = nullptr;
         if (fishing.active()) { // el corcho va al agua: el punto donde cayó, en coordenadas del modelo
             const XMFLOAT3& b = fishing.bobber();
             XMStoreFloat3(&end, XMVector3Transform(XMVectorSet(b.x, b.y, b.z, 1.0f), XMMatrixInverse(nullptr, grip * orient * hand)));
             lineEnd = &end;
+            XMStoreFloat3(&up, XMVector3TransformNormal(XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f), XMMatrixInverse(nullptr, grip * orient * hand))); // el corcho flota derecho en el mundo, sin seguir el giro de la caña
         }
-        model->pose(m_context, clip, time, false, nullptr, lineEnd);
+        model->pose(m_context, clip, time, false, nullptr, lineEnd, lineEnd ? &up : nullptr);
     }
     addModel(*model, world, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
     return true;
@@ -1384,15 +1386,19 @@ void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, int speci
 // Nunca desaparece: un árbol talado deja el tocón y vuelve a crecer, una roca o mena regenera su mineral y un arbusto
 // recogido se queda sin frutos hasta que le vuelven a crecer.
 namespace {
-constexpr int CHERRY_TREE_ID = 11;         // tipo de nodo del cerezo
-constexpr float CHERRY_TREE_SCALE = 2.0f;  // los modelos del cerezo vienen a medio tamaño: la etapa 3 (1,8 m) pasa a 3,6 m, la altura de su hitbox
+// Árboles con modelo .glb por etapa (assets/models/trees/<id>_<etapa>.glb, 3 etapas de crecimiento; ya vienen a su tamaño): palmera, cerezo, árbol de jungla y manzano.
+constexpr bool hasTreeModel(int typeId) { return typeId == 10 || typeId == 11 || typeId == 13 || typeId == 28; }
+constexpr float CHERRY_FRUIT_SCALE = 2.0f; // cereza.glb viene a medio tamaño
+constexpr float APPLE_FRUIT_SCALE = 1.5f;  // la manzana (10 cm) se agranda un poco para que se vea colgando del árbol
 constexpr const char* CHERRY_MODEL = "fruits/cherry"; // assets/models/fruits/cherry.glb
+constexpr const char* APPLE_MODEL = "fruits/apple";   // assets/models/fruits/apple.glb
 }
 
 void Renderer3D::addNode(const ResourceNode& node) {
     const ResourceStyle::Look look = ResourceStyle::look(node.typeId());
     const XMFLOAT3& p = node.body.position;
-    const float g = node.growth();
+    // Un árbol plantado en una parcela nace como brote (no como tocón): su crecimiento se dibuja desde el tamaño pequeño del árbol joven.
+    const float g = node.plot() && ResourceStyle::isTree(look.shape) ? ResourceStyle::STUMP_UNTIL + (1.0f - ResourceStyle::STUMP_UNTIL) * node.growth() : node.growth();
     const XMMATRIX base = XMMatrixTranslation(node.shakeOffset(), 0.0f, 0.0f) * XMMatrixRotationY(node.yaw()) * XMMatrixTranslation(p.x, p.y, p.z);
 
     // Bloque (tamaño, giro, posición local, color, brillo) bajo una transformación de grupo.
@@ -1403,6 +1409,15 @@ void Renderer3D::addNode(const ResourceNode& node) {
     const auto part = [&](const XMFLOAT3& size, float yaw, const XMFLOAT3& at, const XMFLOAT3& color, float glow) { draw(base, size, yaw, at, color, glow); };
 
     using Shape = ResourceStyle::Shape;
+    if (node.fruitReady()) { // frutal maduro de la granja: se ve la fruta en el árbol (se recoge con interactuar)
+        const Fruit::Kind kind = node.typeId() == 10 ? Fruit::Kind::COCONUT : node.typeId() == 13 ? Fruit::Kind::BANANA : node.typeId() == 28 ? Fruit::Kind::APPLE : Fruit::Kind::CHERRY;
+        const int count = kind == Fruit::Kind::COCONUT ? 3 : kind == Fruit::Kind::BANANA ? 2 : 7;
+        for (int i = 0; i < count; ++i) {
+            const float angle = node.yaw() + i * 2.4f, out = kind == Fruit::Kind::COCONUT ? 0.4f : kind == Fruit::Kind::BANANA ? 0.7f : 1.0f + 0.25f * (i % 4);
+            const float up = look.height * (kind == Fruit::Kind::COCONUT ? 0.9f : kind == Fruit::Kind::BANANA ? 0.78f : 0.55f + 0.05f * (i % 5));
+            addFruit(Fruit(kind, 0, XMFLOAT3{ p.x + std::sin(angle) * out, p.y + up, p.z + std::cos(angle) * out }, 0.0f, 0.0f));
+        }
+    }
     if (ResourceStyle::isTree(look.shape)) {
         using ResourceStyle::STUMP_HEIGHT;
         if (ResourceStyle::stump(look, g)) {
@@ -1410,12 +1425,12 @@ void Renderer3D::addNode(const ResourceNode& node) {
             part({ 0.4f, 0.03f, 0.4f }, 0.0f, { 0.0f, STUMP_HEIGHT + 0.01f, 0.0f }, { look.body.x * 1.35f, look.body.y * 1.3f, look.body.z * 1.2f }, 0.0f);
             return;
         }
-        if (node.typeId() == CHERRY_TREE_ID) { // cerezo: modelo .glb por etapa (assets/models/trees/11_<etapa>.glb), 3 etapas de crecimiento
+        if (hasTreeModel(node.typeId())) { // modelo .glb por etapa (assets/models/trees/<id>_<etapa>.glb)
             const float t = (g - ResourceStyle::STUMP_UNTIL) / (1.0f - ResourceStyle::STUMP_UNTIL); // 0..1 desde que brota del tocón
             const int stage = t < 0.3f ? 1 : t < 0.65f ? 2 : 3;
             const float lo = stage == 1 ? 0.0f : stage == 2 ? 0.3f : 0.65f, hi = stage == 1 ? 0.3f : stage == 2 ? 0.65f : 1.0f;
-            const float s = CHERRY_TREE_SCALE * (0.85f + 0.15f * std::clamp((t - lo) / (hi - lo), 0.0f, 1.0f)); // crece un poco dentro de cada etapa
-            if (const RenderModel* model = m_models.get(m_device, "trees/11_" + std::to_string(stage), false)) {
+            const float s = (0.85f + 0.15f * std::clamp((t - lo) / (hi - lo), 0.0f, 1.0f)); // crece un poco dentro de cada etapa
+            if (const RenderModel* model = m_models.get(m_device, "trees/" + std::to_string(node.typeId()) + "_" + std::to_string(stage), false)) {
                 addModel(*model, XMMatrixTranslation(0.0f, -model->boundsMin.y, 0.0f) * XMMatrixScaling(s, s, s) * base, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
                 return;
             }
@@ -1662,7 +1677,7 @@ void Renderer3D::addFruit(const Fruit& fruit) {
     } else if (fruit.kind() == Fruit::Kind::CHERRY) { // modelo cherry.glb (a la misma escala que el cerezo); sin archivo, pareja de esferas
         if (const RenderModel* model = m_models.get(m_device, CHERRY_MODEL, false)) {
             const XMFLOAT3 c = model->center();
-            const float s = k * CHERRY_TREE_SCALE;
+            const float s = k * CHERRY_FRUIT_SCALE;
             addModel(*model, XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(s, s, s) * XMMatrixRotationY(fruit.yaw()) * XMMatrixRotationX(fruit.spin()) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
             return;
         }
@@ -1671,6 +1686,14 @@ void Renderer3D::addFruit(const Fruit& fruit) {
         add(m_sphere, XMMatrixScaling(c, c, c) * XMMatrixTranslation(-c * 0.9f, 0.0f, 0.0f) * at, { 0.85f, 0.05f, 0.12f, 0.0f });
         add(m_sphere, XMMatrixScaling(c, c, c) * XMMatrixTranslation(c * 0.9f, 0.0f, c * 0.3f) * at, { 0.85f, 0.05f, 0.12f, 0.0f });
         add(m_cube, XMMatrixScaling(r * 0.1f, r * 1.1f, r * 0.1f) * XMMatrixTranslation(0.0f, c * 1.4f, 0.0f) * at, { 0.20f, 0.45f, 0.15f, 0.0f }, false);
+    } else if (fruit.kind() == Fruit::Kind::APPLE) { // modelo apple.glb; sin archivo, esfera roja
+        if (const RenderModel* model = m_models.get(m_device, APPLE_MODEL, false)) {
+            const XMFLOAT3 c = model->center();
+            const float s = k * APPLE_FRUIT_SCALE;
+            addModel(*model, XMMatrixTranslation(-c.x, -c.y, -c.z) * XMMatrixScaling(s, s, s) * XMMatrixRotationY(fruit.yaw()) * XMMatrixRotationX(fruit.spin()) * XMMatrixTranslation(p.x, p.y, p.z), { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
+            return;
+        }
+        add(m_sphere, XMMatrixScaling(r, r, r) * XMMatrixTranslation(p.x, p.y, p.z), { 0.82f, 0.10f, 0.12f, 0.0f });
     } else if (const RenderModel* bananas = m_models.get(m_device, BANANA_MODEL, false); bananas && (fruit.piece() || fruit.bunch())) {
         // assets/models/fruits/banana_bunch.glb: nodos corona y platano_1..5. El racimo dibuja solo los plátanos que le quedan; uno suelto es su nodo, tumbado.
         const XMMATRIX spin = XMMatrixScaling(k, k, k) * XMMatrixRotationY(fruit.yaw()) * XMMatrixTranslation(p.x, p.y, p.z);
@@ -1896,37 +1919,50 @@ void Renderer3D::addPortal(const Portal& portal, const XMFLOAT3& accent) {
     }
 }
 
-// La granja: un recinto cuadrado llano (mundo plano aparte, ver Physics::World::Flat) que flota en el cielo. Suelo de hierba con borde de piedra y
-// por debajo la tierra, que se estrecha en escalones.
+// La granja: una malla plana, sin grosor, con el contorno redondeado y abstracto de una isla (ver Physics::World::Flat). Los cultivos van encima.
 void Renderer3D::addFarm(const Scene& scene) {
     const Physics::World::Flat& flat = scene.world.flat;
     if (!flat.active) return;
     const float dx = scene.player.body.position.x - flat.x, dz = scene.player.body.position.z - flat.z;
-    if (std::fabs(dx) > flat.half + 160.0f || std::fabs(dz) > flat.half + 160.0f) return; // lejos: ni se ve
-    const float side = flat.half * 2.0f;
-    const auto slab = [&](float size, float thickness, float top, const XMFLOAT3& color) {
-        add(m_cube, XMMatrixScaling(size, thickness, size) * XMMatrixTranslation(flat.x, flat.y + top - thickness * 0.5f, flat.z), { color.x, color.y, color.z, 0.0f });
-    };
-    slab(side, 3.0f, 0.0f, { 0.30f, 0.64f, 0.27f });                // hierba
-    slab(side - 1.0f, 4.0f, -3.0f, { 0.38f, 0.26f, 0.16f });         // tierra
-    slab(side * 0.7f, 4.0f, -7.0f, { 0.33f, 0.22f, 0.14f });
-    slab(side * 0.4f, 4.0f, -11.0f, { 0.30f, 0.20f, 0.13f });
-    slab(side * 0.18f, 4.0f, -15.0f, { 0.27f, 0.18f, 0.12f });
-    const float edge = 0.7f, off = flat.half - edge * 0.5f;          // borde de piedra
-    const XMFLOAT3 stone = { 0.55f, 0.55f, 0.58f };
-    const auto bar = [&](float sx, float sz, float x, float z) {
-        add(m_cube, XMMatrixScaling(sx, 0.35f, sz) * XMMatrixTranslation(flat.x + x, flat.y + 0.175f, flat.z + z), { stone.x, stone.y, stone.z, 0.0f });
-    };
-    bar(side, edge, 0.0f, off); bar(side, edge, 0.0f, -off);
-    bar(edge, side - 2.0f * edge, off, 0.0f); bar(edge, side - 2.0f * edge, -off, 0.0f);
+    if (std::fabs(dx) > flat.half * 1.3f + 160.0f || std::fabs(dz) > flat.half * 1.3f + 160.0f) return; // lejos: ni se ve
+    add(m_island, XMMatrixScaling(flat.half, 1.0f, flat.half) * XMMatrixTranslation(flat.x, flat.y, flat.z), { 0.30f, 0.64f, 0.27f, 0.0f });
+    if (!scene.inFarm()) return;
+    // Los pokémon que trabajan en la granja: caminan a su parcela, trabajan (se balancean) y descansan.
+    const std::vector<FarmWork::Worker>& crew = scene.farmWork.workers();
+    for (size_t i = 0; i < crew.size() && i < scene.storage.farm().size(); ++i) {
+        const FarmWork::Worker& w = crew[i];
+        const OwnedPokemon& owned = scene.storage.farm()[i];
+        const float bob = w.working ? std::sin(m_clock * 14.0f + static_cast<float>(i)) * 0.07f : 0.0f;
+        addCreature({ w.x, flat.y + FarmWork::SIZE * 0.5f + bob, w.z }, FarmWork::SIZE, w.yaw, owned.speciesId, owned.shiny);
+    }
+}
+
+// Malla de la isla de la granja: un abanico plano de radio medio 1 (se escala al dibujar) con el contorno de Flat::edgeAt.
+Renderer3D::Mesh Renderer3D::createIsland(ID3D11Device* device) {
+    constexpr int SEGMENTS = 96;
+    constexpr float PI = 3.14159265f;
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+    const XMFLOAT4 color = { 1.0f, 1.0f, 1.0f, 1.0f };
+    vertices.push_back({ { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, color });
+    for (int i = 0; i < SEGMENTS; ++i) {
+        const float angle = 2.0f * PI * static_cast<float>(i) / static_cast<float>(SEGMENTS);
+        const float r = Physics::World::Flat::edgeAt(1.0f, angle);
+        vertices.push_back({ { std::cos(angle) * r, 0.0f, std::sin(angle) * r }, { 0.0f, 1.0f, 0.0f }, color });
+    }
+    const XMFLOAT3 below = { 0.0f, -5.0f, 0.0f }; // el lado de abajo: las caras miran hacia arriba
+    for (int i = 0; i < SEGMENTS; ++i) addOutward(indices, vertices, 0, 1 + i, 1 + (i + 1) % SEGMENTS, below);
+    return createMesh(device, vertices.data(), static_cast<UINT>(vertices.size()), sizeof(Vertex), indices);
 }
 
 // Cofre: cuerpo, cerradura y tapa con bisagra atrás; al abrirse suelta chispas del color de su rareza.
 // Tierra labrada de una parcela de cultivo: un cuadrado oscuro con surcos más claros.
 void Renderer3D::addPlot(const Crops::Plot& plot) {
     const XMMATRIX at = XMMatrixTranslation(plot.position.x, plot.position.y, plot.position.z);
-    add(m_cube, XMMatrixScaling(Crops::PLOT_SIZE, 0.12f, Crops::PLOT_SIZE) * XMMatrixTranslation(0.0f, 0.06f, 0.0f) * at, { 0.30f, 0.19f, 0.11f, 0.0f });
-    for (int i = -1; i <= 1; ++i) add(m_cube, XMMatrixScaling(Crops::PLOT_SIZE * 0.92f, 0.03f, 0.1f) * XMMatrixTranslation(0.0f, 0.125f, i * 0.42f) * at, { 0.40f, 0.27f, 0.16f, 0.0f });
+    const float size = plot.tree ? Crops::TREE_PLOT_SIZE : Crops::PLOT_SIZE; // las parcelas de árbol son más grandes
+    add(m_cube, XMMatrixScaling(size, 0.12f, size) * XMMatrixTranslation(0.0f, 0.06f, 0.0f) * at, { 0.30f, 0.19f, 0.11f, 0.0f });
+    const int rows = plot.tree ? 3 : 1;
+    for (int i = -rows; i <= rows; ++i) add(m_cube, XMMatrixScaling(size * 0.92f, 0.03f, 0.1f) * XMMatrixTranslation(0.0f, 0.125f, i * (plot.tree ? 0.42f : 0.42f)) * at, { 0.40f, 0.27f, 0.16f, 0.0f });
 }
 
 void Renderer3D::addChest(const Chest& chest) {
@@ -2340,6 +2376,7 @@ void Renderer3D::cleanup() {
     m_dome = {};
     m_star = {};
     m_cube = {};
+    m_island = {};
     m_cone = {};
     m_ocean = {};
     m_water.clear();

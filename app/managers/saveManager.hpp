@@ -51,6 +51,8 @@ class SaveManager {
         j["inventory"]["money"] = data.money;
         j["pokemon"]["team"] = data.team;
         j["pokemon"]["pc"] = data.pc;
+        j["pokemon"]["farm"] = data.farm;
+        j["pokemon"]["farmClock"] = data.farmClock;
         j["pokemon"]["dexSeen"] = data.dexSeen;
         j["pokemon"]["dexCaught"] = data.dexCaught;
         j["pokemon"]["dexProgress"] = data.dexProgress;
@@ -89,6 +91,8 @@ class SaveManager {
         data.money = JsonUtil::find<int>(j, { "inventory", "money" }).value_or(0);
         data.team = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "team" }).value_or(std::vector<std::string>{});
         data.pc = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "pc" }).value_or(std::vector<std::string>{});
+        data.farm = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "farm" }).value_or(std::vector<std::string>{});
+        data.farmClock = JsonUtil::find<long long>(j, { "pokemon", "farmClock" }).value_or(0);
         data.dexSeen = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "dexSeen" }).value_or(std::vector<std::string>{});
         data.dexCaught = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "dexCaught" }).value_or(std::vector<std::string>{});
         data.dexProgress = JsonUtil::find<std::vector<std::string>>(j, { "pokemon", "dexProgress" }).value_or(std::vector<std::string>{});

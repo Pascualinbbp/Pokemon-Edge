@@ -52,6 +52,7 @@
 #include "entities/playerAction.hpp"
 #include "entities/pokeball.hpp"
 #include "state/pokemonStorage.hpp"
+#include "state/farmWork.hpp"
 #include "state/battle.hpp"
 #include "entities/trainer.hpp"
 #include <memory>
@@ -96,6 +97,7 @@ struct Scene {
     ChestField chests;        // cofres: aparecen dinámicamente según el hábitat
     std::vector<ResourceNode> nodes; // materiales de recolección, colocados al generar el mundo (al final, los nodos vacíos de las parcelas)
     std::vector<Crops::Plot> plots;  // parcelas de cultivo junto al inicio
+    FarmWork farmWork;               // pokémon que trabajan en la granja
     Exploration exploration;  // lo que el jugador ha explorado (el mapa grande lo muestra)
     Fishing fishing;          // pesca: corcho, picada y pokémon enganchado
     SpawnField<GroundItem> groundItems;
@@ -260,6 +262,7 @@ struct Scene {
         weather.update(dt);
         throwCooldown = (std::max)(0.0f, throwCooldown - dt);
         noticeTime = (std::max)(0.0f, noticeTime - dt);
+        updateFarmWork(dt);
         if (m_aiming && input.throwBall && !wheel && !aimingAtTrainerPokemon()) m_throwQueued = THROW_BUFFER; // el clic se recuerda unos instantes: lanzar no depende de si caminamos, corremos o nadamos
         m_throwQueued = (std::max)(0.0f, m_throwQueued - dt);
         if (!m_aiming) m_throwQueued = 0.0f;
@@ -416,6 +419,12 @@ struct Scene {
         fillWorldState(s);
         s.habitatMap = &habitats;
         s.exploration = &exploration;
+        if (inFarm()) {
+            s.farm = true;
+            s.farmX = world.flat.x; s.farmZ = world.flat.z; s.farmHalf = world.flat.half;
+            for (const Crops::Plot& plot : plots) s.farmMarks.push_back({ plot.position.x, plot.position.z, 0.0f });
+            s.farmMarks.push_back({ farmGate.body.position.x, farmGate.body.position.z, 1.0f });
+        }
         for (const Physics::World::Box& wall : world.obstacles) s.mapBlocks.push_back({ wall.center.x, wall.center.z, wall.half.x, wall.half.z });
         s.mapBlocks.push_back({ ResearchMachine::POSITION.x, ResearchMachine::POSITION.z, ResearchMachine::WIDTH * 0.5f, ResearchMachine::DEPTH * 0.5f });
         s.playerX = player.body.position.x;
@@ -440,7 +449,7 @@ struct Scene {
             s.interactTarget = &m_data->chests[chests.entities[ia.index].typeIndex()].name;
         } else if (ia.kind == Interaction::PLOT) {
             s.interactVerb = PLANT_VERB;
-            const std::vector<int> seedCrops = availableSeeds();
+            const std::vector<int> seedCrops = availableSeeds(plots[ia.index].tree);
             const Material* seeds = seedCrops.size() == 1 ? seedMaterial(seedCrops.front()) : nullptr;
             s.interactTarget = seeds ? &seeds->name : &PLOT_NAME;
         } else if (ia.kind == Interaction::NODE) {
@@ -451,6 +460,7 @@ struct Scene {
             s.interactTarget = &type.name;
             const Material* material = m_data->material(type.materialId);
             if (!skill && material && type.action == PICK_VERB) s.interactTarget = &material->name; // "Recoger Baya"; los árboles siguen en "Talar Roble"
+            if (node.fruitTree() && !node.growing()) { s.interactVerb = PICK_VERB; s.interactTarget = &treeFruitName(node.typeId()); } // frutal crecido: "Recoger Coco"
         } else if (ia.kind == Interaction::GROUND) {
             s.interactVerb = PICK_VERB;
             s.interactTarget = &GROUND_NAME;
@@ -674,8 +684,38 @@ struct Scene {
         m_warpTo = to;
         m_warp = 0.0f;
         m_warpMoved = false;
+        if (fishing.active()) endFishing(true);
         aimMode = false;
         lockedTarget = nullptr;
+    }
+
+    // --- Trabajadores de la granja ---
+    // Al llegar a la granja se entrega lo que trabajaron mientras estabas fuera (con tope); al irse se anota el momento. Dentro, se ven trabajando.
+    void updateFarmWork(float dt) {
+        const bool here = inFarm() && m_warpTo != WARP_HOME;
+        if (here && !m_wasFarm) {
+            const std::map<int, int> made = farmWork.settle(*m_data, storage);
+            std::string text;
+            for (const auto& [material, count] : made) {
+                const Item* item = m_data->materialItem(material);
+                if (!item || !inventory.add(item->id, count)) continue;
+                text += (text.empty() ? "" : ", ") + std::to_string(count) + "x " + m_data->itemName(*item);
+            }
+            if (!text.empty()) showNotice(Notice::REWARD, "Trabajadores: " + text);
+        } else if (!here && m_wasFarm) farmWork.leave();
+        m_wasFarm = here;
+        if (!here || storage.farm().empty()) return;
+        std::vector<std::pair<float, float>> spots;
+        for (const Crops::Plot& plot : plots) spots.emplace_back(plot.position.x, plot.position.z);
+        farmWork.update(dt, *m_data, storage, spots, world.flat.x, world.flat.z, [&](int, int plotIndex, const PokemonSpecies& species) {
+            if (FarmWork::skillOf(species) == FarmWork::SKILL_WATER && plotIndex >= 0 && plotIndex < static_cast<int>(plots.size())) {
+                ResourceNode& node = nodes[static_cast<size_t>(plots[static_cast<size_t>(plotIndex)].node)];
+                if (node.growing() && node.canWork(false)) node.work(false, 1.0f + FarmWork::LEVEL_SPEEDUP * static_cast<float>((std::max)(1, species.skillLevel) - 1)); // riega: la planta crece antes
+            }
+            const std::pair<int, int> made = FarmWork::product(species);
+            if (made.first < 0) return;
+            if (const Item* item = m_data->materialItem(made.first)) inventory.add(item->id, made.second);
+        });
     }
 
     void updateWarp(float dt) {
@@ -950,7 +990,7 @@ struct Scene {
         const DirectX::XMFLOAT3& p = player.body.position;
         const bool standing = !player.swimming() && !player.climbing() && player.body.onGround;
         DirectX::XMFLOAT3 water;
-        m_castHint = !fishing.active() && rodLevel() > 0 && standing && m_interaction.kind == Interaction::NONE && Fishing::findWater(world, p.x, p.z, yaw, water, player.body.feet());
+        m_castHint = !fishing.active() && !inFarm() && rodLevel() > 0 && standing && m_interaction.kind == Interaction::NONE && Fishing::findWater(world, p.x, p.z, yaw, water, player.body.feet());
 
         if (fishing.active() && rodLevel() <= 0) endFishing(true);
         if (fishing.active()) {
@@ -1082,7 +1122,7 @@ struct Scene {
         }
         if (!nodeTarget && species && mode == CompanionRules::Mode::COLLECT && m_collecting) {
             for (ResourceNode& node : nodes) {
-                if (!node.canWork(false) || !inRange(node.body.position)) continue;
+                if (!node.canWork(false) || !treeWorkable(node, false) || !inRange(node.body.position)) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
                 const int skillLevel = species->levelIn(type.skillId);
                 if (node.growing() || !node.plant()) {
@@ -1380,6 +1420,29 @@ struct Scene {
 
     // ¿Puede el jugador trabajar este nodo ahora? Regar una planta o extraer exigen su herramienta (nivel mínimo);
     // recoger una planta crecida no exige nada.
+    // Los árboles solo se tocan en la granja (los del mundo principal no admiten ninguna interacción), y solo los sembrados en sus parcelas; el frutal
+    // crecido no se tala (quien no es el jugador tampoco le recoge la fruta).
+    static bool treeWorkable(const ResourceNode& node, bool byPlayer) {
+        if (!ResourceStyle::isTree(ResourceStyle::look(node.typeId()).shape)) return true;
+        return node.plot() && (byPlayer || !node.fruitTree());
+    }
+
+    const std::string& treeFruitName(int treeType) const { return treeType == PALM_TYPE ? COCONUT_NAME : treeType == JUNGLE_TYPE ? BANANA_NAME : treeType == APPLE_TYPE ? APPLE_NAME : CHERRY_NAME; }
+
+    // Recoge la fruta madura directamente del árbol (solo existe en la granja).
+    void collectTreeFruit(ResourceNode& tree) {
+        if (!tree.takeFruit()) return;
+        const int amount = tree.typeId() == PALM_TYPE ? RandomUtil::integer(2, 4) : RandomUtil::integer(4, 8);
+        const std::string& name = treeFruitName(tree.typeId());
+        for (const Material& material : m_data->materials) {
+            if (material.name != name) continue;
+            if (const Item* item = m_data->materialItem(material.id)) giveReward(item->id, amount);
+            break;
+        }
+        Sound::emit(Sound::Sfx::PICK, tree.body.position);
+        gainXp(Xp::GATHER);
+    }
+
     bool playerCanWork(const ResourceNode& node) const {
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
         return (node.plant() && !node.growing()) || inventory.skillLevel(type.skillId) >= type.level;
@@ -1423,7 +1486,7 @@ struct Scene {
             const float tx = trainers[i].body.position.x - player.body.position.x, tz = trainers[i].body.position.z - player.body.position.z, d2 = tx * tx + tz * tz;
             if (d2 <= trainers[i].reach() * trainers[i].reach() && d2 < best) { best = d2; m_interaction = { Interaction::TRAINER, i }; }
         }
-        if (const int i = nearestIn(nodes, [](const ResourceNode& n) { return n.canWork(true); }, best); i >= 0) {
+        if (const int i = nearestIn(nodes, [this](const ResourceNode& n) { return n.canWork(true) && treeWorkable(n, true); }, best); i >= 0) {
             const ResourceNode& node = nodes[i];
             if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
             else {
@@ -1433,11 +1496,13 @@ struct Scene {
                 m_missingPos = nodeAnchor(node);
             }
         }
-        if (availableSeeds().empty()) m_seedCrop = -1;
-        else for (int i = 0; i < static_cast<int>(plots.size()); ++i) { // parcela vacía y con alguna semilla: se puede sembrar lo que se elija
-            if (!nodes[plots[i].node].gone()) continue;
+        const bool hasSeeds[2] = { !availableSeeds(false).empty(), !availableSeeds(true).empty() };
+        if (!hasSeeds[0] && !hasSeeds[1]) m_seedCrop = -1;
+        else for (int i = 0; i < static_cast<int>(plots.size()); ++i) { // parcela vacía y con alguna semilla de su clase: se puede sembrar lo que se elija
+            if (!nodes[plots[i].node].gone() || !hasSeeds[plots[i].tree ? 1 : 0]) continue;
+            const float reach = plots[i].tree ? Crops::TREE_REACH : Crops::REACH;
             const float dx = plots[i].position.x - player.body.position.x, dz = plots[i].position.z - player.body.position.z, d2 = dx * dx + dz * dz;
-            if (d2 <= Crops::REACH * Crops::REACH && d2 < best) { best = d2; m_interaction = { Interaction::PLOT, i }; }
+            if (d2 <= reach * reach && d2 < best) { best = d2; m_interaction = { Interaction::PLOT, i }; }
         }
         if (m_weak) m_interaction = { Interaction::WEAKENED, 0 }; // capturar al debilitado tiene prioridad
     }
@@ -1460,9 +1525,11 @@ struct Scene {
     }
 
     // Cultivos de los que el jugador tiene semillas.
-    std::vector<int> availableSeeds() const {
+    // 'tree': las de árbol (parcelas grandes) o las de cultivos pequeños.
+    std::vector<int> availableSeeds(bool tree) const {
         std::vector<int> crops;
         for (int crop = 0; crop < Crops::COUNT; ++crop) {
+            if (Crops::LIST[crop].tree != tree) continue;
             const Item* seeds = seedItem(crop);
             if (seeds && inventory.count(seeds->id) > 0 && Crops::typeIndexOf(*m_data, crop) >= 0) crops.push_back(crop);
         }
@@ -1473,7 +1540,8 @@ struct Scene {
     struct SeedChoice { int crop; const Item* item; std::string name; int count; };
     std::vector<SeedChoice> seedChoices() const {
         std::vector<SeedChoice> choices;
-        for (const int crop : availableSeeds()) {
+        const bool tree = m_pendingPlot >= 0 && m_pendingPlot < static_cast<int>(plots.size()) && plots[m_pendingPlot].tree;
+        for (const int crop : availableSeeds(tree)) {
             const Item* item = seedItem(crop);
             choices.push_back({ crop, item, item->name, inventory.count(item->id) });
         }
@@ -1491,7 +1559,7 @@ struct Scene {
 
     private:
     void sow(const Crops::Plot& plot) {
-        const std::vector<int> seeds = availableSeeds();
+        const std::vector<int> seeds = availableSeeds(plot.tree);
         if (std::find(seeds.begin(), seeds.end(), m_seedCrop) == seeds.end()) return;
         ResourceNode& node = nodes[plot.node];
         const Item* item = seedItem(m_seedCrop);
@@ -1499,7 +1567,8 @@ struct Scene {
         const int typeIndex = Crops::typeIndexOf(*m_data, m_seedCrop);
         const ResourceNodeType& type = m_data->nodes[typeIndex];
         inventory.add(item->id, -1);
-        node.sow(typeIndex, type.id, type.hits, static_cast<float>(type.growSeconds), RandomUtil::range(0.0f, 6.2831853f));
+        const float grow = plot.tree ? Crops::TREE_GROW_SECONDS : static_cast<float>(type.growSeconds); // los árboles tardan bastante más que los cultivos
+        node.sow(typeIndex, type.id, type.hits, grow, RandomUtil::range(0.0f, 6.2831853f), Crops::fruitTreeNode(type.id));
         player.act(PlayerAction::PICK);
         Sound::emit(Sound::Sfx::PICK, node.body.position);
     }
@@ -1540,12 +1609,17 @@ struct Scene {
             else startDuel(m_interaction.index);
         }
         else if (m_interaction.kind == Interaction::PLOT) {
-            const std::vector<int> seeds = availableSeeds();
+            const std::vector<int> seeds = availableSeeds(plots[m_interaction.index].tree);
             if (seeds.size() == 1) { m_seedCrop = seeds.front(); sow(plots[m_interaction.index]); }
             else if (seeds.size() > 1) { m_pendingPlot = m_interaction.index; seedRequested = true; } // varias semillas: la interfaz deja elegir
         }
         else if (m_interaction.kind == Interaction::NODE) {
             ResourceNode& node = nodes[m_interaction.index];
+            if (node.fruitTree() && !node.growing()) { // frutal crecido: se recoge la fruta directamente del árbol
+                player.act(PlayerAction::PICK);
+                collectTreeFruit(node);
+                return;
+            }
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
             const bool tool = node.growing() || !node.plant();
             const Skill* skill = tool ? m_data->skill(type.skillId) : nullptr;
@@ -1609,13 +1683,13 @@ struct Scene {
     static constexpr int   MAX_FRUITS = 20, MAX_PER_KIND = 5; // como mucho en el suelo a la vez (en total y de cada clase: así los cocos no tapan a los plátanos)
     static constexpr float FRUIT_DROP_MIN = 7.0f, FRUIT_DROP_MAX = 16.0f; // segundos entre caídas
     static constexpr float FRUIT_RANGE = 55.0f;      // solo caen en árboles cercanos al jugador
-    static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13, CHERRY_TYPE = 11;
+    static constexpr int   PALM_TYPE = 10, JUNGLE_TYPE = 13, CHERRY_TYPE = 11, APPLE_TYPE = 28;
 
-    inline static const std::string COCONUT_NAME = "Coco", HALF_COCONUT_NAME = "Mitad de coco", BANANA_NAME = "Plátano", BANANAS_NAME = "Plátanos", BUNCH_NAME = "Racimo de plátanos", CHERRY_NAME = "Cereza";
+    inline static const std::string COCONUT_NAME = "Coco", HALF_COCONUT_NAME = "Mitad de coco", BANANA_NAME = "Plátano", BANANAS_NAME = "Plátanos", BUNCH_NAME = "Racimo de plátanos", CHERRY_NAME = "Cereza", APPLE_NAME = "Manzana";
     static const std::string& fruitName(const Fruit& fruit) {
         if (fruit.half()) return HALF_COCONUT_NAME; // el coco partido es otro objeto (material "Mitad de coco")
         if (fruit.bunch()) return fruit.bananaCount() >= Fruit::BUNCH_SIZE ? BUNCH_NAME : fruit.bananaCount() > 1 ? BANANAS_NAME : BANANA_NAME; // el racimo entero es un objeto; si le faltan, se cogen sueltos
-        return fruit.kind() == Fruit::Kind::COCONUT ? COCONUT_NAME : fruit.kind() == Fruit::Kind::CHERRY ? CHERRY_NAME : BANANA_NAME;
+        return fruit.kind() == Fruit::Kind::COCONUT ? COCONUT_NAME : fruit.kind() == Fruit::Kind::CHERRY ? CHERRY_NAME : fruit.kind() == Fruit::Kind::APPLE ? APPLE_NAME : BANANA_NAME;
     }
     static bool fruitKind(int treeType, Fruit::Kind& kind) {
         if (treeType == PALM_TYPE) kind = Fruit::Kind::COCONUT;
@@ -1737,7 +1811,7 @@ struct Scene {
         std::vector<const ResourceNode*> trees[3]; // árboles cercanos por clase de fruto
         for (const ResourceNode& node : nodes) {
             Fruit::Kind treeKind;
-            if (!fruitKind(node.typeId(), treeKind) || node.growing() || node.body.underground) continue;
+            if (!fruitKind(node.typeId(), treeKind) || node.plot() || node.growing() || node.body.underground) continue; // los frutales de la granja no sueltan la fruta: se recoge del árbol
             if (nearPlayer(node.body.position, FRUIT_RANGE)) trees[static_cast<int>(treeKind)].push_back(&node);
         }
         int pick = -1; // la clase con menos frutos en el suelo entre las que tienen árbol cerca
@@ -2204,6 +2278,7 @@ struct Scene {
     int   m_warpTo = 0;                         // 0 = ninguno; WARP_FARM o WARP_HOME
     float m_warp = 0.0f;
     bool  m_warpMoved = false;
+    bool  m_wasFarm = false;                    // el fotograma anterior el jugador estaba en la granja (para entregar el trabajo al llegar)
     std::string m_deathTitle, m_deathDetail; // lo que cuenta la pantalla de carga tras desmayarse
     static constexpr const char* RESPAWN_PLACE = "el punto de inicio"; // pasará a ser el último centro pokémon visitado
     bool m_respawnMoved = false;
