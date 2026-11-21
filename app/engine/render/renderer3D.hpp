@@ -79,7 +79,27 @@ class Renderer3D {
         bool castsShadow;
         DrawKind kind = DrawKind::SOLID;
         ID3D11ShaderResourceView* texture = nullptr; // solo MODEL
+        DirectX::XMFLOAT4 sphere = { 0.0f, 0.0f, 0.0f, -1.0f }; // esfera envolvente en el mundo (w < 0: sin esfera, nunca se descarta)
     };
+
+    // Los seis planos de un volumen de visión (cámara o luz), con la normal hacia dentro.
+    struct Frustum {
+        DirectX::XMFLOAT4 plane[6];
+        static Frustum make(DirectX::CXMMATRIX viewProj);
+        bool sees(const DirectX::XMFLOAT3& center, float radius) const;
+    };
+
+    // Medidas de rendimiento: se escriben en app.log cada pocos segundos ([PERF]) para ver qué cuesta.
+    struct PerfStats {
+        int frames = 0;
+        double frameSum = 0.0, frameMax = 0.0, collectSum = 0.0, shadowSum = 0.0, mainSum = 0.0;
+        long long collected = 0, shadowDraws = 0, mainDraws = 0, shadowTris = 0, mainTris = 0, culled = 0, nodes = 0;
+        double lastFrame = 0.0, lastLog = 0.0;
+    };
+    mutable PerfStats m_perf;
+    mutable long long m_drawCount = 0, m_triCount = 0, m_cullCount = 0;
+    std::unordered_map<int, const RenderModel*> m_treeModels; // modelo de árbol por (tipo, etapa, lejano) sin buscar por nombre cada frame
+    const RenderModel* treeModel(int typeId, int stage, bool distant);
 
     static Mesh createMesh(ID3D11Device* device, const void* vertices, UINT vertexCount, UINT stride,
         const std::vector<uint16_t>& indices);

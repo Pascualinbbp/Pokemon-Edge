@@ -139,6 +139,7 @@ class ModelCache {
         GpuMesh mesh;
         mesh.stride = sizeof(GpuVertex);
         mesh.indexCount = static_cast<UINT>(indices.size());
+        if (!dynamic) mesh.bound(vertices.data(), vertices.size(), sizeof(GpuVertex)); // los modelos con huesos cambian de forma: esos nunca se descartan
         mesh.vertices = D3dUtil::createBuffer(device, static_cast<UINT>(vertices.size() * sizeof(GpuVertex)), D3D11_BIND_VERTEX_BUFFER,
             vertices.data(), dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE, "CreateBuffer (model vertices)");
         if (vertices.size() <= 65535) {

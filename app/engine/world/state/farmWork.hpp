@@ -15,13 +15,15 @@ class FarmWork {
     public:
     static constexpr int   SKILL_WATER = 3, SKILL_GATHER = 5;
     static constexpr double MAX_OFFLINE = 2.0 * 3600.0;  // como mucho se simulan 2 horas de ausencia
-    static constexpr float CYCLE_SECONDS = 60.0f;        // una tarea con la habilidad a nivel 1 (cada nivel más la acorta un 25 %)
+    static constexpr float CYCLE_SECONDS = 12.0f;        // una tarea con la habilidad a nivel 1 (cada nivel más la acorta un 25 %)
     static constexpr float WORK_SECONDS = 45.0f;         // de cada 60 s trabajan 45 y descansan 15
     static constexpr float REST_SECONDS = 15.0f;
     static constexpr float LEVEL_SPEEDUP = 0.25f;
     static constexpr float WALK_SPEED = 3.5f;
     static constexpr float SIZE = 0.7f;
     static constexpr float STEP_SECONDS = 5.0f;          // paso de la simulación de la ausencia
+
+    static_assert(CYCLE_SECONDS < WORK_SECONDS, "una tarea debe caber en el turno de trabajo (si no, nunca termina)");
 
     enum class Role { NONE, WATER, GATHER };
 

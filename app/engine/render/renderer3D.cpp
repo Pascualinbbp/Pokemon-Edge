@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <cstdlib>
 #include <chrono>
 #include "renderer3D.hpp"
@@ -50,11 +51,12 @@ namespace {
 
     // Mapa de sombras: una proyección ortográfica centrada en el jugador (el mundo es enorme) cuyo centro salta de texel en
     // texel, así las sombras no "nadan" al moverse. Vista desde la dirección de la luz activa.
+    constexpr float kTreeLodDistance = 28.0f; // los árboles más lejos usan su modelo simplificado (_lod)
     constexpr float kNodeDrawRange = 90.0f; // los materiales de recolección más lejos no se dibujan
     constexpr float kCaveDrawRange = 90.0f; // las galerías (y su decorado) más lejos no se dibujan
     constexpr float kLampRange = 50.0f;     // las luces del subsuelo más lejos no cuentan
-    constexpr UINT kShadowMapSize = 3072;
-    constexpr float kShadowHalfExtent = 80.0f; // radio de mundo que recibe sombras alrededor del jugador
+    constexpr UINT kShadowMapSize = 2048;
+    constexpr float kShadowHalfExtent = 64.0f; // radio de mundo que recibe sombras alrededor del jugador
     constexpr float kLightDistance = 400.0f;
     constexpr float kLightDepth = 500.0f;      // profundidad total del volumen de sombras (cubre desde el mar hasta la isla del cielo)
     constexpr float kFarPlane = 700.0f;
@@ -115,13 +117,14 @@ namespace {
             float4 lp = mul(float4(wpos + n * ShadowParams.y, 1.0f), LightViewProj);
             float2 uv = lp.xy * float2(0.5f, -0.5f) + 0.5f;
             float depth = lp.z - ShadowParams.z;
+            if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f || lp.z > 1.0f) return 1.0f; // fuera del volumen de sombras: iluminado
             float sum = 0.0f;
-            [unroll] for (int y = -1; y <= 1; ++y) {
-                [unroll] for (int x = -1; x <= 1; ++x) {
-                    sum += ShadowMap.SampleCmpLevelZero(ShadowSampler, uv + float2(x, y) * ShadowParams.x, depth);
+            [unroll] for (int y = 0; y <= 1; ++y) { // 2x2 lecturas con comparación por hardware (cada una ya filtra en bilineal): borde suave y mucho más barato
+                [unroll] for (int x = 0; x <= 1; ++x) {
+                    sum += ShadowMap.SampleCmpLevelZero(ShadowSampler, uv + (float2(x, y) - 0.5f) * ShadowParams.x, depth);
                 }
             }
-            return sum / 9.0f;
+            return sum * 0.25f;
         }
 
         // Niebla (o agua turbia bajo la superficie) y oscuridad de cuevas: solo se ve lo que queda cerca de la luz del jugador.
@@ -131,6 +134,7 @@ namespace {
             float3 gain = torch * torch + 0.03f;
             float3 aura = float3(0.0f, 0.0f, 0.0f);
             [unroll] for (int i = 0; i < 8; ++i) { // lámparas y cristales: iluminan lo que tienen cerca
+                if (LampPos[i].w <= 0.01f) continue;
                 float l = saturate(1.0f - length(wpos - LampPos[i].xyz) / max(LampPos[i].w, 0.01f));
                 if (LampColor[i].w > 0.5f) aura += LampColor[i].rgb * l * l; // brillo del jugador (Bioluminiscencia): vale aunque no sea una cueva
                 else gain += LampColor[i].rgb * l * l;
@@ -398,6 +402,7 @@ Renderer3D::Mesh Renderer3D::createMesh(ID3D11Device* device, const void* vertic
     Mesh mesh;
     mesh.indexCount = static_cast<UINT>(indices.size());
     mesh.stride = stride;
+    mesh.bound(vertices, vertexCount, stride);
     mesh.vertices = D3dUtil::createBuffer(device, stride * vertexCount, D3D11_BIND_VERTEX_BUFFER,
         vertices, D3D11_USAGE_IMMUTABLE, "CreateBuffer (vertex)");
     mesh.indices = D3dUtil::createBuffer(device, static_cast<UINT>(sizeof(uint16_t) * indices.size()), D3D11_BIND_INDEX_BUFFER,
@@ -1023,6 +1028,11 @@ XMMATRIX Renderer3D::lightViewProj(const XMFLOAT3& lightDir, const XMFLOAT3& foc
 void Renderer3D::add(const Mesh& mesh, CXMMATRIX world, const XMFLOAT4& tint, bool castsShadow, DrawKind kind, ID3D11ShaderResourceView* texture) {
     Draw draw = { &mesh, {}, tint, castsShadow, kind, texture };
     XMStoreFloat4x4(&draw.world, world);
+    if (mesh.radius > 0.0f) { // esfera envolvente en el mundo: sirve para descartar lo que no se ve
+        const XMVECTOR c = XMVector3TransformCoord(XMLoadFloat3(&mesh.center), world);
+        const float scale = (std::max)({ XMVectorGetX(XMVector3Length(world.r[0])), XMVectorGetX(XMVector3Length(world.r[1])), XMVectorGetX(XMVector3Length(world.r[2])) });
+        draw.sphere = { XMVectorGetX(c), XMVectorGetY(c), XMVectorGetZ(c), mesh.radius * scale };
+    }
     m_draws.push_back(draw);
 }
 
@@ -1031,6 +1041,45 @@ void Renderer3D::addModel(const RenderModel& model, CXMMATRIX world, const XMFLO
         add(model.parts[i].mesh, model.partMatrix(static_cast<int>(i), pose.get(static_cast<int>(i))) * world, tint, castsShadow,
             DrawKind::MODEL, model.texture.Get());
     }
+}
+
+Renderer3D::Frustum Renderer3D::Frustum::make(CXMMATRIX viewProj) {
+    XMFLOAT4X4 m;
+    XMStoreFloat4x4(&m, viewProj);
+    const auto col = [&](int c) { return XMFLOAT4{ m.m[0][c], m.m[1][c], m.m[2][c], m.m[3][c] }; };
+    const XMFLOAT4 c0 = col(0), c1 = col(1), c2 = col(2), c3 = col(3);
+    const auto add = [](const XMFLOAT4& a, const XMFLOAT4& b, float k) { return XMFLOAT4{ a.x + k * b.x, a.y + k * b.y, a.z + k * b.z, a.w + k * b.w }; };
+    Frustum f;
+    f.plane[0] = add(c3, c0, 1.0f);  // izquierda
+    f.plane[1] = add(c3, c0, -1.0f); // derecha
+    f.plane[2] = add(c3, c1, 1.0f);  // abajo
+    f.plane[3] = add(c3, c1, -1.0f); // arriba
+    f.plane[4] = c2;                 // cerca (z de 0 a 1)
+    f.plane[5] = add(c3, c2, -1.0f); // lejos
+    for (XMFLOAT4& p : f.plane) {
+        const float length = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+        if (length > 1.0e-6f) { p.x /= length; p.y /= length; p.z /= length; p.w /= length; }
+    }
+    return f;
+}
+
+bool Renderer3D::Frustum::sees(const XMFLOAT3& c, float radius) const {
+    for (const XMFLOAT4& p : plane) {
+        if (p.x * c.x + p.y * c.y + p.z * c.z + p.w < -radius) return false;
+    }
+    return true;
+}
+
+// Modelo de un árbol por tipo y etapa ('distant': el simplificado para lejos, o el completo si no existe).
+const RenderModel* Renderer3D::treeModel(int typeId, int stage, bool distant) {
+    const int key = typeId * 10 + stage * 2 + (distant ? 1 : 0);
+    const auto found = m_treeModels.find(key);
+    if (found != m_treeModels.end()) return found->second;
+    const std::string name = "trees/" + std::to_string(typeId) + "_" + std::to_string(stage);
+    const RenderModel* model = distant ? m_models.get(m_device, name + "_lod", false) : nullptr;
+    if (!model) model = m_models.get(m_device, name, false);
+    m_treeModels[key] = model;
+    return model;
 }
 
 // Lista única de lo que hay en el mundo: la usan el mapa de sombras y la pantalla.
@@ -1386,8 +1435,8 @@ void Renderer3D::addCreature(const XMFLOAT3& c, float size, float yaw, int speci
 // Nunca desaparece: un árbol talado deja el tocón y vuelve a crecer, una roca o mena regenera su mineral y un arbusto
 // recogido se queda sin frutos hasta que le vuelven a crecer.
 namespace {
-// Árboles con modelo .glb por etapa (assets/models/trees/<id>_<etapa>.glb, 3 etapas de crecimiento; ya vienen a su tamaño): roble, palmera, cerezo, acacia, manzano y platanera.
-constexpr bool hasTreeModel(int typeId) { return typeId == 1 || typeId == 10 || typeId == 11 || typeId == 14 || typeId == 28 || typeId == 29; }
+// Árboles con modelo .glb por etapa (assets/models/trees/<id>_<etapa>.glb, 3 etapas de crecimiento; ya vienen a su tamaño): roble, pino, abedul, palmera, cerezo, acacia, manzano y platanera (y, para lejos, <id>_<etapa>_lod.glb).
+constexpr bool hasTreeModel(int typeId) { return typeId == 1 || typeId == 8 || typeId == 9 || typeId == 10 || typeId == 11 || typeId == 14 || typeId == 28 || typeId == 29; }
 constexpr float CHERRY_FRUIT_SCALE = 2.0f; // cereza.glb viene a medio tamaño
 constexpr float APPLE_FRUIT_SCALE = 1.5f;  // la manzana (10 cm) se agranda un poco para que se vea colgando del árbol
 constexpr const char* CHERRY_MODEL = "fruits/cherry"; // assets/models/fruits/cherry.glb
@@ -1427,10 +1476,13 @@ void Renderer3D::addNode(const ResourceNode& node) {
         }
         if (hasTreeModel(node.typeId())) { // modelo .glb por etapa (assets/models/trees/<id>_<etapa>.glb)
             const float t = (g - ResourceStyle::STUMP_UNTIL) / (1.0f - ResourceStyle::STUMP_UNTIL); // 0..1 desde que brota del tocón
-            const int stage = t < 0.3f ? 1 : t < 0.65f ? 2 : 3;
-            const float lo = stage == 1 ? 0.0f : stage == 2 ? 0.3f : 0.65f, hi = stage == 1 ? 0.3f : stage == 2 ? 0.65f : 1.0f;
-            const float s = (0.85f + 0.15f * std::clamp((t - lo) / (hi - lo), 0.0f, 1.0f)); // crece un poco dentro de cada etapa
-            if (const RenderModel* model = m_models.get(m_device, "trees/" + std::to_string(node.typeId()) + "_" + std::to_string(stage), false)) {
+            const bool grown = node.growth() >= 1.0f; // la etapa 3 es el árbol adulto: solo cuando ha terminado de crecer (es cuando da fruta o se puede talar)
+            const int stage = grown ? 3 : t < 0.3f ? 1 : 2;
+            const float lo = stage == 1 ? 0.0f : 0.3f, hi = 1.0f;
+            const float s = stage == 3 ? 1.0f : (0.85f + 0.15f * std::clamp((t - lo) / (hi - lo), 0.0f, 1.0f)); // crece un poco dentro de cada etapa
+            const float ex = p.x - m_eye.x, ez = p.z - m_eye.z;
+            const bool distant = stage >= 2 && ex * ex + ez * ez > kTreeLodDistance * kTreeLodDistance;
+            if (const RenderModel* model = treeModel(node.typeId(), stage, distant)) {
                 addModel(*model, XMMatrixTranslation(0.0f, -model->boundsMin.y, 0.0f) * XMMatrixScaling(s, s, s) * base, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
                 return;
             }
@@ -2113,24 +2165,40 @@ void Renderer3D::drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) con
     context->DrawIndexed(mesh.indexCount, 0, 0);
 }
 
-// Dibuja todos los objetos del mundo con la cámara dada (la de la luz o la del jugador).
+// Dibuja todos los objetos del mundo con la cámara dada (la de la luz o la del jugador). Solo lo que cae dentro del volumen de visión;
+// la lista llega ordenada por malla, así que no se repiten los cambios de buffers y de shader.
 void Renderer3D::drawAll(ID3D11DeviceContext* context, CXMMATRIX viewProj, bool shadowPass) const {
+    const Frustum frustum = Frustum::make(viewProj);
     DrawKind bound = DrawKind::SOLID; // shader de píxeles activo (la pasada de sombras no usa ninguno)
+    const Mesh* last = nullptr;
+    ID3D11ShaderResourceView* lastTexture = nullptr;
     for (const Draw& draw : m_draws) {
         if (draw.kind == DrawKind::GLOW) continue;
-        if (shadowPass) {
-            if (!draw.castsShadow) continue;
-        } else if (draw.kind != bound) {
-            context->PSSetShader(draw.kind == DrawKind::MODEL ? m_modelPixelShader.Get() : m_pixelShader.Get(), nullptr, 0);
-            bound = draw.kind;
-        }
-        if (!shadowPass && draw.kind == DrawKind::MODEL) {
-            ID3D11ShaderResourceView* texture = draw.texture;
-            context->PSSetShaderResources(1, 1, &texture);
+        if (shadowPass && !draw.castsShadow) continue;
+        if (draw.sphere.w >= 0.0f && !frustum.sees({ draw.sphere.x, draw.sphere.y, draw.sphere.z }, draw.sphere.w)) { ++m_cullCount; continue; }
+        if (!shadowPass) {
+            if (draw.kind != bound) {
+                context->PSSetShader(draw.kind == DrawKind::MODEL ? m_modelPixelShader.Get() : m_pixelShader.Get(), nullptr, 0);
+                bound = draw.kind;
+            }
+            if (draw.kind == DrawKind::MODEL && draw.texture != lastTexture) {
+                ID3D11ShaderResourceView* texture = draw.texture;
+                context->PSSetShaderResources(1, 1, &texture);
+                lastTexture = draw.texture;
+            }
         }
         const XMMATRIX world = XMLoadFloat4x4(&draw.world);
         setObject(context, world, world * viewProj, draw.tint);
-        drawIndexed(context, *draw.mesh);
+        if (draw.mesh != last) {
+            ID3D11Buffer* vb = draw.mesh->vertices.Get();
+            const UINT offset = 0;
+            context->IASetVertexBuffers(0, 1, &vb, &draw.mesh->stride, &offset);
+            context->IASetIndexBuffer(draw.mesh->indices.Get(), draw.mesh->indexFormat, 0);
+            last = draw.mesh;
+        }
+        context->DrawIndexed(draw.mesh->indexCount, 0, 0);
+        ++m_drawCount;
+        m_triCount += draw.mesh->indexCount / 3;
     }
     if (!shadowPass && bound != DrawKind::SOLID) context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
 }
@@ -2186,7 +2254,9 @@ void Renderer3D::renderShadowMap(ID3D11DeviceContext* context, CXMMATRIX lightVi
 // Dibuja los trozos de malla cuya esfera envolvente cae a menos de kTerrainDrawRange de la cámara.
 void Renderer3D::drawChunks(ID3D11DeviceContext* context, const std::vector<Chunk>& chunks, CXMMATRIX viewProj, float range) const {
     setObject(context, XMMatrixIdentity(), viewProj, kWhite);
+    const Frustum frustum = Frustum::make(viewProj);
     for (const Chunk& chunk : chunks) {
+        if (!frustum.sees(chunk.center, chunk.radius)) { ++m_cullCount; continue; }
         const float dx = chunk.center.x - m_eye.x, dy = chunk.center.y - m_eye.y, dz = chunk.center.z - m_eye.z;
         const float reach = range + chunk.radius;
         if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
@@ -2289,8 +2359,18 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     const XMMATRIX view = scene.getViewMatrix();
     const XMMATRIX viewProj = view * XMLoadFloat4x4(&m_proj);
     const XMMATRIX lightMatrix = lightViewProj(light.lightDir, env.focus);
+    using PerfClock = std::chrono::steady_clock;
+    const auto perfStart = PerfClock::now();
+    const auto perfMs = [](PerfClock::time_point from, PerfClock::time_point to) { return std::chrono::duration<double, std::milli>(to - from).count(); };
     CrashUtil::stage("dibujo: recoger objetos");
     collect(scene);
+    std::sort(m_draws.begin(), m_draws.end(), [](const Draw& a, const Draw& b) { // por clase, textura y malla: menos cambios de estado
+        if (a.kind != b.kind) return a.kind < b.kind;
+        if (a.texture != b.texture) return a.texture < b.texture;
+        return a.mesh < b.mesh;
+    });
+    const auto perfCollected = PerfClock::now();
+    m_drawCount = m_triCount = m_cullCount = 0;
     if (m_glow > 0.01f) { // la luz del pokémon con Bioluminiscencia (el acompañante) entra en las lámparas del shader
         const XMFLOAT3 glowAt = scene.companionLightPoint();
         m_lamps.insert(m_lamps.begin(), Lamp{ { glowAt.x, glowAt.y, glowAt.z }, 30.0f, { 1.00f * m_glow, 0.93f * m_glow, 0.80f * m_glow }, 0.0f, true });
@@ -2306,6 +2386,9 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     CrashUtil::stage("dibujo: sombras");
     // 1. Mapa de sombras: la luz activa (sol o luna) ve todos los objetos cercanos.
     renderShadowMap(context, lightMatrix);
+    const auto perfShadow = PerfClock::now();
+    const long long shadowDraws = m_drawCount, shadowTris = m_triCount;
+    m_drawCount = m_triCount = 0;
 
     // 2. Cielo (cubre toda la pantalla; no usa la profundidad).
     context->IASetInputLayout(nullptr);
@@ -2342,6 +2425,36 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
     CrashUtil::stage("dibujo: brillos");
     // 5. Brillos aditivos (rayo de captura, destellos).
     drawGlow(context, viewProj);
+
+    // Medidas: cada 5 s una línea [PERF] en app.log (fps, tiempos de CPU de cada fase, dibujos y triángulos enviados, descartes).
+    const auto perfEnd = PerfClock::now();
+    const double now = std::chrono::duration<double>(perfEnd.time_since_epoch()).count();
+    PerfStats& perf = m_perf;
+    if (perf.lastFrame > 0.0) { const double frame = (now - perf.lastFrame) * 1000.0; perf.frameSum += frame; perf.frameMax = (std::max)(perf.frameMax, frame); }
+    perf.lastFrame = now;
+    ++perf.frames;
+    perf.collectSum += perfMs(perfStart, perfCollected);
+    perf.shadowSum += perfMs(perfCollected, perfShadow);
+    perf.mainSum += perfMs(perfShadow, perfEnd);
+    perf.collected += static_cast<long long>(m_draws.size());
+    perf.shadowDraws += shadowDraws; perf.shadowTris += shadowTris;
+    perf.mainDraws += m_drawCount; perf.mainTris += m_triCount; perf.culled += m_cullCount;
+    perf.nodes += static_cast<long long>(scene.nodes.size());
+    if (perf.lastLog == 0.0) perf.lastLog = now;
+    if (now - perf.lastLog >= 5.0 && perf.frames > 1) {
+        const double n = static_cast<double>(perf.frames);
+        char text[512];
+        std::snprintf(text, sizeof(text),
+            "fps=%.1f frame=%.1fms (max %.1f) | cpu: recoger=%.2f sombras=%.2f pantalla=%.2f ms | por frame: lista=%lld sombras=%lld dib/%lldk tri, pantalla=%lld dib/%lldk tri, descartes=%lld | nodos=%lld",
+            n / (now - perf.lastLog), perf.frameSum / (n - 1.0), perf.frameMax, perf.collectSum / n, perf.shadowSum / n, perf.mainSum / n,
+            static_cast<long long>(perf.collected / perf.frames), static_cast<long long>(perf.shadowDraws / perf.frames), static_cast<long long>(perf.shadowTris / perf.frames / 1000),
+            static_cast<long long>(perf.mainDraws / perf.frames), static_cast<long long>(perf.mainTris / perf.frames / 1000), static_cast<long long>(perf.culled / perf.frames),
+            static_cast<long long>(perf.nodes / perf.frames));
+        Logger::logInfo("PERF", text);
+        perf = PerfStats();
+        perf.lastFrame = now;
+        perf.lastLog = now;
+    }
 }
 
 void Renderer3D::cleanup() {

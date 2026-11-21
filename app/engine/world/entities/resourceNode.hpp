@@ -24,8 +24,8 @@ namespace ResourceStyle {
             case 5:  return { Shape::ROCK, { 0.45f, 0.47f, 0.52f }, { 0.45f, 0.90f, 0.98f }, true,  0.85f, 1.1f }; // veta de diamante
             case 6:  return { Shape::BUSH, { 0.20f, 0.50f, 0.22f }, { 0.85f, 0.18f, 0.25f }, true,  0.55f, 0.9f }; // arbusto de bayas
             case 7:  return { Shape::BUSH, { 0.22f, 0.48f, 0.20f }, { 0.98f, 0.80f, 0.18f }, true,  0.55f, 0.9f }; // arbusto dorado
-            case 8:  return { Shape::CONIFER, { 0.34f, 0.22f, 0.12f }, { 0.10f, 0.42f, 0.24f }, false, 0.35f, 3.8f }; // pino
-            case 9:  return { Shape::TREE, { 0.86f, 0.84f, 0.78f }, { 0.52f, 0.72f, 0.22f }, false, 0.3f, 3.4f };   // abedul
+            case 8:  return { Shape::CONIFER, { 0.34f, 0.22f, 0.12f }, { 0.10f, 0.42f, 0.24f }, false, 0.35f, 8.2f }; // pino
+            case 9:  return { Shape::TREE, { 0.86f, 0.84f, 0.78f }, { 0.52f, 0.72f, 0.22f }, false, 0.3f, 7.1f };   // abedul
             case 10: return { Shape::PALM, { 0.55f, 0.40f, 0.22f }, { 0.28f, 0.62f, 0.22f }, false, 0.3f, 6.1f };   // palmera
             case 11: return { Shape::TREE, { 0.30f, 0.20f, 0.16f }, { 0.98f, 0.68f, 0.80f }, false, 0.3f, 4.2f };   // cerezo en flor
             case 12: return { Shape::FLOWER, { 0.28f, 0.58f, 0.24f }, { 0.98f, 0.98f, 0.96f }, true, 0.25f, 0.55f };  // margarita (pétalos blancos)
@@ -95,6 +95,7 @@ class ResourceNode {
     static constexpr float TEAM_WINDOW  = 1.5f;   // segundos durante los que cuenta que el otro siga trabajándolo
     static constexpr float TEAM_BONUS   = 2.0f;   // velocidad al trabajarlo jugador y pokémon a la vez
     static constexpr float VEIN_REACH   = 2.9f;   // las vetas de pared se alcanzan desde el centro del paso
+    static constexpr float WORKER_WATER_STEP = 0.08f; // fracción de crecimiento por riego de un trabajador del hogar (riegan sin parar, así que es poco)
     static constexpr float WATER_STEP   = 0.3f;   // fracción de crecimiento que da un riego (con velocidad 1): cada planta se riega una sola vez por quien riega, hasta que crece
 
     Physics::Body body;
@@ -141,10 +142,12 @@ class ResourceNode {
     // Riego repetible (los pokémon que riegan lo hacen una y otra vez): da crecimiento sin las limitaciones de work().
     void water(float rate) {
         if (m_gone || !growing()) return;
-        m_growth = (std::min)(1.0f, m_growth + WATER_STEP * rate);
+        m_growth = (std::min)(1.0f, m_growth + WORKER_WATER_STEP * rate);
         if (m_growth >= 1.0f) m_wateredByPlayer = m_wateredByCompanion = false;
         m_shake = SHAKE_TIME * 0.5f;
     }
+    // Deja la cosecha lista para un solo golpe (los trabajadores recogen de una vez lo que el jugador golpea varias veces).
+    void prepareHarvest() { m_cooldown = 0.0f; m_hits = (std::max)(0, m_need - 1); }
     // Estado guardado de una parcela (crecimiento y madurez de la fruta).
     void setState(float growth, float fruit) { m_growth = (std::clamp)(growth, 0.0f, 1.0f); m_fruit = (std::clamp)(fruit, 0.0f, 1.0f); }
     void grow(float seconds) { if (!m_gone && growing()) { m_growth = (std::min)(1.0f, m_growth + seconds / m_regrowSeconds); if (m_growth >= 1.0f) m_wateredByPlayer = m_wateredByCompanion = false; } }

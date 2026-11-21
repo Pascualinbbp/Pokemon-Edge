@@ -457,7 +457,7 @@ struct Scene {
         } else if (ia.kind == Interaction::NODE) {
             const ResourceNode& node = nodes[ia.index];
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
-            const Skill* skill = node.growing() ? m_data->skill(type.skillId) : nullptr;
+            const Skill* skill = usesSkill(node) ? m_data->skill(skillFor(node, type)) : nullptr;
             s.interactVerb = skill ? skill->name.c_str() : type.action.c_str();
             s.interactTarget = &type.name;
             const Material* material = m_data->material(type.materialId);
@@ -720,7 +720,8 @@ struct Scene {
     bool plotRipe(const Crops::Plot& plot) const {
         const ResourceNode& node = nodes[static_cast<size_t>(plot.node)];
         if (node.gone()) return false;
-        return node.fruitTree() ? node.fruitReady() : (!node.growing() && node.plant() && node.workable());
+        if (node.fruitTree()) return node.fruitReady();
+        return !ResourceStyle::isTree(ResourceStyle::look(node.typeId()).shape) && !node.growing() && node.plant() && node.workable(); // los árboles no frutales no los talan los trabajadores
     }
 
     bool plotPlantable(const Crops::Plot& plot) const {
@@ -759,7 +760,7 @@ struct Scene {
         if (role == FarmWork::Role::WATER) node.water(FarmWork::speed(species));
         else if (plotRipe(plot)) {
             if (node.fruitTree()) collectTreeFruit(node);
-            else workNode(node, false); // cosecha: el cultivo da su material y la parcela queda libre (la planta muere)
+            else { node.prepareHarvest(); workNode(node, false); } // cosecha: el cultivo da su material y la parcela queda libre (la planta muere)
         } else if (plotPlantable(plot)) {
             m_seedCrop = plot.plan;
             sow(plotIndex, false);
@@ -1252,9 +1253,9 @@ struct Scene {
             for (ResourceNode& node : nodes) {
                 if (!node.canWork(false) || !treeWorkable(node, false) || !inRange(node.body.position)) continue;
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
-                const int skillLevel = species->levelIn(type.skillId);
-                if (node.growing() || !node.plant()) {
-                    if (skillLevel < type.level) continue; // no sabe regar / extraer esto, o no llega al nivel
+                const int skillLevel = species->levelIn(skillFor(node, type));
+                if (usesSkill(node)) {
+                    if (skillLevel < (watering(node) && isTreeNode(node) ? 1 : type.level)) continue; // no sabe regar / extraer esto, o no llega al nivel
                 }
                 const float d2 = distance2(node.body.position);
                 if (d2 < best) {
@@ -1550,6 +1551,13 @@ struct Scene {
     // recoger una planta crecida no exige nada.
     // Los árboles solo se tocan en la granja (los del mundo principal no admiten ninguna interacción), y solo los sembrados en sus parcelas; el frutal
     // crecido no se tala (quien no es el jugador tampoco le recoge la fruta).
+    // Habilidad con la que se trabaja el nodo ahora: una planta o árbol que aún crece se RIEGA (no se tala), sea lo que sea; después, la suya.
+    static bool isTreeNode(const ResourceNode& node) { return ResourceStyle::isTree(ResourceStyle::look(node.typeId()).shape); }
+    static bool watering(const ResourceNode& node) { return node.plant() && node.growing(); }
+    static int skillFor(const ResourceNode& node, const ResourceNodeType& type) { return watering(node) ? FarmWork::SKILL_WATER : type.skillId; }
+    // ¿Se trabaja con herramienta/habilidad? (regar, extraer o talar) o a mano (recoger una planta crecida).
+    static bool usesSkill(const ResourceNode& node) { return node.growing() || !node.plant() || isTreeNode(node); }
+
     static bool treeWorkable(const ResourceNode& node, bool byPlayer) {
         if (!ResourceStyle::isTree(ResourceStyle::look(node.typeId()).shape)) return true;
         return node.plot() && (byPlayer || !node.fruitTree());
@@ -1573,7 +1581,8 @@ struct Scene {
 
     bool playerCanWork(const ResourceNode& node) const {
         const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
-        return (node.plant() && !node.growing()) || inventory.skillLevel(type.skillId) >= type.level;
+        if (watering(node) && isTreeNode(node)) return true; // regar un brote no exige nivel
+        return (node.plant() && !node.growing() && !isTreeNode(node)) || inventory.skillLevel(skillFor(node, type)) >= type.level;
     }
 
     // El aviso de capturar al debilitado dura WEAK_PROMPT_TIME desde que aparece; con otro debilitado vuelve a empezar.
@@ -1619,7 +1628,7 @@ struct Scene {
             if (playerCanWork(node)) m_interaction = { Interaction::NODE, i };
             else {
                 const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
-                m_missingSkill = type.skillId; // sin herramienta de ese nivel: solo un pokémon que llegue al nivel puede trabajarlo
+                m_missingSkill = skillFor(node, type); // sin herramienta de ese nivel: solo un pokémon que llegue al nivel puede trabajarlo
                 m_missingLevel = type.level;
                 m_missingPos = nodeAnchor(node);
             }
@@ -1751,10 +1760,10 @@ struct Scene {
                 return;
             }
             const ResourceNodeType& type = m_data->nodes[node.typeIndex()];
-            const bool tool = node.growing() || !node.plant();
-            const Skill* skill = tool ? m_data->skill(type.skillId) : nullptr;
+            const bool tool = usesSkill(node);
+            const Skill* skill = tool ? m_data->skill(skillFor(node, type)) : nullptr;
             player.act(skill ? PlayerActions::parse(skill->animation) : PlayerAction::PICK); // la animación de su herramienta; recoger una planta: agacharse
-            workNode(node, true, tool ? inventory.skillSpeed(type.skillId) : 1.0f);
+            workNode(node, true, tool ? inventory.skillSpeed(skillFor(node, type)) : 1.0f);
         }
     }
 
