@@ -724,6 +724,17 @@ struct Scene {
         return !ResourceStyle::isTree(ResourceStyle::look(node.typeId()).shape) && !node.growing() && node.plant() && node.workable(); // los árboles no frutales no los talan los trabajadores
     }
 
+    bool plotChoppable(const Crops::Plot& plot) const {
+        const ResourceNode& node = nodes[static_cast<size_t>(plot.node)];
+        return !node.gone() && !node.fruitTree() && !node.growing() && node.plant() && ResourceStyle::isTree(ResourceStyle::look(node.typeId()).shape) && node.workable();
+    }
+
+    bool plotMinable(const Crops::Plot& plot) const {
+        const ResourceNode& node = nodes[static_cast<size_t>(plot.node)];
+        const int id = node.typeId();
+        return !node.gone() && (id == 2 || id == 3 || id == 4) && node.workable();
+    }
+
     bool plotPlantable(const Crops::Plot& plot) const {
         if (plot.plan < 0 || !nodes[static_cast<size_t>(plot.node)].gone() || Crops::LIST[plot.plan].tree != plot.tree) return false;
         const Item* seeds = seedItem(plot.plan);
@@ -740,6 +751,8 @@ struct Scene {
                 if (!node.gone() && node.growing() && i != other) return i;
             }
             for (int i = 0; i < count; ++i) { const ResourceNode& node = nodes[static_cast<size_t>(plots[static_cast<size_t>(i)].node)]; if (!node.gone() && node.growing()) return i; }
+        } else if (role == FarmWork::Role::CHOP || role == FarmWork::Role::MINE) {
+            for (int i = 0; i < count; ++i) { const Crops::Plot& p = plots[static_cast<size_t>(i)]; if (i != other && (role == FarmWork::Role::CHOP ? plotChoppable(p) : plotMinable(p))) return i; }
         } else if (role == FarmWork::Role::GATHER) { // primero lo que está listo; si no, sembrar lo designado
             for (int i = 0; i < count; ++i) if (i != other && plotRipe(plots[static_cast<size_t>(i)])) return i;
             for (int i = 0; i < count; ++i) if (i != other && plotPlantable(plots[static_cast<size_t>(i)])) return i;
@@ -751,6 +764,8 @@ struct Scene {
         const Crops::Plot& plot = plots[static_cast<size_t>(plotIndex)];
         const ResourceNode& node = nodes[static_cast<size_t>(plot.node)];
         if (role == FarmWork::Role::WATER) return !node.gone() && node.growing();
+        if (role == FarmWork::Role::CHOP) return plotChoppable(plot);
+        if (role == FarmWork::Role::MINE) return plotMinable(plot);
         return plotRipe(plot) || plotPlantable(plot);
     }
 
@@ -758,6 +773,7 @@ struct Scene {
         Crops::Plot& plot = plots[static_cast<size_t>(plotIndex)];
         ResourceNode& node = nodes[static_cast<size_t>(plot.node)];
         if (role == FarmWork::Role::WATER) node.water(FarmWork::speed(species));
+        else if (role == FarmWork::Role::CHOP || role == FarmWork::Role::MINE) { node.prepareHarvest(); workNode(node, false); }
         else if (plotRipe(plot)) {
             if (node.fruitTree()) collectTreeFruit(node);
             else { node.prepareHarvest(); workNode(node, false); } // cosecha: el cultivo da su material y la parcela queda libre (la planta muere)
@@ -1793,16 +1809,17 @@ struct Scene {
 
     // Un paso de trabajo en el nodo (riego o golpe); al agotarlo da su material.
     // Sonido de trabajar un nodo: depende de lo que es (roca: picar; árbol: talar; planta: recoger), no de quién lo trabaja.
-    static void nodeSound(const ResourceNode& node) {
+    static void nodeSound(const ResourceNode& node, bool watered = false) {
         using Shape = ResourceStyle::Shape;
         const Shape shape = ResourceStyle::look(node.typeId()).shape;
-        const Sound::Sfx sfx = shape == Shape::ROCK ? Sound::Sfx::MINE : ResourceStyle::isTree(shape) ? Sound::Sfx::CHOP : Sound::Sfx::PICK;
+        const Sound::Sfx sfx = watered ? Sound::Sfx::WATER : shape == Shape::ROCK ? Sound::Sfx::MINE : ResourceStyle::isTree(shape) ? Sound::Sfx::CHOP : Sound::Sfx::PICK;
         Sound::emit(sfx, node.body.position);
     }
 
     void workNode(ResourceNode& node, bool byPlayer, float speed = 1.0f) {
+        const bool watering = node.plant() && node.growing(); // regar suena a agua, no a talar
         if (!node.work(byPlayer, speed)) return;
-        nodeSound(node);
+        nodeSound(node, watering);
         if (!byPlayer && !node.plant() && node.hits() > 0) m_taskNode = static_cast<int>(&node - nodes.data()); // el pokémon ya empezó: lo termina
         if (!node.takeHarvest()) return;
         if (!byPlayer && m_taskNode == static_cast<int>(&node - nodes.data())) { // terminó: descansa antes de ir a por otra cosa

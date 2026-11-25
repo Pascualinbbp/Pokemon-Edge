@@ -13,7 +13,7 @@
 // En el mundo principal no existen: al volver se simula el tiempo transcurrido (con tope MAX_OFFLINE). Dentro del hogar se ven trabajando.
 class FarmWork {
     public:
-    static constexpr int   SKILL_WATER = 3, SKILL_GATHER = 5;
+    static constexpr int   SKILL_CHOP = 1, SKILL_MINE = 2, SKILL_WATER = 3, SKILL_GATHER = 5;
     static constexpr double MAX_OFFLINE = 2.0 * 3600.0;  // como mucho se simulan 2 horas de ausencia
     static constexpr float CYCLE_SECONDS = 12.0f;        // una tarea con la habilidad a nivel 1 (cada nivel más la acorta un 25 %)
     static constexpr float WORK_SECONDS = 45.0f;         // de cada 60 s trabajan 45 y descansan 15
@@ -25,7 +25,7 @@ class FarmWork {
 
     static_assert(CYCLE_SECONDS < WORK_SECONDS, "una tarea debe caber en el turno de trabajo (si no, nunca termina)");
 
-    enum class Role { NONE, WATER, GATHER };
+    enum class Role { NONE, WATER, GATHER, CHOP, MINE };
 
     struct Worker {
         float x = 0.0f, z = 0.0f, yaw = 0.0f;
@@ -37,7 +37,9 @@ class FarmWork {
         int last = -1;        // última parcela atendida (el riego va rotando)
     };
 
-    static Role roleOf(const PokemonSpecies& species) { return species.skillId == SKILL_WATER ? Role::WATER : species.skillId == SKILL_GATHER ? Role::GATHER : Role::NONE; }
+    static Role roleOf(const PokemonSpecies& species) {
+        return species.skillId == SKILL_WATER ? Role::WATER : species.skillId == SKILL_GATHER ? Role::GATHER : species.skillId == SKILL_CHOP ? Role::CHOP : species.skillId == SKILL_MINE ? Role::MINE : Role::NONE;
+    }
     static float speed(const PokemonSpecies& species) { return 1.0f + LEVEL_SPEEDUP * static_cast<float>((std::max)(1, species.skillLevel) - 1); }
     static float cycleSeconds(const PokemonSpecies& species) { return CYCLE_SECONDS / speed(species); }
 

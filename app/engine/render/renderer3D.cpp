@@ -51,7 +51,8 @@ namespace {
 
     // Mapa de sombras: una proyección ortográfica centrada en el jugador (el mundo es enorme) cuyo centro salta de texel en
     // texel, así las sombras no "nadan" al moverse. Vista desde la dirección de la luz activa.
-    constexpr float kTreeLodDistance = 28.0f; // los árboles más lejos usan su modelo simplificado (_lod)
+    constexpr float kLod1 = 11.0f, kLodBand1 = 3.0f; // árboles: completo hasta ~11 m, medio (_mid) hasta ~26 m y lejano (_lod) más allá; el cambio se funde en bandas
+    constexpr float kLod2 = 26.0f, kLodBand2 = 4.0f;
     constexpr float kNodeDrawRange = 90.0f; // los materiales de recolección más lejos no se dibujan
     constexpr float kCaveDrawRange = 90.0f; // las galerías (y su decorado) más lejos no se dibujan
     constexpr float kLampRange = 50.0f;     // las luces del subsuelo más lejos no cuentan
@@ -75,6 +76,7 @@ namespace {
             matrix WorldViewProj;
             matrix World;
             float4 Tint;
+            float4 Fade;
         }
         cbuffer Frame : register(b1) {
             matrix InvSky;
@@ -164,6 +166,10 @@ namespace {
         SamplerState ModelSampler : register(s1);
 
         float4 PS_MODEL(PS_IN input) : SV_Target {
+            if (Fade.x < 0.999f) { // fundido entre niveles de detalle: trama de puntos ordenada (cada nivel pone sus píxeles y el otro los complementarios)
+                float t = frac(52.9829189f * frac(dot(input.pos.xy, float2(0.06711056f, 0.00583715f))));
+                clip(Fade.y > 0.5f ? t - Fade.x : Fade.x - t);
+            }
             float3 n = normalize(input.nrm);
             float diffuse = saturate(dot(n, LightDir.xyz));
             float lit = 0.0f;
@@ -1070,13 +1076,15 @@ bool Renderer3D::Frustum::sees(const XMFLOAT3& c, float radius) const {
     return true;
 }
 
-// Modelo de un árbol por tipo y etapa ('distant': el simplificado para lejos, o el completo si no existe).
-const RenderModel* Renderer3D::treeModel(int typeId, int stage, bool distant) {
-    const int key = typeId * 10 + stage * 2 + (distant ? 1 : 0);
+// Modelo de un árbol por tipo, etapa y nivel de detalle (si falta el simplificado se usa el siguiente más detallado).
+const RenderModel* Renderer3D::treeModel(int typeId, int stage, int level) {
+    const int key = typeId * 100 + stage * 10 + level;
     const auto found = m_treeModels.find(key);
     if (found != m_treeModels.end()) return found->second;
     const std::string name = "trees/" + std::to_string(typeId) + "_" + std::to_string(stage);
-    const RenderModel* model = distant ? m_models.get(m_device, name + "_lod", false) : nullptr;
+    const RenderModel* model = nullptr;
+    if (level >= 2) model = m_models.get(m_device, name + "_lod", false);
+    if (!model && level >= 1) model = m_models.get(m_device, name + "_mid", false);
     if (!model) model = m_models.get(m_device, name, false);
     m_treeModels[key] = model;
     return model;
@@ -1481,9 +1489,31 @@ void Renderer3D::addNode(const ResourceNode& node) {
             const float lo = stage == 1 ? 0.0f : 0.3f, hi = 1.0f;
             const float s = stage == 3 ? 1.0f : (0.85f + 0.15f * std::clamp((t - lo) / (hi - lo), 0.0f, 1.0f)); // crece un poco dentro de cada etapa
             const float ex = p.x - m_eye.x, ez = p.z - m_eye.z;
-            const bool distant = stage >= 2 && ex * ex + ez * ez > kTreeLodDistance * kTreeLodDistance;
-            if (const RenderModel* model = treeModel(node.typeId(), stage, distant)) {
-                addModel(*model, XMMatrixTranslation(0.0f, -model->boundsMin.y, 0.0f) * XMMatrixScaling(s, s, s) * base, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose());
+            const float d = std::sqrt(ex * ex + ez * ez);
+            const XMMATRIX& at = base;
+            // Tres niveles de detalle (completo, medio y lejano) con fundido entre ellos para que no se note el cambio; la sombra usa siempre uno barato.
+            const float s1 = stage >= 2 ? std::clamp((d - (kLod1 - kLodBand1)) / (2.0f * kLodBand1), 0.0f, 1.0f) : 0.0f;
+            const float s2 = stage >= 2 ? std::clamp((d - (kLod2 - kLodBand2)) / (2.0f * kLodBand2), 0.0f, 1.0f) : 0.0f;
+            const auto put = [&](int level, float fade, bool invert, bool visible, bool shadow) {
+                const RenderModel* model = treeModel(node.typeId(), stage, level);
+                if (!model) return false;
+                const size_t first = m_draws.size();
+                addModel(*model, XMMatrixTranslation(0.0f, -model->boundsMin.y, 0.0f) * XMMatrixScaling(s, s, s) * at, { 1.0f, 1.0f, 1.0f, 0.0f }, ModelPose(), shadow);
+                for (size_t i = first; i < m_draws.size(); ++i) { m_draws[i].fade = { fade, invert ? 1.0f : 0.0f }; m_draws[i].visible = visible; }
+                return true;
+            };
+            if (treeModel(node.typeId(), stage, 0)) {
+                if (s1 < 1.0f) put(0, 1.0f - s1, false, true, false);
+                if (stage >= 2 && s1 > 0.0f && s2 < 1.0f) {
+                    if (s1 < 1.0f) put(1, 1.0f - s1, true, true, false);
+                    else if (s2 > 0.0f) put(1, 1.0f - s2, false, true, false);
+                    else put(1, 1.0f, false, true, false);
+                }
+                if (stage >= 2 && s2 > 0.0f) {
+                    if (s2 < 1.0f) put(2, 1.0f - s2, true, true, false);
+                    else put(2, 1.0f, false, true, false);
+                }
+                put(stage >= 2 ? (d < kLod1 ? 1 : 2) : 0, 1.0f, false, false, true); // solo sombra
                 return;
             }
         }
@@ -2149,8 +2179,9 @@ void Renderer3D::addCapture(const CaptureSequence& sequence) {
     }
 }
 
-void Renderer3D::setObject(ID3D11DeviceContext* context, CXMMATRIX world, CXMMATRIX worldViewProj, const XMFLOAT4& tint) const {
+void Renderer3D::setObject(ID3D11DeviceContext* context, CXMMATRIX world, CXMMATRIX worldViewProj, const XMFLOAT4& tint, float fade, bool fadeInvert) const {
     ObjectConstants cb;
+    cb.fade = { fade, fadeInvert ? 1.0f : 0.0f, 0.0f, 0.0f };
     XMStoreFloat4x4(&cb.worldViewProj, XMMatrixTranspose(worldViewProj));
     XMStoreFloat4x4(&cb.world, XMMatrixTranspose(world));
     cb.tint = tint;
@@ -2174,7 +2205,7 @@ void Renderer3D::drawAll(ID3D11DeviceContext* context, CXMMATRIX viewProj, bool 
     ID3D11ShaderResourceView* lastTexture = nullptr;
     for (const Draw& draw : m_draws) {
         if (draw.kind == DrawKind::GLOW) continue;
-        if (shadowPass && !draw.castsShadow) continue;
+        if (shadowPass ? !draw.castsShadow : !draw.visible) continue;
         if (draw.sphere.w >= 0.0f && !frustum.sees({ draw.sphere.x, draw.sphere.y, draw.sphere.z }, draw.sphere.w)) { ++m_cullCount; continue; }
         if (!shadowPass) {
             if (draw.kind != bound) {
@@ -2188,7 +2219,7 @@ void Renderer3D::drawAll(ID3D11DeviceContext* context, CXMMATRIX viewProj, bool 
             }
         }
         const XMMATRIX world = XMLoadFloat4x4(&draw.world);
-        setObject(context, world, world * viewProj, draw.tint);
+        setObject(context, world, world * viewProj, draw.tint, shadowPass ? 1.0f : draw.fade.x, !shadowPass && draw.fade.y > 0.5f);
         if (draw.mesh != last) {
             ID3D11Buffer* vb = draw.mesh->vertices.Get();
             const UINT offset = 0;
@@ -2214,7 +2245,7 @@ void Renderer3D::drawGlow(ID3D11DeviceContext* context, CXMMATRIX viewProj) cons
     for (const Draw& draw : m_draws) {
         if (draw.kind != DrawKind::GLOW) continue;
         const XMMATRIX world = XMLoadFloat4x4(&draw.world);
-        setObject(context, world, world * viewProj, draw.tint);
+        setObject(context, world, world * viewProj, draw.tint, shadowPass ? 1.0f : draw.fade.x, !shadowPass && draw.fade.y > 0.5f);
         drawIndexed(context, *draw.mesh);
     }
     context->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFF);
@@ -2326,6 +2357,10 @@ void Renderer3D::render(ID3D11DeviceContext* context, const Scene& scene, int wi
         m_skyBase = createSkyBase(m_device, scene.habitats);
         m_worldSeed = scene.habitats.seed();
         m_worldBuilt = true;
+        for (const int id : { 1, 8, 9, 10, 11, 14, 28, 29 }) { // los árboles se cargan ahora (pantalla de carga) y no al verlos por primera vez, que provocaba tirones
+            if (!hasTreeModel(id)) continue;
+            for (int stage = 1; stage <= 3; ++stage) for (int level = 0; level <= (stage >= 2 ? 2 : 0); ++level) treeModel(id, stage, level);
+        }
     }
 
     const float aspect = static_cast<float>(width) / height;

@@ -1,5 +1,7 @@
 #include "../../utils/core/crashUtil.hpp"
 #include "../../utils/core/loggerUtil.hpp"
+#include <chrono>
+#include <cstdio>
 #include "mainWindow.hpp"
 #include "graphicsDevice.hpp"
 #include "guiInput.hpp"
@@ -270,6 +272,9 @@ void MainWindow::run() {
         }
 
         const float dt = timer.tick(kMaxFrameSeconds);
+        using HitchClock = std::chrono::steady_clock;
+        const auto hitchStart = HitchClock::now();
+        double saveMs = 0.0;
 
         bool justPaused = false;
         if (g_state == GameState::PLAYING) {
@@ -311,18 +316,22 @@ void MainWindow::run() {
                 g_autosaveTimer += dt;
                 if (g_autosaveTimer >= kAutosaveSeconds) {
                     g_autosaveTimer = 0.0f;
+                    const auto saveStart = HitchClock::now();
                     if (SessionManager::saveCurrent()) g_savedNotice = kSavedNoticeSeconds;
+                    saveMs = std::chrono::duration<double, std::milli>(HitchClock::now() - saveStart).count();
                 }
             }
         } else if (g_state == GameState::LOADING) {
             g_loadTimer += dt;
         }
 
+        const auto hitchUpdated = HitchClock::now();
         // GUI: fondo de la GUI. Juego: fondo propio del motor.
         const bool inGame = isInGame(g_state);
         CrashUtil::stage("fotograma: empezar");
         GraphicsDevice::beginFrame(inGame ? GameEngine::CLEAR_COLOR : GuiStyle::BACKGROUND);
         if (inGame) engine.render(GraphicsDevice::context(), GraphicsDevice::width(), GraphicsDevice::height());
+        const auto hitchRendered = HitchClock::now();
 
         CrashUtil::stage("fotograma: interfaz");
         ImGui_ImplDX11_NewFrame();
@@ -438,7 +447,18 @@ void MainWindow::run() {
         ImGui::Render();
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         CrashUtil::stage("fotograma: presentar");
+        const auto hitchGui = HitchClock::now();
         GraphicsDevice::present();
+        {   // un fotograma que tarda más de 70 ms deja en el registro en qué fase se fue el tiempo (para cazar los tirones)
+            const auto hitchEnd = HitchClock::now();
+            const auto ms = [](HitchClock::time_point a, HitchClock::time_point b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+            if (ms(hitchStart, hitchEnd) > 70.0) {
+                char text[256];
+                std::snprintf(text, sizeof(text), "fotograma %.0f ms | logica=%.1f (autoguardado %.1f) dibujo3d=%.1f interfaz=%.1f presentar=%.1f | estado=%s",
+                    ms(hitchStart, hitchEnd), ms(hitchStart, hitchUpdated), saveMs, ms(hitchUpdated, hitchRendered), ms(hitchRendered, hitchGui), ms(hitchGui, hitchEnd), gameStateName(g_state));
+                Logger::logInfo("HITCH", text);
+            }
+        }
 
         if (g_state != prevState) {
             Logger::logInfo("STATE", std::string(gameStateName(prevState)) + " -> " + gameStateName(g_state));

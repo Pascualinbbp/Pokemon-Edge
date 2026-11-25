@@ -34,6 +34,7 @@ class Renderer3D {
         DirectX::XMFLOAT4X4 worldViewProj;
         DirectX::XMFLOAT4X4 world;
         DirectX::XMFLOAT4 tint; // rgb = color, a = brillo propio
+        DirectX::XMFLOAT4 fade = { 1.0f, 0.0f, 0.0f, 0.0f }; // x = fracción de píxeles que se dibujan (fundido entre niveles de detalle), y = 1: los complementarios
     };
 
     // Datos de todo el frame: luz, sombras, ambiente y cielo (registro b1).
@@ -80,6 +81,8 @@ class Renderer3D {
         DrawKind kind = DrawKind::SOLID;
         ID3D11ShaderResourceView* texture = nullptr; // solo MODEL
         DirectX::XMFLOAT4 sphere = { 0.0f, 0.0f, 0.0f, -1.0f }; // esfera envolvente en el mundo (w < 0: sin esfera, nunca se descarta)
+        DirectX::XMFLOAT2 fade = { 1.0f, 0.0f };  // fundido de nivel de detalle (ver ObjectConstants::fade)
+        bool visible = true;                      // false: solo proyecta sombra (no se dibuja en pantalla)
     };
 
     // Los seis planos de un volumen de visión (cámara o luz), con la normal hacia dentro.
@@ -99,7 +102,7 @@ class Renderer3D {
     mutable PerfStats m_perf;
     mutable long long m_drawCount = 0, m_triCount = 0, m_cullCount = 0;
     std::unordered_map<int, const RenderModel*> m_treeModels; // modelo de árbol por (tipo, etapa, lejano) sin buscar por nombre cada frame
-    const RenderModel* treeModel(int typeId, int stage, bool distant);
+    const RenderModel* treeModel(int typeId, int stage, int level); // level 0 = completo, 1 = medio (_mid), 2 = lejano (_lod)
 
     static Mesh createMesh(ID3D11Device* device, const void* vertices, UINT vertexCount, UINT stride,
         const std::vector<uint16_t>& indices);
@@ -158,7 +161,7 @@ class Renderer3D {
     void addBattle(const Scene& scene);
     void addCreature(const DirectX::XMFLOAT3& position, float size, float yaw, int speciesId, bool shiny);
     void setObject(ID3D11DeviceContext* context, DirectX::CXMMATRIX world, DirectX::CXMMATRIX worldViewProj,
-        const DirectX::XMFLOAT4& tint) const;
+        const DirectX::XMFLOAT4& tint, float fade = 1.0f, bool fadeInvert = false) const;
     void drawIndexed(ID3D11DeviceContext* context, const Mesh& mesh) const;
     void drawAll(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj, bool shadowPass) const;
     void drawGlow(ID3D11DeviceContext* context, DirectX::CXMMATRIX viewProj) const;

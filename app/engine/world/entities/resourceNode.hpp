@@ -96,7 +96,7 @@ class ResourceNode {
     static constexpr float TEAM_BONUS   = 2.0f;   // velocidad al trabajarlo jugador y pokémon a la vez
     static constexpr float VEIN_REACH   = 2.9f;   // las vetas de pared se alcanzan desde el centro del paso
     static constexpr float WORKER_WATER_STEP = 0.08f; // fracción de crecimiento por riego de un trabajador del hogar (riegan sin parar, así que es poco)
-    static constexpr float WATER_STEP   = 0.3f;   // fracción de crecimiento que da un riego (con velocidad 1): cada planta se riega una sola vez por quien riega, hasta que crece
+    static constexpr float WATER_STEP   = 0.1f;   // fracción de crecimiento que da un riego (con velocidad 1): cada planta se riega una sola vez por quien riega, hasta que crece
 
     Physics::Body body;
 

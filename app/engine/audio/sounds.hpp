@@ -31,6 +31,7 @@ namespace Sound {
         HEAL,           // poción sobre un pokémon
         RADIO_TUNE,     // cambio de emisora (interferencia)
         COCONUT_BREAK,  // un coco se parte
+        WATER,          // regar
         COUNT
     };
 
@@ -64,6 +65,7 @@ namespace Sound {
             { "audio/sfx/heal.wav",          0.85f, 40.0f, 0.00f },
             { "audio/sfx/radio_tune.wav",    0.60f, 0.0f,  0.00f },
             { "audio/sfx/coconut_break.wav", 0.85f, 35.0f, 0.05f },
+            { "audio/sfx/water.wav",         0.75f, 30.0f, 0.06f },
         };
         return table[static_cast<size_t>(sfx)];
     }
