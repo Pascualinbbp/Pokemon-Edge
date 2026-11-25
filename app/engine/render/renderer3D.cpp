@@ -2245,7 +2245,7 @@ void Renderer3D::drawGlow(ID3D11DeviceContext* context, CXMMATRIX viewProj) cons
     for (const Draw& draw : m_draws) {
         if (draw.kind != DrawKind::GLOW) continue;
         const XMMATRIX world = XMLoadFloat4x4(&draw.world);
-        setObject(context, world, world * viewProj, draw.tint, shadowPass ? 1.0f : draw.fade.x, !shadowPass && draw.fade.y > 0.5f);
+        setObject(context, world, world * viewProj, draw.tint);
         drawIndexed(context, *draw.mesh);
     }
     context->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFF);
